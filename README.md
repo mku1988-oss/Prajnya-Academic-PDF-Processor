@@ -340,7 +340,7 @@ If you use Prajnya in your research, please cite:
   title={Prajnya: Academic PDF Processor for RAG Pipelines},
   author={Manu Unni},
   year={2026},
-  url={https://github.com/YourUsername/Prajnya-Academic-PDF-Processor}
+  url={https://github.com/mku1988-oss/Prajnya-Academic-PDF-Processor/}
 }
 ```
 
