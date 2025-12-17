@@ -336,7 +336,7 @@ MIT License - Free for commercial and academic use
 
 If you use Prajnya in your research, please cite:
 ```bibtex
-@software{prajnya2024,
+@software{prajnya2026,
   title={Prajnya: Academic PDF Processor for RAG Pipelines},
   author={Manu Unni},
   year={2026},
