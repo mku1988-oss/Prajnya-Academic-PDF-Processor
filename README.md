@@ -25,19 +25,19 @@ Traditional PDF extraction tools fail on academic papers due to:
 
 ## Key Features
 
-### 🎯 **Plug-and-Play RAG Integration**
+###  **Plug-and-Play RAG Integration**
 - **Modular design**: Import as Python package or use via CLI/API
 - **Structured JSON output**: Ready for vector databases and embeddings
 - **Batch processing**: Handle hundreds of papers with async processing
 - **Persistence layer**: Atomic ledger system prevents data loss
 
-### 🧠 **Intelligent Processing**
+###  **Intelligent Processing**
 - **Adaptive routing**: Fast heuristics for simple pages, VLM for complex layouts
 - **Vision-first analysis**: 7B+ parameter VLMs understand document structure
 - **Multi-tier fallback**: Graceful degradation ensures complete coverage
 - **Reading order recovery**: Maintains logical text flow across columns
 
-### 🚀 **Production Ready**
+###  **Production Ready**
 - **Async architecture**: Non-blocking processing for high throughput
 - **Error recovery**: Handles malformed PDFs gracefully
 - **Progress tracking**: Real-time status for long-running batches
