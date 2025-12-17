@@ -1,0 +1,105 @@
+# Structured Analysis for Body Pages
+# Shot 2 of Two-Shot Processing
+# Phase 3 Integration - 5-Tier Adaptive Routing
+# Created: October 28, 2025
+
+task_name: "structured_analysis_body_page"
+description: "Shot 2: Convert raw OCR text into structured JSON with metadata"
+task_type: "structured_extraction"
+status: "production"
+
+# ============================================================================
+# PROMPT CONFIGURATION
+# ============================================================================
+prompt: |
+  You are a document analysis expert. Your task is to analyze the raw OCR text below and structure it into a JSON object.
+  
+  RAW_TEXT_TO_ANALYZE:
+  ---
+  {raw_text}
+  ---
+  
+  TASK REQUIREMENTS:
+  1. Extract metadata about the page (language, rotation, content type)
+  2. Identify if the page contains tables or diagrams
+  3. Preserve the natural_text content for RAG purposes
+  4. Output a valid JSON object that adheres to the OlmOCR schema
+  
+  RESPONSE FORMAT RULES:
+  - You MUST respond with ONLY a valid JSON object
+  - NO explanatory text before or after the JSON
+  - NO markdown code blocks or backticks
+  - The JSON must be parseable by Python's json.loads()
+  
+  JSON SCHEMA (You must follow this structure):
+  {{
+    "primary_language": "string (e.g., 'en', 'es', 'fr')",
+    "is_rotation_valid": boolean,
+    "rotation_correction": integer (0, 90, 180, or 270),
+    "is_table": boolean,
+    "is_diagram": boolean,
+    "natural_text": "string (the full text content for RAG)"
+  }}
+  
+  EXAMPLE OUTPUT:
+  {{
+    "primary_language": "en",
+    "is_rotation_valid": true,
+    "rotation_correction": 0,
+    "is_table": false,
+    "is_diagram": false,
+    "natural_text": "The complete text from the page..."
+  }}
+
+# ============================================================================
+# OUTPUT FORMAT
+# ============================================================================
+output_format:
+  type: "json"
+  schema:
+    type: "object"
+    properties:
+      primary_language:
+        type: "string"
+        description: "ISO language code"
+      is_rotation_valid:
+        type: "boolean"
+        description: "Whether page orientation is correct"
+      rotation_correction:
+        type: "integer"
+        description: "Degrees to rotate (0, 90, 180, 270)"
+      is_table:
+        type: "boolean"
+        description: "Whether page contains tables"
+      is_diagram:
+        type: "boolean"
+        description: "Whether page contains diagrams/figures"
+      natural_text:
+        type: "string"
+        description: "Complete text content for RAG indexing"
+    required:
+      - "primary_language"
+      - "is_rotation_valid"
+      - "rotation_correction"
+      - "is_table"
+      - "is_diagram"
+      - "natural_text"
+
+# ============================================================================
+# TEMPERATURE REQUIREMENTS
+# ============================================================================
+# Shot 2 MUST use temperature: 0.0 for deterministic JSON generation
+# This is configured in olmocr-2-7b.yaml under two_shot_parameters.shot2_analysis
+
+# ============================================================================
+# USAGE NOTES
+# ============================================================================
+# This task is specifically designed for the second shot of two-shot processing.
+# The input {raw_text} comes from the output of raw_ocr_extraction.yaml after:
+# 1. Paragraph-level deduplication preprocessing
+# 2. Anchor text integration (if available)
+# 
+# Expected behavior:
+# - Zero temperature ensures consistent JSON structure
+# - Model focuses on structuring rather than "seeing" (already done in Shot 1)
+# - Output is clean, parseable JSON with no markdown wrappers

@@ -1,0 +1,452 @@
+# src/processing/utils/author_utils.py
+"""
+Author utilities:
+- normalization
+- canonicalization
+- fuzzy matching helpers
+- merging helpers for author lists
+"""
+
+from typing import Dict, List, Tuple, Optional
+import re
+import unicodedata
+
+try:
+    # rapidfuzz is fast and preferred
+    from rapidfuzz import fuzz
+except Exception:
+    # fallback to difflib if not installed
+    import difflib
+    fuzz = None
+
+def _normalize_whitespace(s: str) -> str:
+    return re.sub(r"\s+", " ", s.strip())
+
+def _strip_accents(s: str) -> str:
+    return ''.join(ch for ch in unicodedata.normalize('NFKD', s) if not unicodedata.combining(ch))
+
+def normalize_name_raw(name: str) -> str:
+    """Return lowercased, accent-stripped, whitespace-normalized name."""
+    if not name:
+        return ""
+    n = _normalize_whitespace(name)
+    n = _strip_accents(n)
+    return n.lower()
+
+def split_name(name: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Heuristic split into (first_names, last_name).
+    If input is "Last, First" it will detect that. Otherwise, last token is last name.
+    Returns (first_names or None, last_name or None)
+    """
+    if not name:
+        return None, None
+    name = _normalize_whitespace(name)
+    # If comma present, assume "Last, First"
+    if ',' in name:
+        parts = [p.strip() for p in name.split(',', 1)]
+        last = parts[0]
+        first = parts[1] if len(parts) > 1 else ""
+        return first or None, last or None
+    # Otherwise assume Last token is last name
+    tokens = name.split()
+    if len(tokens) == 1:
+        return None, tokens[0]
+    first = " ".join(tokens[:-1])
+    last = tokens[-1]
+    return first or None, last or None
+
+def canonicalize_author(name: str) -> str:
+    """
+    Return 'lastname, f' canonical short form for matchup.
+    Example: 'Johanna Myllyharju' -> 'myllyharju, j'
+    """
+    if not name:
+        return ""
+    first, last = split_name(name)
+    if not last:
+        # fallback to normalized raw name
+        return normalize_name_raw(name)
+    # take first initial if first available
+    if first:
+        initial = first.strip().split()[0][0]
+        return f"{normalize_name_raw(last)}, {initial}"
+    else:
+        # no first name known — use last only
+        return normalize_name_raw(last)
+
+def author_pretty(name: str) -> str:
+    """Return cleaned pretty name using normalized whitespace (but keeping case)."""
+    if not name:
+        return ""
+    return " ".join(name.split())
+
+def _fuzzy_score(a: str, b: str) -> int:
+    """
+    Return fuzzy matching score 0..100 between a and b.
+    Prefer rapidfuzz when available.
+    """
+    if not a or not b:
+        return 0
+    if 'rapidfuzz' in globals() and fuzz is not None:
+        # use token_set_ratio style measure
+        try:
+            return int(fuzz.token_set_ratio(a, b))
+        except Exception:
+            # fallback to simple ratio
+            try:
+                return int(fuzz.ratio(a, b))
+            except Exception:
+                pass
+    # fallback: difflib
+    import difflib
+    s = difflib.SequenceMatcher(None, a, b).ratio()
+    return int(s * 100)
+
+def names_match(candidate: str, raw_text: str, threshold: int = 90) -> Tuple[bool, int]:
+    """
+    Check if candidate name appears in raw_text with fuzzy match >= threshold.
+    
+    SPECIAL HANDLING for abbreviated names:
+    - "G Fullerton" should match "Gary D. Fullerton"
+    - "E Nes" should match "Elena Nes"
+    
+    Returns (matched_bool, score)
+    """
+    if not candidate or not raw_text:
+        return False, 0
+
+    candidate_norm = normalize_name_raw(candidate)
+    raw = normalize_name_raw(raw_text)
+
+    # Quick substring check
+    if candidate_norm in raw:
+        return True, 100
+
+    # Check if candidate is "Initial Lastname" format
+    candidate_parts = candidate.strip().split()
+    if len(candidate_parts) == 2:
+        first_part = candidate_parts[0]
+        last_part = candidate_parts[1]
+        
+        # If first part is a single letter (initial)
+        if len(first_part) == 1 and first_part.isalpha():
+            # Search for "<Initial>... <Lastname>" in text
+            # e.g., "G Fullerton" matches "Gary D. Fullerton"
+            pattern = f"{first_part.lower()}[a-z]*[\\s\\.]*.*?{last_part.lower()}"
+            import re
+            if re.search(pattern, raw, re.IGNORECASE):
+                return True, 95  # High confidence for initial match
+
+    # Fuzzy check whole text
+    score = _fuzzy_score(candidate_norm, raw)
+    if score >= threshold:
+        return True, score
+
+    # Check line-by-line
+    for line in raw_text.splitlines():
+        line_norm = normalize_name_raw(line)
+        if not line_norm:
+            continue
+        if candidate_norm in line_norm:
+            return True, 100
+        
+        if len(candidate_parts) == 2 and len(candidate_parts[0]) == 1:
+            pattern = f"{candidate_parts[0].lower()}[a-z]*[\\s\\.]*.*?{candidate_parts[1].lower()}"
+            if re.search(pattern, line_norm):
+                return True, 95
+        
+        sc = _fuzzy_score(candidate_norm, line_norm)
+        if sc >= threshold:
+            return True, sc
+
+    return False, score
+
+def merge_author_lists(
+    vlm_authors: List[str], 
+    zotero_authors: List[str], 
+    title_page_text: str,
+    containment_threshold: int = 2
+) -> Tuple[List[str], List[str]]:
+    """
+    Three-Way Author Consensus (VLM + Zotero + Title Page)
+
+    1. Build a unified pool of candidate author names from VLM and Zotero.
+    2. Confirm each candidate using structured identity scoring 
+    (AuthorMatcher) against reliable reference authors 
+    (VLM if available, otherwise Zotero). 
+    If none match, fall back to fuzzy matching on title-page text.
+    3. Remove summary/aggregate strings (e.g., “A. Smith, B. Jones”).
+    4. Canonically deduplicate by keeping the most complete form 
+    (e.g., prefer “John Smith” over “J. Smith”).
+
+    Returns a clean, deduplicated author list and any filtered suspicious strings.
+    """
+    if not title_page_text:
+        return sorted(list(set((vlm_authors or []) + (zotero_authors or [])))), []
+
+    # --- Step 1: unified candidate pool ---
+    candidate_pool = set()
+
+    # Normalize VLM authors
+    for a in (vlm_authors or []):
+        if not a:
+            continue
+        a = a.strip().strip("[]").rstrip(",")
+        candidate_pool.add(a)
+        
+    # Normalize Zotero authors
+    for a in (zotero_authors or []):
+        if not a:
+            continue
+        a = a.strip().strip("[]").rstrip(",")
+        candidate_pool.add(a)
+
+    # --- Step 2: identity scoring against reference authors ---
+    if vlm_authors:
+        reference_authors = [a for a in vlm_authors if a.strip()]
+    else:
+        reference_authors = [a for a in zotero_authors if a.strip()]
+
+    confirmed_candidates = set()
+
+    for cand in candidate_pool:
+        for ref in reference_authors:
+            is_match, score, breakdown = AuthorMatcher.match_authors(cand, ref)
+            if is_match:
+                confirmed_candidates.add(cand)
+                break
+
+    # --- fallback BEFORE redundancy filter and dedupe ---
+    if not confirmed_candidates:
+        confirmed_candidates = {
+            cand for cand in candidate_pool
+            if names_match(cand, title_page_text)[0]
+        }
+
+    # --- Step 3: filter summary/superset strings ---
+    suspicious_authors = {
+        a for a in confirmed_candidates
+        if sum(1 for b in confirmed_candidates 
+               if a != b and b.lower() in a.lower()) >= containment_threshold
+    }
+
+    good_authors = confirmed_candidates - suspicious_authors
+
+    # --- Step 4: canonical dedupe ---
+    author_map = {}
+    for name in good_authors:
+        canonical_key = canonicalize_author(name)
+        if not canonical_key: continue
+            
+        # If we've seen this author before, keep the longer (more complete) name.
+        if canonical_key in author_map:
+            if len(name) > len(author_map[canonical_key]):
+                author_map[canonical_key] = name
+        else:
+            author_map[canonical_key] = name
+
+    final_clean_list = list(author_map.values())
+
+    return final_clean_list, list(suspicious_authors)
+
+class AuthorMatcher:
+    """
+    Weighted, structured per-author scoring for bibliographic metadata.
+    
+    Weights reflect human intuition about name stability:
+    - Last name: 50 points (backbone)
+    - First name: 35 points (handles abbreviations)
+    - Middle name: 15 points (handles variation)
+    Total: 100 points
+    """
+    
+    # Configurable weights
+    WEIGHT_LAST = 50
+    WEIGHT_FIRST = 35
+    WEIGHT_MIDDLE = 15
+    
+    # Matching thresholds
+    THRESHOLD_DEFINITE = 85  # Definitely same person
+    THRESHOLD_LIKELY = 70    # Probably same person
+    
+    @staticmethod
+    def parse_name(name: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        """
+        Parse author name into (first, middle, last) components.
+        
+        Handles formats:
+        - "Gary D. Fullerton"
+        - "Fullerton, Gary D."
+        - "G Fullerton"
+        - "Fullerton"
+        
+        Returns: (first, middle, last)
+        """
+        if not name:
+            return None, None, None
+        
+        name = name.strip()
+        
+        # Handle "Last, First Middle" format
+        if ',' in name:
+            parts = [p.strip() for p in name.split(',', 1)]
+            last = parts[0]
+            rest = parts[1] if len(parts) > 1 else ""
+            
+            # Parse first/middle from rest
+            tokens = rest.split()
+            first = tokens[0] if tokens else None
+            middle = tokens[1] if len(tokens) > 1 else None
+            
+            return first, middle, last
+        
+        # Handle "First Middle Last" format
+        tokens = name.split()
+        if len(tokens) == 1:
+            return None, None, tokens[0]  # Last only
+        elif len(tokens) == 2:
+            return tokens[0], None, tokens[1]  # First Last
+        else:
+            return tokens[0], tokens[1], tokens[-1]  # First Middle Last
+    
+    @staticmethod
+    def normalize_component(comp: Optional[str]) -> str:
+        """Normalize name component for comparison."""
+        if not comp:
+            return ""
+        # Remove punctuation, lowercase
+        return re.sub(r'[^\w]', '', comp.lower())
+    
+    @classmethod
+    def score_last_name(cls, candidate_last: Optional[str], 
+                        reference_last: Optional[str]) -> float:
+        """
+        Score last name match (0-50 points).
+        
+        Rules:
+        - Exact match: 50 points
+        - No match: 0 points (immediate reject)
+        """
+        if not candidate_last or not reference_last:
+            return 0.0
+        
+        cand_norm = cls.normalize_component(candidate_last)
+        ref_norm = cls.normalize_component(reference_last)
+        
+        if cand_norm == ref_norm:
+            return cls.WEIGHT_LAST  # 50 points
+        
+        return 0.0  # Different last name = reject
+    
+    @classmethod
+    def score_first_name(cls, candidate_first: Optional[str],
+                         reference_first: Optional[str]) -> float:
+        """
+        Score first name match (0-35 points).
+        
+        Rules:
+        - Full match: 35 points
+        - Initial match (G vs Gary): 28 points (80%)
+        - Both initials (G vs G): 28 points
+        - Missing data: 17 points (50% - neutral)
+        - Mismatch: 0 points
+        """
+        if not candidate_first or not reference_first:
+            return cls.WEIGHT_FIRST * 0.5  # 17.5 points (neutral)
+        
+        cand_norm = cls.normalize_component(candidate_first)
+        ref_norm = cls.normalize_component(reference_first)
+        
+        # Full match
+        if cand_norm == ref_norm:
+            return cls.WEIGHT_FIRST  # 35 points
+        
+        # Initial match
+        if len(cand_norm) == 1 and ref_norm.startswith(cand_norm):
+            return cls.WEIGHT_FIRST * 0.8  # 28 points
+        if len(ref_norm) == 1 and cand_norm.startswith(ref_norm):
+            return cls.WEIGHT_FIRST * 0.8  # 28 points
+        
+        # Both single initials but different
+        if len(cand_norm) == 1 and len(ref_norm) == 1:
+            return 0.0  # Different initials = reject
+        
+        return 0.0  # No match
+    
+    @classmethod
+    def score_middle_name(cls, candidate_middle: Optional[str],
+                          reference_middle: Optional[str]) -> float:
+        """
+        Score middle name match (0-15 points).
+        
+        Rules:
+        - Full match: 15 points
+        - Initial match: 12 points (80%)
+        - Missing data: 10 points (67% - expected)
+        - Mismatch: 5 points (33% - not penalized heavily)
+        """
+        if not candidate_middle or not reference_middle:
+            return cls.WEIGHT_MIDDLE * 0.67  # 10 points (expected absence)
+        
+        cand_norm = cls.normalize_component(candidate_middle)
+        ref_norm = cls.normalize_component(reference_middle)
+        
+        # Full match
+        if cand_norm == ref_norm:
+            return cls.WEIGHT_MIDDLE  # 15 points
+        
+        # Initial match
+        if len(cand_norm) == 1 and ref_norm.startswith(cand_norm):
+            return cls.WEIGHT_MIDDLE * 0.8  # 12 points
+        if len(ref_norm) == 1 and cand_norm.startswith(ref_norm):
+            return cls.WEIGHT_MIDDLE * 0.8  # 12 points
+        
+        # Mismatch - not heavily penalized
+        return cls.WEIGHT_MIDDLE * 0.33  # 5 points
+    
+    @classmethod
+    def match_authors(cls, candidate: str, reference: str) -> Tuple[bool, float, dict]:
+        """
+        Match two author names using weighted component scoring.
+        
+        Args:
+            candidate: Author name from Zotero (e.g., "G Fullerton")
+            reference: Author name from title page (e.g., "Gary D. Fullerton")
+        
+        Returns:
+            (is_match, score, breakdown)
+            
+        Example:
+            >>> match_authors("G Fullerton", "Gary D. Fullerton")
+            (True, 88.0, {
+                'last': 50.0,
+                'first': 28.0,
+                'middle': 10.0,
+                'total': 88.0
+            })
+        """
+        # Parse names
+        cand_first, cand_middle, cand_last = cls.parse_name(candidate)
+        ref_first, ref_middle, ref_last = cls.parse_name(reference)
+        
+        # Score components
+        last_score = cls.score_last_name(cand_last, ref_last)
+        first_score = cls.score_first_name(cand_first, ref_first)
+        middle_score = cls.score_middle_name(cand_middle, ref_middle)
+        
+        total_score = last_score + first_score + middle_score
+        
+        breakdown = {
+            'last': last_score,
+            'first': first_score,
+            'middle': middle_score,
+            'total': total_score,
+            'candidate_parsed': (cand_first, cand_middle, cand_last),
+            'reference_parsed': (ref_first, ref_middle, ref_last)
+        }
+        
+        # Decision
+        is_match = total_score >= cls.THRESHOLD_LIKELY
+        
+        return is_match, total_score, breakdown

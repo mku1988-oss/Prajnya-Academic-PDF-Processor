@@ -1,0 +1,117 @@
+# OlmOCR-2-7B-1025 Model Profile with Two-Shot Support
+#.\src\processing\strategies\config\vlm_profiles\olmocr-2-7b.yaml
+# Phase 3 Integration - 5-Tier Adaptive Routing System
+# Created: October 28, 2025
+
+model_name: "olmocr-2-7b"  # Must match llama-swap config name
+model_type: "specialized_ocr"
+benchmark_score: 82.3  # +4 points improvement over v0825 (77.4)
+status: "production_ready"
+
+# ============================================================================
+# BASE API PARAMETERS (For Single-Shot & Surgical VLM Processing)
+# ============================================================================
+# Used for TIER 2 (Surgical VLM) and TIER 3 (Single-Shot)
+api_parameters:
+  temperature: 0.4
+  repeat_penalty: 1.15
+  #frequency_penalty: 0.1
+  max_tokens: 4096
+
+# ============================================================================
+# RESOURCE REQUIREMENTS (For Concurrency Calculation)
+# ============================================================================
+resource_requirements:
+  vram_per_instance_gb: 7.6  # User-measured VRAM usage
+
+
+# ============================================================================
+# TWO-SHOT PARAMETERS (For Complex/Mixed Content Processing)
+# ============================================================================
+# Used for TIER 4 (Two-Shot Processing)
+# Critical: Different temperatures for each shot ensure optimal results
+two_shot_parameters:
+  # Shot 1: Raw OCR Extraction (Faithful Transcription)
+  shot1_ocr:
+    temperature: 0.05  # Very low for faithful, deterministic transcription
+    max_tokens: 8192   # Double tokens for complete page capture
+    repeat_penalty: 1.15
+    frequency_penalty: 0.1
+  
+  # Shot 2: Structured Analysis (Deterministic JSON Generation)
+  shot2_analysis:
+    temperature: 0.0   # Zero temperature for perfectly deterministic JSON
+    max_tokens: 8192   # Same as shot1 to handle large structured outputs
+    repeat_penalty: 1.15
+    frequency_penalty: 0.1
+
+# ============================================================================
+# TITLE PAGE DETECTION PARAMETERS (Lightweight Classification)
+# ============================================================================
+# Used for: Fast visual classification of title pages vs cover pages
+# Task: title_page_detection.yaml
+# Frequency: 1-2 calls per document (validates heuristic candidates)
+title_page_detection_parameters:
+  temperature: 0.0     # Deterministic classification
+  max_tokens: 10       # Single word response
+  repeat_penalty: 1.0  # No penalty needed for short response
+
+# ============================================================================
+# APPLICATION CONFIGURATION
+# ============================================================================
+app_config:
+  target_dpi: 300
+  preferred_image_format: "png"
+  target_image_size: 1024  # Optimal resolution for speed/quality balance
+  target_anchor_text_len: 600
+
+# ============================================================================
+# HYBRID PROCESSING CONFIGURATION
+# ============================================================================
+hybrid_processing:
+  enabled: true
+  
+  page_classifier:
+    confidence_threshold: 0.85
+    enable_vlm_verification: true
+    
+    equation:
+      total_confidence_threshold: 2.5
+      high_confidence_count: 2
+      high_confidence_min: 0.9
+    
+    visual_threshold: 3
+  
+  surgical_vlm:
+    task_config_path: "config"
+    enabled_tasks:
+      - figure_description
+      - equation_to_latex
+      - table_description
+
+# ============================================================================
+# MODEL CAPABILITIES & IMPROVEMENTS
+# ============================================================================
+capabilities:
+  - advanced_ocr
+  - text_extraction
+  - semantic_markup
+  - math_equations  # 82.1% accuracy (improved)
+  - table_extraction  # 84.3% accuracy (improved)
+  - multi_column_text  # 84.3% accuracy (improved)
+
+improvements_over_v0825:
+  - "+4 points on olmOCR-Bench (82.3% vs 77.4%)"
+  - "Base model upgraded: Qwen2.5-VL-7B-Instruct"
+  - "GRPO RL training for math/tables/tricky OCR"
+  - "Optimized prompt system (v4)"
+  - "Resolution: 1288px compatible"
+
+# ============================================================================
+# PERFORMANCE EXPECTATIONS (Estimated based on V0825 + improvements)
+# ============================================================================
+performance:
+  expected_quality_score: 0.82  # Higher than v0825 due to model improvements
+  two_shot_avg_time: 90  # seconds per complex page
+  single_shot_avg_time: 60  # seconds per table page
+  surgical_avg_time: 30  # seconds per simple visual page

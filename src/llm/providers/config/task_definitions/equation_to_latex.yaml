@@ -1,0 +1,54 @@
+task_name: "equation_to_latex"
+task_type: "equation_conversion"
+description: "Convert mathematical equations to raw LaTeX format"
+
+prompt: |
+  Convert this mathematical equation to LaTeX format.
+  
+  CRITICAL RULES:
+  - Output ONLY the LaTeX code
+  - Do NOT include $ or $$ wrappers
+  - Do NOT include any explanatory text
+  - Use proper LaTeX syntax for all symbols
+  - Preserve subscripts, superscripts, and fractions accurately
+  - Use \frac{}{} for fractions
+  - Use ^{} for superscripts, _{} for subscripts
+  - Use proper spacing commands (\, for thin space, \quad for medium space)
+  
+  Common LaTeX commands:
+  - Integrals: \int_{lower}^{upper}
+  - Summations: \sum_{i=1}^{n}
+  - Products: \prod_{i=1}^{n}
+  - Square roots: \sqrt{expression} or \sqrt[n]{expression}
+  - Greek letters: \alpha, \beta, \gamma, \delta, etc.
+  - Operators: \times, \div, \cdot, \pm, \neq, \leq, \geq
+  - Matrices: \begin{matrix} ... \end{matrix}
+  
+  Example conversions:
+  If you see: E = mc²
+  Output: E = mc^{2}
+  
+  If you see: integral from a to b of f(x)dx
+  Output: \int_{a}^{b} f(x) \, dx
+  
+  If you see: x = (-b ± sqrt(b²-4ac)) / 2a
+  Output: x = \frac{-b \pm \sqrt{b^{2} - 4ac}}{2a}
+
+output_format:
+  type: "text"
+  expected_format: "raw_latex_no_wrappers"
+  example: |
+    \int_{0}^{\infty} e^{-x^{2}} \, dx = \frac{\sqrt{\pi}}{2}
+
+integration_notes:
+  - "Output will be wrapped with $$ for display math by processor"
+  - "Must be valid KaTeX-compatible LaTeX"
+  - "No markdown formatting, no backticks, no code blocks"
+  - "Processor adds: $$[your_output]$$"
+
+quality_guidelines:
+  - "Verify subscripts and superscripts use {} braces"
+  - "Ensure fractions use \frac not division symbols"
+  - "Include proper spacing around operators"
+  - "Test output is valid LaTeX (no syntax errors)"
+  - "Preserve mathematical meaning accurately"

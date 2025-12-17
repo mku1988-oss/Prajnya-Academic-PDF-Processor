@@ -1,0 +1,50 @@
+task_name: "figure_description"
+task_type: "visual_description"
+description: "Describe figures/diagrams in OlmoCR format"
+
+prompt: |
+  CRITICAL VALIDATION: Before describing, verify this is a valid figure/diagram.
+  
+  RETURN EMPTY STRING ("") IF:
+  - Image shows only text (headers, footers, page numbers)
+  - Image contains only decorative lines or borders
+  - Image is a simple horizontal/vertical line
+  - Image shows navigation elements (arrows, buttons)
+  - Image is too small or unclear to meaningfully describe
+  - Image contains only a single word or short label
+  
+  ONLY PROCEED WITH DESCRIPTION IF:
+  - Image contains a chart, graph, diagram, or illustration
+  - Image has meaningful visual content worth describing
+  - Image contributes scientific/technical information to the document
+  
+  If valid, describe this figure in detail.
+  
+  Format your response as: **Figure:** [your description]
+  
+  Include:
+  - What the figure shows (charts, diagrams, images, etc.)
+  - Axis labels and units (if applicable)
+  - Legend items (if applicable)
+  - Key trends or patterns visible in the data
+  - Notable data points or observations
+  
+  Be concise but complete. Use clear scientific language appropriate for research papers.
+  Focus on factual description of visual elements rather than interpretation.
+
+output_format:
+  type: "text"
+  expected_format: "**Figure:** Description text"
+  example: "**Figure:** Bar chart showing monthly rainfall distribution across 12 months. Y-axis represents rainfall in mm (0-300 range), X-axis shows months Jan-Dec. Peak rainfall occurs in July (~280mm) with lowest in February (~50mm)."
+
+integration_notes:
+  - "Output MUST start with '**Figure:**' prefix"
+  - "Integrates seamlessly into OlmoCR natural_text Markdown"
+  - "No need for figure numbering unless visible in image"
+  - "Description replaces the visual element in text extraction"
+
+quality_guidelines:
+  - "Describe what is visible, not what it might mean"
+  - "Include quantitative information when available (values, ranges, scales)"
+  - "Mention color-coding if it conveys important information"
+  - "Keep descriptions under 150 words for readability"

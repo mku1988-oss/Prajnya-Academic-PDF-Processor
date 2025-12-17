@@ -1,0 +1,215 @@
+strategy_name: research_article
+strategy_type: academic_paper_processing
+version: '1.2'
+description: Optimized processing strategy for research articles and reviews using VLM providers
+pipeline:
+  log_level: DEBUG
+  text_threshold: 200
+  tesseract:
+    enabled: true
+    dpi: 300
+    tesseract_cmd: null
+processing:
+  continue_on_error: true
+  fail_on_title_page_error: true
+  max_retries_per_page: 3
+  retry_delay_seconds: 2
+  sequential_processing: true
+  parallel_pages: false
+  batch_size: 1
+  log_level: INFO
+  detailed_logging: false
+zotero:
+  enabled: true
+  offline_mode: false
+  api_key: ${ZOTERO_API_KEY}
+  library_id: ${ZOTERO_LIBRARY_ID}
+  library_type: user
+profile_registry:
+  default: olmocr-2-7b
+  fallback: olmocr-2-7b
+  title_detection: olmocr-2-7b
+task_registry:
+  raw_ocr: raw_ocr_extraction
+  structured_body: structured_analysis_body_page
+  structured_title: structured_analysis_title_page
+  legacy_ocr: olmocr_document_processing
+  figure_desc: figure_description
+  table_desc: table_description
+  title_detection: title_page_detection
+vlm_provider:
+  api_endpoint: "http://localhost:8080/v1/chat/completions" # Default local server
+  local_server:
+    enabled: true
+    backend: "router_mode"  # "router_mode" (recommended), "llama_swap", "direct_mode"
+
+    # Connection settings
+    host: "localhost"
+    port: 8080
+    timeout: 300
+
+    # Server executable (cross-platform)
+    # Supports: .bat (Windows wrapper), .exe (direct), native binary (Linux/Mac)
+    # Can be absolute or relative (relative resolves from project root)
+    server_executable: "D:/LLMs/Shastrasaara/llama_cpp_bin/run-llama-server.bat"
+    # Examples:
+    #   Windows direct: "D:/LLMs/Shastrasaara/llama_cpp_bin/llama-server.exe"
+    #   Linux: "/usr/local/bin/llama-server"
+    #   Mac: "/opt/homebrew/bin/llama-server"
+    #   Relative: "bin/llama-server"
+
+    # Model profiles (Prajnya-specific, focused subset)
+    # Relative path from project root (more portable)
+    model_profiles: "src/processing/strategies/config/vlm_profiles/model.ini"
+    # Or absolute: "D:/LLMs/Shastrasaara/src/v4/gemini_refactor/src/processing/strategies/config/vlm_profiles/model.ini"
+
+    # Router mode settings
+    models_max: 1  # Max concurrent models (VRAM constraint: 8GB)
+
+    # llama-swap specific (only used if backend: "llama_swap")
+    llama_swap_executable: "D:/LLMs/Shastrasaara/llama_cpp_bin/llama-swap.exe"
+    swap_config: "D:/LLMs/Shastrasaara/llama_cpp_bin/run_swap_Config.yaml"
+
+    # Logging
+    log_directory: "run_outputs/logs"  # Relative to project root
+  concurrency:
+    enabled: true              # Re-enabled: Server optimized (ubatch-size 2048, ctx-size 16384)
+    vram_capacity_gb: 8        # User VRAM capacity
+    max_concurrent: null       # Auto-calculated: 8GB / 7.6GB = 1 instance (sequential)
+  title_page:
+
+    processing_mode: two_shot
+    profile: '@profile_registry.default'
+    resolution_override: 1288
+    shot1_task: '@task_registry.raw_ocr'
+    shot2_task: '@task_registry.structured_title'
+  body_pages:
+    processing_mode: adaptive
+    tier1_pymupdf:
+      description: Pure text extraction via PyMuPDF (fastest)
+      performance: ~1s per page
+    tier2_surgical_vlm:
+      description: Surgical VLM processing for isolated elements
+      profile: '@profile_registry.default'
+      performance: ~30s per page
+    tier3_single_shot:
+      description: OlmOCR single-shot for large tables
+      profile: '@profile_registry.default'
+      task: '@task_registry.legacy_ocr'
+      performance: ~60s per page
+    tier4_two_shot:
+      description: OlmOCR two-shot for complex/mixed content
+      profile: '@profile_registry.default'
+      shot1_task: '@task_registry.raw_ocr'
+      shot2_task: '@task_registry.structured_body'
+      performance: ~90s per page (most accurate)
+      deduplication: true
+    tier5_fallback:
+      description: Original full VLM processing (fallback)
+      profile: '@profile_registry.fallback'
+      task: '@task_registry.legacy_ocr'
+      performance: ~60-90s per page
+    adaptive_routing_rules:
+    - name: pure_text_fast_path
+      conditions:
+        page_type: text_only
+      tier: tier1_pymupdf
+      reason: No visual elements = PyMuPDF is fastest and sufficient
+    - name: simple_visual_surgical
+      conditions:
+        page_type: simple_visual
+      tier: tier2_surgical_vlm
+      reason: Isolated figures/tables = surgical extraction is efficient
+    - name: large_table_only
+      conditions:
+        has_large_table: true
+        has_figures: false
+        has_mixed_content: false
+      tier: tier3_single_shot
+      reason: Large table without figures = single-shot handles well
+    - name: complex_or_mixed
+      conditions:
+        any_of:
+        - page_type: complex_visual
+        - has_mixed_content: true
+        - has_dense_figures: true
+      tier: tier4_two_shot
+      reason: Complex/mixed content = two-shot provides highest accuracy
+    - name: default_fallback
+      conditions:
+        default: true
+      tier: tier5_fallback
+      reason: Unknown page characteristics = use tested fallback
+  fallback:
+    profile: numarkdown-8b
+    enabled: false
+quality:
+  minimum_overall_score: 0.5
+  minimum_page_score: 0.3
+  minimum_metadata_completeness: 0.6
+  warn_below_score: 0.7
+metadata:
+  doi_confidence_threshold: 0.85
+  isbn_confidence_threshold: 0.85
+  validate_doi_format: true
+  validate_year_range: true
+  fallback_to_pdf_metadata: true
+performance:
+  image_format: png
+  image_padding: 200
+  enable_caching: false
+  cache_directory: null
+  page_timeout_seconds: 300
+  total_timeout_seconds: 1800
+  clear_pdf_after_processing: true
+output:
+  include_raw_vlm_output: false
+  include_page_metadata: true
+  include_quality_scores: true
+  markdown_format: true
+  preserve_structure: true
+  detailed_errors: true
+  include_warnings: true
+limitations:
+- DOI extraction depends on footer visibility - may fail if footer is cropped
+- Title page metadata requires high resolution (1288px) for accurate DOI capture
+- 'Processing time: ~21s for title page (1288px), ~5s per body page (1024px)'
+- Some articles don't include DOI on first page - will attempt extraction but may fail
+notes:
+- Configuration based on testing Oct 1-4, 2025
+- 'Resolution settings validated with benchmark: 76.2% quality at 1024px'
+- 'Hybrid approach threshold (0.85) based on V3 accuracy testing: 95%+ success rate'
+- Title page resolution (1288px) specifically chosen to capture footer DOI
+validation:
+  required_metadata_fields:
+  - title
+  - authors
+  - doi
+  required_content_fields:
+  - pages
+  - metadata
+  test_documents:
+  - sample_pdfs/research_article_with_doi.pdf
+  - sample_pdfs/review_article_multipage.pdf
+version_history:
+  '1.1':
+    date: '2025-10-28'
+    changes:
+    - 'Phase 3 Integration: Added 5-Tier Adaptive Routing System'
+    - Created olmocr-2-7b profile with two_shot_parameters support
+    - 'Added tier definitions: PyMuPDF, Surgical VLM, Single-Shot, Two-Shot, Fallback'
+    - Implemented adaptive_routing_rules for intelligent page routing
+    - Integrated OlmOCR Hybrid System two-shot processing for complex pages
+    author: Claude 4 Sonnet
+    notes: Configuration-driven implementation preserves VLM-agnostic design
+  '1.0':
+    date: '2025-10-05'
+    changes:
+    - Initial configuration based on VLM provider testing
+    - Hybrid approach thresholds from V3 validation
+    - Resolution settings from Oct 1-4 testing
+    author: Claude 4 Sonnet
+vlm_parameter_overrides:
+  temperature: 0.4
+  max_tokens: 4096
+  repeat_penalty: 1.15

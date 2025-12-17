@@ -1,0 +1,42 @@
+# Gemini 2.5 Pro VLM Profile
+# Cloud-based VLM for users with limited GPU hardware
+# Created: December 10, 2025
+
+model_name: "gemini-2.5-pro"
+model_type: "cloud_api_gemini"
+benchmark_score: null  # To be measured
+status: "production"
+
+# ============================================================================
+# APP CONFIGURATION
+# ============================================================================
+app_config:
+  target_image_size: 1024
+  preferred_image_format: "png"
+  page_batch_size: 1  # Process one page at a time
+
+# ============================================================================
+# API PARAMETERS
+# ============================================================================
+api_parameters:
+  temperature: 0.4
+  max_tokens: 8192
+
+# ============================================================================
+# PERFORMANCE & PRICING
+# ============================================================================
+performance:
+  speed: "fast"
+  cost_per_page: 0.005  # Approximate
+  pricing:
+    # Based on Gemini 1.5 Pro pricing (assuming similar for 2.5 Pro or better)
+    input_cost_per_million: 1.25 # $1.25 / 1M input tokens
+    output_cost_per_million: 5.00 # $5.00 / 1M output tokens
+
+# ============================================================================
+# RATE LIMITS (Free Tier)
+# ============================================================================
+rate_limits:
+  free_tier:
+    requests_per_minute: 2  # Conservative estimate
+    requests_per_day: 50    # Conservative estimate

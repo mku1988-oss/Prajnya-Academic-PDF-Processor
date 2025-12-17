@@ -1,0 +1,58 @@
+# Title Page Detection Task Definition
+# Lightweight visual classification for identifying research article title pages
+# Created: November 3, 2025
+
+task_name: "title_page_detection"
+description: "Fast visual classification: Distinguish research article title pages from repository/publisher cover pages"
+task_type: "classification"
+status: "production"
+
+# ============================================================================
+# PROMPT CONFIGURATION
+# ============================================================================
+prompt: |
+  You are analyzing a page from an academic PDF. Your task is to determine if this is the actual research article title page or a repository/publisher cover page.
+  
+  **Research Article Title Page indicators:**
+  - Article title (prominent, usually bold)
+  - Author names with affiliations
+  - Abstract section with research content
+  - Keywords section
+  - Journal name and publication information
+  
+  **Repository/Publisher Cover Page indicators:**
+  - Repository logos (JSTOR, PubMed, arXiv, IEEE, Wiley, etc.)
+  - "Stable URL" or "Downloaded from" text
+  - Copyright notices for repository/publisher
+  - Minimal content (mostly blank)
+  - References or links section
+  
+  Respond with ONLY ONE of these words:
+  - TITLE_PAGE (this is the actual research article title page)
+  - COVER_PAGE (this is a repository or publisher cover page)
+  - UNCERTAIN (cannot determine with confidence)
+  
+  Your answer:
+
+# ============================================================================
+# OUTPUT FORMAT
+# ============================================================================
+output_format:
+  type: "text"
+  description: "Single word classification: TITLE_PAGE, COVER_PAGE, or UNCERTAIN"
+
+# ============================================================================
+# PERFORMANCE CHARACTERISTICS
+# ============================================================================
+# This is a LIGHTWEIGHT task optimized for speed:
+# - Temperature: 0.0 (deterministic)
+# - Max tokens: 10 (single word response)
+# - Expected latency: 2-5 seconds per page
+# - Use case: Fast title page detection in document orchestration
+
+# ============================================================================
+# USAGE NOTES
+# ============================================================================
+# Called by: document_orchestrator._vlm_validate_title_page()
+# Frequency: 1-2 calls per document (only validates top heuristic candidates)
+# No base_text required: Pure visual classification

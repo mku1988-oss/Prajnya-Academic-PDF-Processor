@@ -1,0 +1,25 @@
+#.\src\llm\providers\config\task_definitions\structured_analysis_title_page.yaml
+task_name: "structured_analysis_title_page"
+description: "Shot 2 (Title Page): Convert raw OCR text into structured bibliographic JSON."
+prompt: |
+  You are a document analysis expert. Populate a JSON object that strictly adheres to the provided schema based on the raw text below. For 'authors', create a list of separate strings. Example: 'John Doe, Jane Smith' becomes ["John Doe", "Jane Smith"].
+
+  RAW_TEXT_TO_ANALYZE:
+  ---
+  {raw_text}
+  ---
+output_format:
+  type: "json"
+  schema:
+    type: "object"
+    properties:
+      metadata:
+        type: "object"
+        properties:
+          title: { "type": ["string", "null"] }
+          authors: { "type": "array", "items": { "type": "string" } }
+          doi: { "type": ["string", "null"] }
+          journal_name: { "type": ["string", "null"] }
+          publication_year: { "type": ["integer", "null"] }
+        required: ["title", "authors", "doi", "journal_name", "publication_year"]
+    required: ["metadata"]
