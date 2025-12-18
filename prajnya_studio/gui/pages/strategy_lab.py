@@ -1,3 +1,4 @@
+# .\prajnya_studio\gui\pages\strategy_lab.py
 """
 Strategy Lab - Level 1 (Quick Settings)
 Visual configuration editor for VLM processing strategies
@@ -19,9 +20,11 @@ from typing import Dict, Any, Optional
 import shutil
 import logging
 
-from .. import theme, components
-from ..app_state import AppState
-from ...prajnya.orchestrator import reset_orchestrator, get_orchestrator
+from gui.utils.model_registry import discover_vlm_models
+
+from gui import theme, components
+from gui.app_state import AppState
+from prajnya.orchestrator import reset_orchestrator, get_orchestrator
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -62,17 +65,8 @@ PRESETS = {
     },
 }
 
-# Available VLM models - Local (GPU-based)
-AVAILABLE_MODELS_LOCAL = {
-    "olmocr-2-7b": "OlmOCR 2.7B - Latest model, 82% accuracy",
-    "olmocr-7b": "OlmOCR 7B - Stable, tested, 76% accuracy",
-}
-
-# Available VLM models - Cloud (Gemini API)
-AVAILABLE_MODELS_CLOUD = {
-    "gemini-3-pro": "Gemini 3 Pro - Latest AI, best quality (~$0.011/page)",
-    "gemini-2-5-flash": "Gemini 2.5 Flash - Fast & cheap (~$0.001/page)",
-}
+# Discover models dynamically
+AVAILABLE_MODELS_LOCAL, AVAILABLE_MODELS_CLOUD = discover_vlm_models()
 
 # Combined dict for validation (backward compatibility)
 AVAILABLE_MODELS = {**AVAILABLE_MODELS_LOCAL, **AVAILABLE_MODELS_CLOUD}
@@ -83,6 +77,7 @@ def mount():
     state = AppState.get_instance()
 
     # --- CSS: Force Standard Radios to match Vedic Palette ---
+    # FIX: Added specific rules for Sliders (Indigo) alongside Radios (Vermillion)
     ui.add_head_html(f'''
         <style>
             /* Radios & Checkboxes -> Vermillion (Agni) */
@@ -293,7 +288,7 @@ def mount():
                     # Model Config Info (Relative Path)
                     ui.label('Model Configuration File').classes('text-xs font-semibold uppercase tracking-wider mt-3 mb-1').style(f'color: {theme.THEME_LIGHT["text_muted"]};')
                     
-                    relative_ini_path = "src/processing/strategies/config/vlm_profiles/model.ini"
+                    relative_ini_path = "src/llm/providers/config/model_profiles/model.ini"
                     with ui.row().classes('items-center gap-1'):
                          ui.icon('description', size='xs').style(f'color: {theme.THEME_LIGHT["text_muted"]};')
                          ui.label(relative_ini_path).classes('text-xs font-mono break-all').style(f'color: {theme.THEME_LIGHT["text"]};')
@@ -387,7 +382,7 @@ def mount():
                     f'background: {theme.THEME_LIGHT["gold"]};'
                 )
                 
-                # Cloud Mode Banner
+                # Cloud Mode Banner (Phase 4.8.2)
                 cloud_banner = ui.column().classes('w-full mb-4').style(
                     'background: #eff6ff; border-left: 4px solid #3b82f6; padding: 12px;'
                 )
@@ -669,7 +664,7 @@ def mount():
 
                                 ui.separator().classes('my-4')
 
-                                # VLM Parameters
+                                # VLM Parameters (Sprint 3.4)
                                 ui.label('VLM Parameters').classes('text-md font-semibold')
                                 ui.label('Fine-tune model generation settings').classes('text-xs text-gray-500 mb-3')
 
@@ -704,7 +699,7 @@ def mount():
                                 ui.separator().classes('my-4')
 
                                 # ================================================================
-                                # ASYNC IO PARALLELISM
+                                # ASYNC IO PARALLELISM (Phase 4.9)
                                 # ================================================================
                                 with ui.expansion('Async Processing (Phase 4.9)', icon='speed').classes('w-full border rounded-lg p-2'):
                                     ui.label('Parallel VLM Execution').classes('text-md font-semibold text-blue-800')
@@ -960,7 +955,7 @@ def mount():
 
             ui.separator().classes('my-6')
 
-            # Expert Mode - YAML Editor
+            # Expert Mode - YAML Editor (Sprint 3.5)
             with ui.card().classes('w-full mt-4 p-4').style('background: #FFF3E0; border-left: 4px solid #FF6B35;'):
                 with ui.row().classes('w-full items-center gap-2'):
                     ui.icon('code', size='sm').classes('text-orange-600')
@@ -1040,7 +1035,7 @@ def mount():
             updated_config = apply_preset_to_config(current_config, preset, model, use_cloud_mode)
             logger.info("Config updated with preset values")
 
-            # Apply advanced panel overrides
+            # Apply advanced panel overrides (Sprint 3.2 Phase 2)
             updated_config = apply_advanced_settings(updated_config)
             logger.info("Advanced settings applied")
 
@@ -1068,7 +1063,7 @@ def mount():
             save_strategy_config(STRATEGY_CONFIG_PATH, updated_config)
             logger.info("Config saved successfully")
 
-            # Trigger hot-reload
+            # Trigger hot-reload (Sprint 3.2 implementation)
             logger.info("🔄 Triggering orchestrator hot-reload...")
 
             try:
@@ -1121,7 +1116,7 @@ def mount():
             logger.info(f"✅ Successfully applied preset '{preset_key}' with model '{model}'")
 
             # ---------------------------------------------------------
-            # Router Mode Integration
+            # Router Mode Integration (Phase 5.5)
             # ---------------------------------------------------------
             # If server manager is available, switch the active model immediately
             state = AppState.get_instance()
@@ -1320,7 +1315,7 @@ def mount():
             updated['vlm_provider']['body_pages']['processing_mode'] = body_mode_adv.value
             logger.info(f"Advanced: body_mode={body_mode_adv.value}")
 
-            # AsyncIO Settings
+            # AsyncIO Settings (Phase 4.9)
             if 'concurrency' not in updated['vlm_provider']:
                 updated['vlm_provider']['concurrency'] = {}
             
@@ -1332,7 +1327,7 @@ def mount():
             logger.info(f"Advanced: async_enabled={async_enabled.value}, vram={vram_input.value}")
 
             # ===================================================================
-            # VLM PARAMETERS
+            # VLM PARAMETERS (Sprint 3.4)
             # ===================================================================
 
             # Create vlm_parameter_overrides section if it doesn't exist
@@ -1346,7 +1341,7 @@ def mount():
             logger.info(f"Advanced: VLM params temp={temperature_adv.value}, max_tokens={int(max_tokens_adv.value)}, repeat_penalty={repeat_penalty_adv.value}")
 
             # ===================================================================
-            # QUALITY TAB
+            # QUALITY TAB (Sprint 3.3)
             # ===================================================================
 
             # Quality thresholds
@@ -1369,7 +1364,7 @@ def mount():
             logger.info(f"Advanced: metadata confidence doi={doi_confidence.value}, isbn={isbn_confidence.value}")
 
             # ===================================================================
-            # ROUTING TAB
+            # ROUTING TAB (Sprint 3.3)
             # ===================================================================
 
             # Routing mode (affects body_pages processing_mode)
@@ -1428,7 +1423,7 @@ def mount():
                 body_mode_adv.value = 'adaptive'
                 routing_enabled.value = True
 
-            # AsyncIO Settings
+            # AsyncIO Settings (Phase 4.9)
             concurrency = vlm_provider.get('concurrency', {})
             async_enabled.value = concurrency.get('enabled', False)
             vram_input.value = concurrency.get('vram_capacity_gb', 0)

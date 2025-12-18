@@ -26,9 +26,9 @@ zotero:
   library_id: ${ZOTERO_LIBRARY_ID}
   library_type: user
 profile_registry:
-  default: olmocr-2-7b
+  default: gemini-3-flash
   fallback: olmocr-2-7b
-  title_detection: olmocr-2-7b
+  title_detection: gemini-3-flash
 task_registry:
   raw_ocr: raw_ocr_extraction
   structured_body: structured_analysis_body_page
@@ -38,46 +38,24 @@ task_registry:
   table_desc: table_description
   title_detection: title_page_detection
 vlm_provider:
-  api_endpoint: "http://localhost:8080/v1/chat/completions" # Default local server
+  api_endpoint: http://localhost:8080/v1/chat/completions
   local_server:
     enabled: true
-    backend: "router_mode"  # "router_mode" (recommended), "llama_swap", "direct_mode"
-
-    # Connection settings
-    host: "localhost"
+    backend: router_mode
+    host: localhost
     port: 8080
     timeout: 300
-
-    # Server executable (cross-platform)
-    # Supports: .bat (Windows wrapper), .exe (direct), native binary (Linux/Mac)
-    # Can be absolute or relative (relative resolves from project root)
-    server_executable: "D:/LLMs/Shastrasaara/llama_cpp_bin/run-llama-server.bat"
-    # Examples:
-    #   Windows direct: "D:/LLMs/Shastrasaara/llama_cpp_bin/llama-server.exe"
-    #   Linux: "/usr/local/bin/llama-server"
-    #   Mac: "/opt/homebrew/bin/llama-server"
-    #   Relative: "bin/llama-server"
-
-    # Model profiles (Prajnya-specific, focused subset)
-    # Relative path from project root (more portable)
-    model_profiles: "src/processing/strategies/config/vlm_profiles/model.ini"
-    # Or absolute: "D:/LLMs/Shastrasaara/src/v4/gemini_refactor/src/processing/strategies/config/vlm_profiles/model.ini"
-
-    # Router mode settings
-    models_max: 1  # Max concurrent models (VRAM constraint: 8GB)
-
-    # llama-swap specific (only used if backend: "llama_swap")
-    llama_swap_executable: "D:/LLMs/Shastrasaara/llama_cpp_bin/llama-swap.exe"
-    swap_config: "D:/LLMs/Shastrasaara/llama_cpp_bin/run_swap_Config.yaml"
-
-    # Logging
-    log_directory: "run_outputs/logs"  # Relative to project root
+    server_executable: D:/LLMs/Shastrasaara/llama_cpp_bin/run-llama-server.bat
+    model_profiles: src/processing/strategies/config/vlm_profiles/model.ini
+    models_max: 1
+    llama_swap_executable: D:/LLMs/Shastrasaara/llama_cpp_bin/llama-swap.exe
+    swap_config: D:/LLMs/Shastrasaara/llama_cpp_bin/run_swap_Config.yaml
+    log_directory: run_outputs/logs
   concurrency:
-    enabled: true              # Re-enabled: Server optimized (ubatch-size 2048, ctx-size 16384)
-    vram_capacity_gb: 8        # User VRAM capacity
-    max_concurrent: null       # Auto-calculated: 8GB / 7.6GB = 1 instance (sequential)
+    enabled: true
+    vram_capacity_gb: 8.0
+    max_concurrent: auto
   title_page:
-
     processing_mode: two_shot
     profile: '@profile_registry.default'
     resolution_override: 1288

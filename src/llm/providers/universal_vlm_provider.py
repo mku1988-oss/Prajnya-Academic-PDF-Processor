@@ -54,13 +54,11 @@ class APIParameters(BaseModel):
     """
     temperature: Optional[float] = Field(None, ge=0.0, le=2.0, description="Sampling temperature")
     max_tokens: Optional[int] = Field(None, gt=0, description="Maximum tokens to generate (default: 100)")
-    repeat_penalty: Optional[float] = Field(None, ge=0.0, description="Penalty for repeating recent tokens")
-    presence_penalty: Optional[float] = Field(None, ge=-2.0, le=2.0, description="Penalty for tokens appearing anywhere in the text")
     frequency_penalty: Optional[float] = Field(None, ge=-2.0, le=2.0, description="Penalty based on token frequency")
     # Add other API-accepted parameters as needed (validated against llama.cpp docs)
     
     class Config:
-        extra = 'forbid'  # Strict validation - only known API params allowed
+        extra = 'allow'  # Flexible validation - allows custom params like 'thinking_level'
 
 class ServerConfig(BaseModel):
     """Tier 2: Server configuration (documentation only, not sent in API requests).
@@ -1168,6 +1166,16 @@ class UniversalVLMProvider:
         api_params = self.model_profile.get_api_params()
         temperature = api_params.get('temperature', 0.4)
         max_tokens = api_params.get('max_tokens', 8192)
+        
+        # NEW: Thinking Configuration for Gemini 3
+        thinking_level = api_params.get('thinking_level')
+        thinking_config = None
+        if thinking_level:
+            self.logger.info(f"Enabling thinking/reasoning with level: {thinking_level}")
+            thinking_config = types.ThinkingConfig(
+                include_thoughts=True,
+                thinking_level=thinking_level
+            )
 
         # Simple rate limit retry strategy
         # 1. Try request
@@ -1177,6 +1185,16 @@ class UniversalVLMProvider:
 
         def make_api_request():
             """Execute Gemini API request."""
+            # Config options
+            config_args = {
+                "temperature": temperature,
+                "max_output_tokens": max_tokens
+            }
+            
+            # Add thinking_config if available (requires google-genai 1.51.0+)
+            if thinking_config:
+                config_args["thinking_config"] = thinking_config
+
             return self.gemini_client.models.generate_content(
                 model=self.model_profile.model_name,
                 contents=[
@@ -1191,10 +1209,7 @@ class UniversalVLMProvider:
                         ]
                     )
                 ],
-                config=types.GenerateContentConfig(
-                    temperature=temperature,
-                    max_output_tokens=max_tokens
-                )
+                config=types.GenerateContentConfig(**config_args)
             )
 
         def is_rate_limit_error(error: Exception) -> bool:

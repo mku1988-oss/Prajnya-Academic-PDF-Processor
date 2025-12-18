@@ -173,7 +173,7 @@ async def run_batch(
                 doi=metadata.doi if metadata else None,
                 title=metadata.title if metadata else None,
                 authors=metadata.authors if metadata else [],
-                journal=metadata.publisher if metadata else None,
+                journal=metadata.journal if (metadata and hasattr(metadata, 'journal') and metadata.journal) else (metadata.publisher if metadata else None),
                 year=metadata.year if metadata else None,
                 validation_confidence=metadata.validation_confidence if metadata else 0.0,
                 validation_source=metadata.validation_source if metadata else "unknown",

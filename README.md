@@ -122,13 +122,14 @@ We implement a **Triple-Referee System** for critical metadata (Title, Authors, 
 ### 2. Sovereign Intelligence (Bring Your Own Brain)
 We are **Model Agnostic**. You are not locked into a vendor.
 *   **Privacy First**: Run 100% offline with `olmocr-7b` or `llama-3-vision`.
-*   **Speed First**: Switch to `gemini-2-5-flash`.
+*   **Speed First**: Switch to `gemini-3-flash` (Thinking-enabled). 
 *   **Reasoning First**: Switch to `gpt-4o` or `claude-3-5-sonnet`.
 
 **Configuration is just 1 line of YAML:**
 ```yaml
 # src/processing/strategies/config/research_article_strategy.yaml
-vlm_profile: "olmocr-7b"  # <--- Change to 'gemini-2-5-flash' instantly
+profile_registry:
+  default: "gemini-3-flash"  # <--- High-velocity "Thinking" VLM
 ```
 
 For detailed instructions on running **100% Offline** (Self-Hosted), see our [Advanced Setup Guide](./Advanced_Setup.md).
@@ -265,10 +266,10 @@ For deeper technical configuration, please consult our specialized guides:
 If you use Prajnya in your research, please cite:
 
 ```bibtex
-@software{prajnya2025,
+@software{prajnya2026,
   title={Prajnya: Reference Architecture for Academic RAG Pipelines},
   author={Manu Unni},
-  year={2025},
+  year={2026},
   version={5.0.0},
   url={https://github.com/mku1988-oss/Prajnya-Academic-PDF-Processor}
 }
@@ -292,4 +293,4 @@ See the full [Acknowledgments](./Acknowledgements.md) file for comprehensive cre
 
 > *"Prajnya: Where adaptive intelligence meets verified knowledge."*
 
-*Last Updated: December 17, 2025*
+*Last Updated: December 18, 2024*

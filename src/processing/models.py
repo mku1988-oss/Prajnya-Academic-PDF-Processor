@@ -128,6 +128,10 @@ class ExtractedMetadata(BaseModel):
         pattern=r'^10\.\d{4,}/.+$',
         description="Digital Object Identifier (articles/chapters) - just the DOI part without URL"
     )
+    journal: Optional[str] = Field(
+        None,
+        description="Journal name (articles)"
+    )
     isbn: Optional[str] = Field(
         None,
         pattern=r'^\d{10}(\d{3})?$',
@@ -363,7 +367,7 @@ class DocumentProfile(BaseModel):
         description="Raw PDF metadata from PyMuPDF"
     )
     
-    # NEW FIELD
+    # NEW FIELD (Phase 3.6)
     page_1_text: Optional[str] = Field(
         None,
         description="Extracted first-page text (native or OCR). Used for classification and initial metadata."
