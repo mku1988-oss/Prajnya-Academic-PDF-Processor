@@ -84,3 +84,7 @@ Thumbs.db
 # Distribution / packaging
 *.tar.gz
 *.zip
+
+# Internal Agent Protocols (Lab only)
+GEMINI.md
+CLAUDE.md
