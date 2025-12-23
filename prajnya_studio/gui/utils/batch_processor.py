@@ -33,7 +33,7 @@ from datetime import datetime
 
 # Import semantic ledger for saving processed results
 from src.processing.ledger.semantic_ledger import SemanticLedger, LedgerRecord, generate_hash
-from src.processing.ledger.csv_backend import CsvLedgerBackend
+from src.core.services.ledger_service import LedgerService
 from src.processing.process_manager import ProcessManager
 from src.processing.worker_engine import run_batch_process
 from src.processing.models import JobConfig
@@ -77,9 +77,8 @@ class BatchProcessor:
         self._current_file_start: Optional[float] = None
 
         # Initialize semantic ledger for saving results
-        ledger_path = Path(os.getenv("SARA_LEDGER_PATH", "persistence/semantic_ledger.csv"))
-        self.ledger: SemanticLedger = CsvLedgerBackend(file_path=str(ledger_path.resolve()))
-        logger.info(f"Semantic ledger initialized at: {ledger_path.resolve()}")
+        self.ledger: SemanticLedger = LedgerService.get_ledger_instance()
+        logger.info(f"Semantic ledger initialized via Service")
 
         logger.info("BatchProcessor initialized")
 
@@ -391,55 +390,28 @@ class BatchProcessor:
 
     def _save_to_ledger(self, file_path: str, result: Dict[str, Any]) -> None:
         """
-        Save processing result to semantic ledger.
-
-        Args:
-            file_path: Path to the processed PDF
-            result: Processing result dict from orchestrator
-
-        Note:
-            Only saves if processing was successful and metadata was extracted.
-            Errors are logged but don't raise exceptions to avoid batch interruption.
+        Save processing result to semantic ledger via LedgerService.
         """
         try:
             processing_result = result.get('processing_result')
+            # LedgerService handles None/empty checks internally or raises generic error, but we can verify here
             if not processing_result or not hasattr(processing_result, 'metadata'):
                 logger.warning(f"Skipping ledger save for {Path(file_path).name}: No metadata extracted")
                 return
 
-            metadata = processing_result.metadata
-            if not metadata:
-                logger.warning(f"Skipping ledger save for {Path(file_path).name}: Metadata is None")
-                return
+            if not processing_result.metadata:
+                 logger.warning(f"Skipping ledger save for {Path(file_path).name}: Metadata is None")
+                 return
 
-            # Generate document ID (hash of file content)
-            doc_hash = generate_hash(file_path)
-
-            # Create ledger record
-            record = LedgerRecord(
-                document_id=doc_hash,
-                pdf_filename=Path(file_path).name,
-                doi=metadata.doi,
-                title=metadata.title,
-                authors=metadata.authors if metadata.authors else [],
-                journal=metadata.publisher,  # Map publisher to journal field
-                year=metadata.year,
-                validation_confidence=metadata.validation_confidence or 0.0,
-                validation_source=metadata.validation_source or 'batch_processing',
-                manual_entry=False,
-                requires_review=False,  # Could be enhanced based on confidence thresholds
-                last_updated=datetime.now().isoformat(),
-                retrieval_provenance={
-                    'processed_via': 'batch_commander',
-                    'batch_processor_version': '1.0',
-                    'processing_timestamp': datetime.now().isoformat()
-                },
-                source_hash=doc_hash
+            # Use Centralized Service
+            LedgerService.save_processing_result(
+                processing_result=processing_result,
+                file_path=file_path,
+                ledger=self.ledger,
+                # Batch processor defaults
+                validation_source=processing_result.metadata.validation_source or 'batch_processing',
+                requires_review=False
             )
-
-            # Save to ledger (in-memory)
-            self.ledger.update_record(record)
-            logger.info(f"💾 Saved to ledger: {Path(file_path).name} (doc_id: {doc_hash[:8]}...)")
 
         except Exception as e:
             logger.error(f"Failed to save {Path(file_path).name} to ledger: {e}", exc_info=True)

@@ -1,3 +1,4 @@
+# .\prajnya_studio\gui\app_state.py
 import threading
 from collections import deque
 from typing import Dict, Any, Optional
@@ -16,6 +17,8 @@ class AppState:
         self.vlm_lock_state: bool = False
         self.temp_run_folder: Optional[str] = None
         self.server_manager: Optional[Any] = None  # To be initialized in studio_app.py
+        self.vlm_online: bool = False
+        self.vlm_latency: int = 0
 
     @staticmethod
     def get_instance() -> 'AppState':

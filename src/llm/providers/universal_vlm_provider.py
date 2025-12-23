@@ -876,6 +876,15 @@ class UniversalVLMProvider:
             # Parse JSON - GBNF grammar should ensure valid JSON (with sanitization fallback)
             parsed_json = json.loads(cleaned_output)
             
+            # Helper to unwrap nested 'metadata' if it exists (common with strict schemas)
+            if 'metadata' in parsed_json and isinstance(parsed_json['metadata'], dict):
+                self.logger.debug("Unwrapping nested 'metadata' key from JSON")
+                # If there are other top-level keys like 'content', keep them
+                content_backup = parsed_json.get('natural_text', '')
+                parsed_json = parsed_json['metadata']
+                if not parsed_json.get('natural_text') and content_backup:
+                     parsed_json['natural_text'] = content_backup
+
             # Extract natural_text as content
             content = parsed_json.get('natural_text', '')
             

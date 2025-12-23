@@ -6,9 +6,9 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from .. import theme
-from ..app_state import AppState
-from ...prajnya import orchestrator, logger as prajnya_logger
+from gui import theme
+from gui.app_state import AppState
+from prajnya import orchestrator, logger as prajnya_logger
 
 # Module-level logger for this page
 logger = logging.getLogger(__name__)
@@ -16,10 +16,14 @@ logger = logging.getLogger(__name__)
 # --- GLOBAL STATE (Persists across tab switches) ---
 _global_batch_processor = None
 _global_batch_ledger = None
-from ..utils.batch_processor import BatchProcessor
-from ..utils.batch_ledger import BatchLedger
-from ..utils.confidence_utils import derive_field_confidence
-from ...prajnya.orchestrator import get_orchestrator
+
+# CRITICAL: Import orchestrator FIRST to setup sys.path
+# This allows batch_processor to import from src/core/services
+from prajnya.orchestrator import get_orchestrator
+# These imports now work because sys.path was setup above
+from gui.utils.batch_processor import BatchProcessor
+from gui.utils.batch_ledger import BatchLedger
+from gui.utils.confidence_utils import derive_field_confidence
 
 class LogStream(ui.log):
     """A self-updating log element that connects to the Prajnya logger."""
@@ -131,30 +135,7 @@ def mount():
                         f'font-size: 12px; '
                         f'font-family: var(--prajnya-font-mono);'
                     )
-    elif vlm_offline or batch_processor is None:
-        # Original banner for VLM backend offline
-        with ui.card().classes('w-full mb-4').style(
-            f'background: {theme.THEME_LIGHT["warning"]}22; '
-            f'border: 2px solid {theme.THEME_LIGHT["warning"]}; '
-            f'border-radius: 8px; '
-            f'padding: 16px;'
-        ):
-            with ui.row().classes('items-center gap-3'):
-                ui.icon('warning', size='32px').style(f'color: {theme.THEME_LIGHT["warning"]};')
-                with ui.column().classes('gap-1'):
-                    ui.label('VLM Backend Offline').style(
-                        f'font-weight: 600; '
-                        f'color: {theme.THEME_LIGHT["text"]};'
-                    )
-                    ui.label('The llama.cpp VLM server is not running. Start it and refresh the page to enable batch processing.').style(
-                        f'color: {theme.THEME_LIGHT["text_muted"]}; '
-                        f'font-size: 13px;'
-                    )
-                    ui.label('Expected at: http://localhost:8080/health').style(
-                        f'color: {theme.THEME_LIGHT["text_muted"]}; '
-                        f'font-size: 12px; '
-                        f'font-family: var(--prajnya-font-mono);'
-                    )
+    # Note: VLM offline banner removed - status shown in header indicator instead
 
     # --- Logic Handlers ---
     
@@ -202,6 +183,7 @@ def mount():
         
         file_list_label.text = "0 files ready"
         
+        # FIX: Reset the upload component to allow re-uploading same files
         if 'upload' in locals() or 'upload' in globals():
              # This check is safe because clear_queue is a closure in mount()
              # where 'upload' is defined later. Python closures resolve nicely.
@@ -255,6 +237,45 @@ def mount():
             batch_processor.register_callback('on_file_error', on_file_error)
             batch_processor.register_callback('on_progress_update', on_progress_update)
             batch_processor.register_callback('on_batch_complete', on_batch_complete)
+
+            # --- LAZY LAUNCH (Phase 6) ---
+            state = AppState.get_instance()
+            if state.server_manager:
+                # Check if server is needed (heuristic: if default profile is NOT gemini/cloud)
+                # We need to peek at the strategy config again or check the server manager's default
+                # Simpler: If server is NOT running, try to ensure it started if it's "local" mode.
+                # However, server_manager doesn't know if it's unwanted.
+                # Let's check the profile_registry.default from the strategy file we loaded in studio_app (or reload it)
+                
+                # Robust approach: Read config
+                import yaml
+                is_cloud_profile = False
+                try:
+                    cfg_path = Path("src/processing/strategies/config/research_article_strategy.yaml")
+                    if cfg_path.exists():
+                        with open(cfg_path, 'r', encoding='utf-8') as f:
+                             cfg = yaml.safe_load(f)
+                             def_prof = cfg.get('profile_registry', {}).get('default', 'olmocr-2-7b')
+                             if any(x in def_prof.lower() for x in ['gemini', 'gpt', 'claude', 'cloud']):
+                                 is_cloud_profile = True
+                except Exception as e:
+                    logger.warning(f"Could not determine profile type: {e}")
+
+                if not is_cloud_profile:
+                    if not await asyncio.to_thread(state.server_manager.is_running):
+                        ui.notify("Lazy Launch: Starting VLM Engine... (Please wait)", type='info', icon='rocket_launch')
+                        status_label.text = "Starting Engine..."
+                        logger.info("Lazy Launch triggered. Starting server...")
+                        
+                        success = await asyncio.to_thread(state.server_manager.ensure_started)
+                        if not success:
+                             raise RuntimeError("Failed to start VLM Server.")
+                        
+                        # Load default model (CRITICAL for Router Mode)
+                        def_prof = cfg.get('profile_registry', {}).get('default', 'olmocr-2-7b') if 'cfg' in locals() else 'olmocr-2-7b'
+                        ui.notify(f"Loading model: {def_prof}...", type='info')
+                        await asyncio.to_thread(state.server_manager.load_model, def_prof)
+                        ui.notify("VLM Engine Ready", type='positive')
 
             ui.notify(f'Starting batch {_global_batch_ledger.batch_id}: {len(uploaded_files)} files', type='info')
             logger.info(f"🚀 Starting batch {_global_batch_ledger.batch_id}: {len(uploaded_files)} files")
@@ -524,10 +545,12 @@ def mount():
                 _global_batch_ledger.export_json(str(ledger_path))
 
                 logger.info(f"📊 Ledger exported: {ledger_path}")
+                # FIX: Use safe_notify
                 safe_notify(f'Ledger saved to: {output_dir}', type='info', icon='folder')
 
             except Exception as e:
                 logger.error(f"Failed to export ledger: {e}")
+                # FIX: Use safe_notify
                 safe_notify(f'Ledger export failed: {str(e)}', type='negative')
 
         # Log summary
@@ -873,7 +896,7 @@ def mount():
         # --- RIGHT COLUMN: Terminal + Future Panels ---
         with ui.column().classes('flex-1 gap-4'):
 
-            # Output Log (Terminal) - Card-based
+            # Output Log (Terminal) - Card-based (v2.0)
             with ui.card().classes('w-full').style(
                 f'background: {theme.THEME_LIGHT["card"]}; '
                 f'border: 1px solid {theme.THEME_LIGHT["border"]}; '
@@ -893,6 +916,7 @@ def mount():
                         f'letter-spacing: 0.5px;'
                     )
 
+                    # PROV/VAR tag badge
                     ui.label('PROV/VAR').classes('text-xs').style(
                         f'background: {theme.THEME_LIGHT["warning"]}; '
                         f'color: white; '
@@ -1059,17 +1083,19 @@ def mount():
     # --- CRITICAL: State Rehydration (At the very end of mount) ---
     
     # Restore file list from global processor
-    if batch_processor.files_queue:
+    if batch_processor and batch_processor.files_queue:
         uploaded_files.extend(batch_processor.files_queue)
         file_list_label.text = f"{len(uploaded_files)} files ready"
 
     # If processor has activity (running OR finished), restore the UI state
-    if batch_processor.status != 'idle':
+    if batch_processor and batch_processor.status != 'idle':
         
         # 1. Restore Stats & Progress Visuals
         stats = batch_processor.get_progress()
         
-        import asyncio
+        # FIX: Use create_task for async update in sync mount
+        # FIX: Use create_task for async update in sync mount
+        # 'asyncio' is already imported globally, do not shadow it locally
         asyncio.create_task(on_progress_update(stats))
 
         # 2. Restore Ledger Table

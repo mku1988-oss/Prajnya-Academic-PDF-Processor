@@ -25,6 +25,7 @@ import io
 import re
 
 # Add parent directory to path for imports
+# TODO (Phase 2): Remove sys.path manipulation - convert to proper Python package
 #   See: Response&Suggestions.txt - Suggestion 3
 #   Action: Create pyproject.toml/setup.py, install with 'pip install -e .'
 #   Benefits: Cleaner imports, easier distribution, standard Python packaging
@@ -90,7 +91,7 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
         # Load strategy configuration from YAML
         self.config = self._load_strategy_config()
         
-        # --- NEW: INITIALIZE LEDGER AND ZOTERO SERVICE ---
+        # --- NEW: INITIALIZE LEDGER AND ZOTERO SERVICE (PHASE 3.5) ---
         self.ledger: Optional[SemanticLedger] = None
         self.zotero_service: Optional[ZoteroService] = None
         
@@ -154,7 +155,7 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
             api_endpoint=self.api_endpoint
         )
         
-        # --: CLOUD PIPELINE DETECTION ---
+        # --- PHASE 3: CLOUD PIPELINE DETECTION ---
         # Detect if we are using a Cloud API (e.g., Gemini) to enable the simplified
         # "Early Branching" pipeline, bypassing the complex 5-Tier local router.
         self.use_cloud_pipeline = self.body_vlm_profile.get('model_type') == 'cloud_api_gemini'
@@ -232,7 +233,7 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
         errors = []
         self.current_pdf_path = profile.pdf_path
         try:
-            # --: EARLY BRANCHING FOR CLOUD PIPELINE ---
+            # --- PHASE 3: EARLY BRANCHING FOR CLOUD PIPELINE ---
             if self.use_cloud_pipeline:
                 self.logger.info("Executing Cloud Hybrid Pipeline (Gemini)...")
                                 
@@ -282,6 +283,7 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                 except Exception:
                     title_page_raw_text = ""
     
+                # FIX: If PyMuPDF text is empty (scanned PDF), fallback to VLM content
                 # The 'title_page' object (ContentPage) contains the text extracted by VLM Shot 1
                 if not title_page_raw_text.strip() and title_page:
                     self.logger.info("PyMuPDF text empty (scanned doc?), using VLM extracted text as referee.")
@@ -304,7 +306,7 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                     pages_to_process = list(range(1, profile.page_count))
     
                 if pages_to_process:
-                    # --: TIER 0 PRE-COMPUTATION & CONCURRENCY ---
+                    # --- PHASE 4.6: TIER 0 PRE-COMPUTATION & CONCURRENCY ---
                     # Check all three conditions: parameter, hybrid enabled, AND config enabled
                     async_vlm_enabled = self.concurrency_config.get('enabled', False)
 
@@ -902,6 +904,7 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
             'tier5': []
         }
 
+        # PRIORITY 3 FIX: Initialize classification cache to store analysis results
         # This avoids re-classification in GPU thread (line 906-907)
         self._classification_cache = {}
 
@@ -918,6 +921,7 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                 page, page_idx, pymupdf_result=pymupdf_result
             )
 
+            # PRIORITY 3 FIX: Cache classification results for later use
             # Stores (page_type, analysis) tuple to avoid re-classification
             self._classification_cache[page_idx] = (page_type, analysis)
 
@@ -1341,6 +1345,7 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                 for page_idx in page_indices:
                     page = thread_doc.load_page(page_idx)
 
+                    # PRIORITY 3 FIX: Use cached classification instead of re-classifying
                     # Previously: Re-ran classification here (5-10s wasted per document)
                     # Now: Retrieve from cache populated in Tier 0
 
@@ -1579,6 +1584,7 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
             # The 'content' field is what was extracted from _post_process_output
             final_metadata = shot2_result.get('metadata', {})
             
+            # CRITICAL FIX: Use Shot 2's 'natural_text' field (which should be cleaned_text)
             # If Shot 2 fails to return natural_text, fall back to cleaned_text
             final_content = final_metadata.get('natural_text', cleaned_text)
             
@@ -2021,12 +2027,16 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
             return bibliographic_metadata
 
         # 2. Extract nested VLM metadata block
+        # 2. Extract nested VLM metadata block
+        # Check for nested 'metadata' first (legacy/schema constraint), then fall back to flat structure
         vlm_metadata_block = page1_content.metadata.get('metadata')
+        
         if not isinstance(vlm_metadata_block, dict):
-            self.logger.warning(
-                f"VLM response for title page did not contain the expected nested 'metadata' dictionary. Found: {type(vlm_metadata_block)}"
-            )
-            return bibliographic_metadata
+            # The provider likely unwrapped it already. Use the top-level metadata dict.
+            vlm_metadata_block = page1_content.metadata
+            
+            # Validation trace
+            self.logger.debug(f"Using flat metadata structure. Keys: {list(vlm_metadata_block.keys())}")
 
         # 3. Extract fields (safe access)
         bibliographic_metadata['title'] = vlm_metadata_block.get('title')
@@ -2100,6 +2110,7 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                 self.logger.info("Performing Zotero canonical lookup...")
                 zr = self.zotero_service.get_canonical_metadata(vlm_metadata)
                 zotero_record = zr.get("record", {})
+                # FIX BUG #8: Preserve confidence and source from Zotero
                 zotero_confidence = zr.get("confidence", 0.0)
                 zotero_source = zr.get("source", "unknown")
             except Exception as e:
@@ -2111,6 +2122,7 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
         # ==============================
         merged = merge_metadata(vlm_metadata, zotero_record, title_page_text)
         
+        # FIX BUG #8: Add confidence and source to merged metadata
         merged["validation_confidence"] = zotero_confidence
         merged["validation_source"] = zotero_source
 
@@ -2121,6 +2133,7 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
         # ==============================
         provenance = self._annotate_provenance(merged)
         
+        # CRITICAL FIX: Remove both provenance AND _provenance to prevent circular references
         # The old _provenance field may still exist from legacy code
         merged.pop("_provenance", None)
         merged.pop("provenance", None)  # Remove the one we just created too
@@ -2362,12 +2375,14 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
         )
         
         # 4. Create the provider, INJECTING the pre-loaded config objects
+        # SKIP VALIDATION: In GUI lazy launch mode, server isn't running during strategy init
         provider = UniversalVLMProvider(
             model_name=pydantic_model_profile.model_name,
             task_type=task_type,
             model_profile=pydantic_model_profile,
             task_definition=pydantic_task_definition,
-            api_endpoint=api_endpoint
+            api_endpoint=api_endpoint,
+            skip_validation=True  # Skip health check during init (server may not be running yet)
         )
         
         return provider, vlm_profile_data, resolution

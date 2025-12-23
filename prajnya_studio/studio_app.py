@@ -1,6 +1,7 @@
+# .\prajnya_studio\studio_app.py
 from nicegui import ui, app
-from .gui import theme, app_state, persistent_settings, health_check, components, icons
-from .gui.pages import batch_commander, strategy_lab, ledger_master, help as help_page
+from gui import theme, app_state, persistent_settings, health_check, components, icons
+from gui.pages import batch_commander, strategy_lab, ledger_master, help as help_page
 import sys
 import asyncio
 
@@ -9,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configure Python logging
-from .prajnya.logger import setup_logging
+from prajnya.logger import setup_logging
 import logging
 setup_logging()
 
@@ -25,55 +26,44 @@ state.settings = settings
 from pathlib import Path
 app.add_static_files('/static', Path(__file__).parent)
 
-# Server Manager Integration
-from src.llm.providers.server_manager import ServerManager
-import yaml
-from pathlib import Path
+# Server Manager Integration (Phase 5.5)
+# Server Manager Integration (Phase 5.5) -> Phase 5.9.5: Centralized Service
+from src.core.services.server_service import ServerService
+from src.core.bootstrap import PrajnyaBootstrap
+
+# Initialize env/logging via bootstrap
+PrajnyaBootstrap.initialize_environment()
 
 async def startup_server():
-    """Start VLM server using configuration from strategy YAML."""
-    logging.info("Initializing VLM Server...")
+    """Start VLM server using configuration from strategy YAML (Lazy)."""
+    logging.info("Initializing VLM Server (Lazy Mode)...")
 
-    # Load configuration from strategy YAML
-    server_config = None
-    model_to_load = "olmocr-2-7b"
-    try:
-        config_path = Path("src/processing/strategies/config/research_article_strategy.yaml")
-        if config_path.exists():
-            with open(config_path, 'r', encoding='utf-8') as f:
-                cfg = yaml.safe_load(f)
-                # Extract local_server configuration
-                server_config = cfg.get('vlm_provider', {}).get('local_server', {})
-                # Extract default model
-                model_to_load = cfg.get('profile_registry', {}).get('default', "olmocr-2-7b")
-    except Exception as e:
-        logging.warning(f"Could not read strategy config: {e}")
-
-    # Initialize ServerManager from config (or fallback to defaults)
-    if server_config and server_config.get('enabled', True):
-        manager = ServerManager.from_config(server_config)
-        logging.info(f"Using ServerManager from config: backend={server_config.get('backend', 'router_mode')}")
-    else:
-        manager = ServerManager(backend="router_mode")
-        logging.info("Using default ServerManager configuration")
-
+    # Use centralized service factory (standby mode)
+    manager = ServerService.create_server_manager()
+    
     state.server_manager = manager
 
-    # Run startup in thread pool to avoid blocking event loop
-    loop = asyncio.get_running_loop()
+    # Lazy Launch: Do NOT start server automatically.
+    logging.info("Lazy Launch Enabled: VLM Server in standby mode.")
+    # Use app.timer (not ui.timer) to avoid 'slot not determined' error in startup context
+    # Use app.timer (not ui.timer) to avoid 'slot not determined' error
+    # ASYNC + EXECUTOR: Critical to prevent blocking the event loop with requests.get!
+    async def update_global_vlm_status():
+        if state.server_manager:
+            try:
+                # Check server status in thread pool to avoid blocking asyncio loop
+                # This prevents 'KeyError' in engineio/socketio due to heartbeat starvation
+                loop = asyncio.get_running_loop()
+                server_running = await loop.run_in_executor(None, state.server_manager.is_running)
+                
+                state.vlm_online = server_running
+                # Use 45ms placeholder if online, else 0
+                state.vlm_latency = state.get_vlm_latency() if server_running else 0
+            except Exception:
+                pass # Fail silently to keep timer alive
 
-    try:
-        # Start server
-        started = await loop.run_in_executor(None, manager.ensure_started)
-        if started:
-            logging.info("VLM Server ready.")
-            # Load default model
-            await loop.run_in_executor(None, lambda: manager.load_model(model_to_load))
-        else:
-            logging.error("Failed to start VLM Server.")
-            ui.notify("VLM Server failed to start", type="negative")
-    except Exception as e:
-        logging.error(f"Error during server startup: {e}")
+    # Start global timer (2.0s interval)
+    app.timer(2.0, update_global_vlm_status)
 
 async def shutdown_server():
     """Stop VLM server on app shutdown."""
@@ -185,16 +175,29 @@ def create_ui(current_route='/batch'):
             f'overflow-y: auto; '
             f'position: relative;'
         ):
-            # System Status Indicator (Top Right) - Dynamic VLM status
+            # System Status Indicator (Top Right) - Reactive VLM status
             with ui.row().classes('absolute top-4 right-4 gap-2 items-center').style('z-index: 10;'):
-                # Check if backend is available
+                # Check if VLM server is actually running
                 from prajnya import orchestrator
-                vlm_state = 'online' if orchestrator.BACKEND_AVAILABLE else 'error'
-                status_dot = components.status_pulse(state=vlm_state)
+
+                # Create static pulse indicator (color won't change, but that's acceptable)
                 
-                ui.label('VLM Online' if orchestrator.BACKEND_AVAILABLE else 'VLM Offline').classes('text-sm text-gray-600')
-                latency = state.get_vlm_latency() if orchestrator.BACKEND_AVAILABLE else 0
-                ui.label(f'{latency}ms' if latency > 0 else 'N/A').classes('text-xs text-gray-400')
+                # 1. Online Pulse (Green) - Visible when vlm_online is True
+                components.status_pulse(state='online').bind_visibility_from(state, 'vlm_online')
+
+                # 2. Offline Pulse (Red/Error) - Visible when vlm_online is False
+                components.status_pulse(state='error').bind_visibility_from(state, 'vlm_online', backward=lambda x: not x)
+
+                # Create reactive labels that will update
+                ui.label().bind_text_from(
+                    state, 'vlm_online', 
+                    backward=lambda online: 'VLM Online' if online else 'VLM Offline'
+                ).classes('text-sm text-gray-600')
+
+                ui.label().bind_text_from(
+                    state, 'vlm_latency',
+                    backward=lambda lat: f'{lat}ms' if lat > 0 else 'N/A'
+                ).classes('text-xs text-gray-400')
             
             # Page content goes here (returned container)
             with ui.column().classes('w-full h-full p-8').style('padding-top: 60px;') as content:

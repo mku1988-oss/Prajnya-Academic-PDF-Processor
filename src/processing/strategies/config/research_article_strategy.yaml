@@ -26,9 +26,9 @@ zotero:
   library_id: ${ZOTERO_LIBRARY_ID}
   library_type: user
 profile_registry:
-  default: gemini-3-flash
+  default: olmocr-2-7b
   fallback: olmocr-2-7b
-  title_detection: gemini-3-flash
+  title_detection: gemini-3-pro
 task_registry:
   raw_ocr: raw_ocr_extraction
   structured_body: structured_analysis_body_page
