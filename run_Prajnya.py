@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# .\run_Prajnya.py
 """
 run_Prajnya.py — Prajnya unified runner (integrated to your repo)
 
@@ -28,8 +29,13 @@ load_dotenv()
 
 # Project imports (actual modules in your repo)
 from src.processing.document_orchestrator import DocumentOrchestrator
-from src.processing.ledger.csv_backend import CsvLedgerBackend
+# Phase 5.9.5: Use centralized services
+from src.core.bootstrap import PrajnyaBootstrap
+from src.core.services.ledger_service import LedgerService
+from src.core.services.server_service import ServerService
 from src.processing.ledger.semantic_ledger import LedgerRecord, generate_hash
+from src.processing.models import ProcessingResult, ExtractedMetadata as Metadata
+from src.version import PIPELINE_VERSION
 
 # Logging with UTF-8 support for Unicode characters (arrows, checkmarks, etc.)
 # Configure root logger to handle all loggers in the application
@@ -88,8 +94,8 @@ class PrajnyaRunner:
     def __init__(self, ledger_path: Union[str, Path] = LEDGER_CSV_PATH):
         # instantiate orchestrator
         self.orch = DocumentOrchestrator()
-        # ledger backend (CSV)
-        self.ledger = CsvLedgerBackend(str(ledger_path))
+        # ledger backend (CSV) - Phase 5.9.5: Centralized
+        self.ledger = LedgerService.get_ledger_instance(ledger_path if ledger_path else None)
 
     def assess_metadata_completeness(
         self, 
@@ -218,9 +224,7 @@ class PrajnyaRunner:
         processing_result = None
 
         try:
-            # ------------------------------------------------------------------
             # EXECUTE MAIN PIPELINE
-            # ------------------------------------------------------------------
             orches = self.orch.process_document(pdf_path, pages_to_process=pages, concurrency_enabled=concurrency_enabled)
 
             if isinstance(orches, dict):
@@ -246,9 +250,7 @@ class PrajnyaRunner:
                 res["metadata"] = getattr(orches, "metadata", {}) or {}
                 res["pages_processed"] = getattr(orches, "pages_processed", 0) or 0
 
-            # ------------------------------------------------------------------
-            # METADATA COMPLETENESS ASSESSMENT
-            # ------------------------------------------------------------------
+            # METADATA COMPLETENESS ASSESSMENT (Phase 3.8)
             md = res.get("metadata") or {}
             document_id = md.get("source_hash") or generate_hash(str(pdf_path))
 
@@ -257,9 +259,7 @@ class PrajnyaRunner:
 
             logger.info(f"Metadata assessment: {assessment}")
 
-            # ------------------------------------------------------------------
             # INTERACTIVE REVIEW (if needed and mode allows)
-            # ------------------------------------------------------------------
             if assessment["requires_review"] and not noninteractive:
                 print("\n" + "="*60)
                 print("⚠️  METADATA REVIEW REQUIRED")
@@ -281,64 +281,19 @@ class PrajnyaRunner:
             else:
                 assessment["review_status"] = "provisional" if assessment["requires_review"] else "reviewed"
 
-            # ------------------------------------------------------------------
-            # LEDGER UPDATE
-            # ------------------------------------------------------------------
+            # LEDGER UPDATE (Phase 3.8 compliant)
+            # LEDGER UPDATE (Phase 5.9.5: Centralized Service)
             try:
-                existing = self.ledger.get_record(document_id)
-                
-                if existing:
-                    # Update record with latest metadata
-                    existing.title = md.get("title")
-                    existing.doi = md.get("doi")
-                    existing.journal = md.get("journal")
-                    existing.year = md.get("year")
-                    
-                    authors = md.get("authors") or []
-                    if isinstance(authors, str):
-                        authors = [a.strip() for a in authors.split(",") if a.strip()]
-                    existing.authors = authors
-                    existing.requires_review = assessment.get("requires_review", False)
-                    existing.review_needed_fields = assessment.get("missing_fields", [])
-                    existing.review_status = "reviewed" if not assessment["requires_review"] else "provisional"
-                    existing.last_updated = datetime.utcnow().isoformat()
-                    
-                    self.ledger.update_record(existing)
-                else:
-                    # Create new record
-                    authors = md.get("authors") or []
-                    if isinstance(authors, str):
-                        authors = [a.strip() for a in authors.split(",") if a.strip()]
-                    
-                    prov = md.get("provenance", {})
-                    validation_confidence = prov.get("validation_confidence", 0.0)
-                    validation_source = prov.get("validation_source", "prajnya_runner")
-                    new_rec = LedgerRecord(
-                        document_id=document_id,
-                        pdf_filename=pdf_path.name,
-                        title=md.get("title"),
-                        doi=md.get("doi"),
-                        authors=authors,
-                        journal=md.get("journal"),
-                        year=md.get("year"),
-                        
-                        validation_confidence=validation_confidence,
-                        validation_source=validation_source,
-                        requires_review=assessment.get("requires_review", False),
-                        review_needed_fields=assessment.get("missing_fields", []),
-                        review_status="reviewed" if not assessment["requires_review"] else "provisional",
-                        last_reviewed_by=None,
-                        manual_entry=False,
-                        
-                        last_updated=datetime.utcnow().isoformat(),
-                        retrieval_provenance=md.get("retrieval_provenance", {}),
-                        source_hash=document_id
-                    )
-                    self.ledger.update_record(new_rec)
-                
-                # CRITICAL: Ledger flush NOW happens in Runner
-                self.ledger.commit()
-                logger.info("Ledger updated successfully")
+                # Use centralized service to save result (Single Source of Truth)
+                LedgerService.save_processing_result(
+                    processing_result=res.get("processing_result") or ProcessingResult(metadata=Metadata(**md), pages=[]), # shim if needed
+                    file_path=str(pdf_path),
+                    ledger=self.ledger,
+                    requires_review=assessment["requires_review"],
+                    review_needed_fields=assessment["missing_fields"],
+                    review_status=assessment["review_status"]
+                )
+                logger.info("Ledger updated successfully via LedgerService")
                 
             except Exception as e:
                 logger.error(f"Ledger update failed: {e}", exc_info=True)
@@ -350,13 +305,9 @@ class PrajnyaRunner:
             res["processing_time"] = (datetime.utcnow() - start).total_seconds()
             # DO NOT RETURN — we still need to write JSON
 
-        # ------------------------------------------------------------------
-        # STRUCTURED JSON OUTPUT
+        # STRUCTURED JSON OUTPUT (Phase 3.8 format)
         # MOVED HERE: After ledger update, so user corrections are captured
-        # ------------------------------------------------------------------
-        # NOTE: In batch mode, this writes provisional metadata
         # The JSON will be regenerated after interactive review via regenerate_json()
-        # ------------------------------------------------------------------
         try:
             out_dir = Path("run_outputs") / "documents"
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -373,13 +324,15 @@ class PrajnyaRunner:
             
             # Remove the circular provenance dict from metadata
             metadata_clean.pop("provenance", None)
+            
+            # Phase 3.8 compliant structure
             structured_output = {
                 "document_info": {
                     "filename": pdf_path.name,
                     "document_type": orches.get("document_type") if isinstance(orches, dict) else None,
                     "processing_time": res["processing_time"],
                     "success": res["success"],
-                    "pipeline_version": "v4.3.0-phase3.8"  # NEW
+                    "pipeline_version": PIPELINE_VERSION
                 },
                 
                 "metadata_final": metadata_clean,  # Use cleaned metadata
@@ -520,7 +473,7 @@ class PrajnyaRunner:
                         "document_type": "research_article",
                         "processing_time": 0.0,  # Not re-processing
                         "success": True,
-                        "pipeline_version": "v4.3.0-phase3.8"
+                        "pipeline_version": PIPELINE_VERSION
                     },
                     
                     "metadata_final": metadata_clean,
@@ -714,7 +667,6 @@ class PrajnyaRunner:
 
         print("Interactive review complete. Ledger updated.")
 
-# ---- CLI ----
 def build_parser():
     p = argparse.ArgumentParser(prog="run_Prajnya")
     g = p.add_mutually_exclusive_group(required=False)
@@ -741,51 +693,32 @@ def main(argv=None):
     else:
         logger.setLevel(logging.WARNING)
 
-    # Initialize VLM Server
-    from src.llm.providers.server_manager import ServerManager
-    import yaml
+    # Safe defaults for finally block
+    server_manager = None
+    runner = None
+    needs_review = []
+    ledger_candidates = []
 
-    # Load configuration from strategy YAML
-    server_config = None
-    model_to_load = "olmocr-2-7b"
+    # Phase 5.9.5: Centralized Server Initialization
     try:
-        config_path = Path("src/processing/strategies/config/research_article_strategy.yaml")
-        if config_path.exists():
-            with open(config_path, 'r', encoding='utf-8') as f:
-                cfg = yaml.safe_load(f)
-                # Extract local_server configuration
-                server_config = cfg.get('vlm_provider', {}).get('local_server', {})
-                # Extract default model
-                model_to_load = cfg.get('profile_registry', {}).get('default', "olmocr-2-7b")
+        # Initialize env and logging via bootstrap
+        PrajnyaBootstrap.initialize_environment()
+        
+        # Initialize and start server (if needed)
+        # Note: We pass auto_load_model=True to maintain existing behavior
+        server_manager, model_to_load = ServerService.initialize_and_start(auto_load_model=True)
+        
     except Exception as e:
-        logger.warning(f"Could not read strategy config: {e}")
-
-    # Initialize ServerManager from config (or fallback to defaults)
-    if server_config and server_config.get('enabled', True):
-        server_manager = ServerManager.from_config(server_config)
-    else:
-        logger.info("Using default ServerManager configuration")
-        server_manager = ServerManager(backend="router_mode")
+        logger.error(f"Failed to initialize server: {e}")
+        return 1
 
     try:
-        if not server_manager.ensure_started():
-            logger.error("Failed to start VLM server")
-            return 1
-
-        # Load model for Phase 5.5
-        if not server_manager.load_model(model_to_load):
-            logger.warning(f"Failed to load VLM model '{model_to_load}'. Processing may fail if no model is loaded.")
-
         pages_list = None
         if args.pages:
             pages_list = parse_pages_to_list(args.pages)
 
         runner = PrajnyaRunner()
         
-        # Initialize review lists for finally block
-        needs_review = []
-        ledger_candidates = []
-
         if args.review:
             # interactive review mode
             runner.review_ledger_interactive()
@@ -824,9 +757,10 @@ def main(argv=None):
 
     finally:
         # Stop server only if we started it (ServerManager handles this check)
-        server_manager.stop()
+        if server_manager:
+            server_manager.stop()
         try:
-            if hasattr(runner.ledger, "_records"):
+            if runner and hasattr(runner.ledger, "_records"):
                 for rec in runner.ledger._records.values():
                     if not rec.title or not rec.authors or len(rec.authors) == 0 or not rec.doi:
                         ledger_candidates.append(rec.pdf_filename or rec.document_id)

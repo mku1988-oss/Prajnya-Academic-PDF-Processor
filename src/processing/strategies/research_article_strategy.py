@@ -7,7 +7,7 @@ Processing Flow:
 2. Pages 2+: Body content extraction at 1024px
 
 Blueprint Reference: Section 1.2
-PHASE_VERSION = "3.5.1"
+Version: See src.version.PIPELINE_VERSION for current version
 """
 
 from pathlib import Path
@@ -25,7 +25,6 @@ import io
 import re
 
 # Add parent directory to path for imports
-# TODO (Phase 2): Remove sys.path manipulation - convert to proper Python package
 #   See: Response&Suggestions.txt - Suggestion 3
 #   Action: Create pyproject.toml/setup.py, install with 'pip install -e .'
 #   Benefits: Cleaner imports, easier distribution, standard Python packaging
@@ -91,7 +90,6 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
         # Load strategy configuration from YAML
         self.config = self._load_strategy_config()
         
-        # --- NEW: INITIALIZE LEDGER AND ZOTERO SERVICE (PHASE 3.5) ---
         self.ledger: Optional[SemanticLedger] = None
         self.zotero_service: Optional[ZoteroService] = None
         
@@ -112,7 +110,6 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                 self.zotero_service = None
         else:
             self.logger.info("Zotero integration is disabled in the configuration.")
-        # --- END OF NEW BLOCK ---
         
         self.logger.info(
             f"Loaded strategy config: {self.config['strategy_name']} "
@@ -155,13 +152,11 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
             api_endpoint=self.api_endpoint
         )
         
-        # --- PHASE 3: CLOUD PIPELINE DETECTION ---
         # Detect if we are using a Cloud API (e.g., Gemini) to enable the simplified
         # "Early Branching" pipeline, bypassing the complex 5-Tier local router.
         self.use_cloud_pipeline = self.body_vlm_profile.get('model_type') == 'cloud_api_gemini'
         if self.use_cloud_pipeline:
             self.logger.info("Cloud API Profile Detected: Enabling Simplified Hybrid Pipeline (Lite Router)")
-        # ----------------------------------------
         
         # ========================================================================
         # TITLE PAGE CONFIG (Resolution for Two-Shot Processing)
@@ -185,7 +180,6 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
             f"shot2={self.title_shot2_task}"
         )
 
-        # --- End of corrected block ---
 
         # The rest of the __init__ method remains the same.
         # Store important config values for easy access
@@ -233,7 +227,6 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
         errors = []
         self.current_pdf_path = profile.pdf_path
         try:
-            # --- PHASE 3: EARLY BRANCHING FOR CLOUD PIPELINE ---
             if self.use_cloud_pipeline:
                 self.logger.info("Executing Cloud Hybrid Pipeline (Gemini)...")
                                 
@@ -264,9 +257,7 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                 all_pages.extend(body_pages)
 
             else:
-                # --- STANDARD LOCAL PIPELINE (Original 5-Tier Logic) ---
                 
-                # --- Title Page Processing ---
                 self.logger.info(f"Processing page 1/{profile.page_count} (title page metadata)...")
                 title_page = self._process_title_page(profile)
                 all_pages.append(title_page)
@@ -274,7 +265,6 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                 # Extract key metadata immediately after processing the title page
                 bibliographic_metadata = self._extract_metadata_from_page1(title_page, profile.pdf_path)
                 
-                # --- NEW: PHASE 3.5 - VALIDATE & ENRICH METADATA ---
                 # This is the core integration of the new workflow
                 # Get raw title-page text via PyMuPDF (fast, already available)
                 try:
@@ -283,7 +273,6 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                 except Exception:
                     title_page_raw_text = ""
     
-                # FIX: If PyMuPDF text is empty (scanned PDF), fallback to VLM content
                 # The 'title_page' object (ContentPage) contains the text extracted by VLM Shot 1
                 if not title_page_raw_text.strip() and title_page:
                     self.logger.info("PyMuPDF text empty (scanned doc?), using VLM extracted text as referee.")
@@ -296,9 +285,7 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                     title_page_text=title_page_raw_text,
                     profile=profile  # Pass the full profile object
                 )
-                # --- END OF NEW BLOCK --
                 
-                # --- Body Pages Processing ---
                 if test_pages_override:
                     pages_to_process = [p - 1 for p in test_pages_override if p > 1]
                     self.logger.info(f"Processing specific pages from test override: {test_pages_override}")
@@ -306,7 +293,6 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                     pages_to_process = list(range(1, profile.page_count))
     
                 if pages_to_process:
-                    # --- PHASE 4.6: TIER 0 PRE-COMPUTATION & CONCURRENCY ---
                     # Check all three conditions: parameter, hybrid enabled, AND config enabled
                     async_vlm_enabled = self.concurrency_config.get('enabled', False)
 
@@ -425,7 +411,6 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                 page_num=page_number + 1
             )
 
-            # --- SHOT 1: RAW OCR EXTRACTION (Faithful Transcription) ---
             self.logger.info("Title Page Shot 1: Raw OCR extraction (temp=0.05)...")
             shot1_start = time.time()
             
@@ -460,7 +445,6 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                     metadata={'error': 'shot1_empty_title_page', 'processing_method': 'two_shot_title_failed'}
                 )
             
-            # --- DEDUPLICATION: PARAGRAPH-LEVEL CLEANUP ---
             self.logger.info("Title Page: Performing paragraph-level deduplication...")
             dedup_start = time.time()
             
@@ -472,7 +456,6 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                 f"({len(cleaned_text)/len(raw_text)*100:.1f}% retained) in {dedup_time:.2f}s"
             )
             
-            # --- SHOT 2: STRUCTURED METADATA EXTRACTION ---
             self.logger.info("Title Page Shot 2: Structured metadata extraction (temp=0.0)...")
             shot2_start = time.time()
             
@@ -1286,6 +1269,7 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
             return []
 
         self.logger.info(f"CPU Thread: Processing {len(page_indices)} Tier 1 pages...")
+
         thread_doc = fitz.open(profile.pdf_path)
         self.logger.debug(f"CPU Thread: Opened separate document handle (ptr: {id(thread_doc)})")
 
@@ -1324,6 +1308,7 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
         with the CPU thread. PyMuPDF documents are NOT thread-safe.
         """
         self.logger.info("GPU Thread: Starting sequential VLM processing...")
+
         thread_doc = fitz.open(profile.pdf_path)
         self.logger.debug(f"GPU Thread: Opened separate document handle (ptr: {id(thread_doc)})")
 
@@ -1500,7 +1485,6 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                 page_num=page_idx + 1
             )
             
-            # --- SHOT 1: RAW OCR EXTRACTION ---
             self.logger.debug("Executing Shot 1: Raw OCR extraction (temp=0.05)...")
             shot1_start = time.time()
             
@@ -1538,7 +1522,6 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                     metadata={'error': 'shot1_empty', 'processing_method': 'two_shot_failed'}
                 )
             
-            # --- DEDUPLICATION: PARAGRAPH-LEVEL CLEANUP ---
             self.logger.debug("Performing paragraph-level deduplication...")
             dedup_start = time.time()
             
@@ -1550,7 +1533,6 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                 f"({len(cleaned_text)/len(raw_text)*100:.1f}% retained) in {dedup_time:.2f}s"
             )
             
-            # --- SHOT 2: STRUCTURED ANALYSIS ---
             self.logger.debug("Executing Shot 2: Structured analysis (temp=0.0)...")
             shot2_start = time.time()
             
@@ -1648,7 +1630,6 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
             shot1_params = two_shot_params.get('shot1_ocr', {})
             shot2_params = two_shot_params.get('shot2_analysis', {})
             
-            # --- SHOT 1: RAW OCR (Async) ---
             shot1_task_name = self.config['vlm_provider']['body_pages']['tier4_two_shot']['shot1_task']
             shot1_task_type = self._resolve_reference(shot1_task_name, self.config)
             
@@ -1672,12 +1653,10 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
             raw_text = shot1_wrapper.get('content', '')
             shot1_time = time.time() - start_time
             
-            # --- DEDUPLICATION (Sync) ---
             # Fast CPU op, safe to run sync in this coroutine context
             cleaned_text = self._deduplicate_paragraphs(raw_text)
             dedup_time = time.time() - (start_time + shot1_time)
             
-            # --- SHOT 2: STRUCTURED ANALYSIS (Async) ---
             shot2_start_abs = time.time()
             shot2_task_name = self.config['vlm_provider']['body_pages']['tier4_two_shot']['shot2_task']
             shot2_task_type = self._resolve_reference(shot2_task_name, self.config)
@@ -2110,7 +2089,6 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                 self.logger.info("Performing Zotero canonical lookup...")
                 zr = self.zotero_service.get_canonical_metadata(vlm_metadata)
                 zotero_record = zr.get("record", {})
-                # FIX BUG #8: Preserve confidence and source from Zotero
                 zotero_confidence = zr.get("confidence", 0.0)
                 zotero_source = zr.get("source", "unknown")
             except Exception as e:
@@ -2122,7 +2100,6 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
         # ==============================
         merged = merge_metadata(vlm_metadata, zotero_record, title_page_text)
         
-        # FIX BUG #8: Add confidence and source to merged metadata
         merged["validation_confidence"] = zotero_confidence
         merged["validation_source"] = zotero_source
 
@@ -2264,7 +2241,6 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
         suspicious_str = suspicious[0]
         self.logger.info(f"Analyzing suspicious author string: '{suspicious_str}'")
         
-        # --- Tesseract Referee ---
         bboxes = page.search_for(suspicious_str)
         if bboxes:
             bbox = bboxes[0]
