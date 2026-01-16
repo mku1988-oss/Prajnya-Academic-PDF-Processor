@@ -42,7 +42,6 @@ try:
 except ImportError:
     GEMINI_AVAILABLE = False
 
-# --- REVISED: Pydantic Models for Full YAML Compatibility ---
 
 # A flexible model for parameters: defines common ones, allows any others.
 # Three-Tier Parameter Architecture
@@ -109,6 +108,12 @@ class ModelParameters(BaseModel):
     class Config:
         extra = 'allow'
 
+class CloudConfig(BaseModel):
+    """Configuration for Cloud APIs (e.g., OpenRouter, OpenAI)."""
+    api_endpoint: str = Field(..., description="Full API endpoint URL")
+    api_key_env: str = Field(..., description="Environment variable name for API key")
+    timeout: int = Field(120, description="API timeout in seconds")
+
 class ModelProfile(BaseModel):
     """Three-Tier Model Profile with backward compatibility.
     
@@ -123,6 +128,7 @@ class ModelProfile(BaseModel):
     api_parameters: Optional[APIParameters] = Field(None, description="Tier 1: API request parameters")
     server_config: Optional[ServerConfig] = Field(None, description="Tier 2: Server configuration (documentation)")
     app_config: Optional[AppConfig] = Field(None, description="Tier 3: Application settings")
+    cloud_config: Optional[CloudConfig] = Field(None, description="Cloud API configuration (Optional)")
     
     # Legacy Support (DEPRECATED - for backward compatibility)
     parameters: Optional[ModelParameters] = Field(None, description="DEPRECATED: Use api_parameters instead")
@@ -161,7 +167,6 @@ class TaskDefinition(BaseModel):
         # Allow extra fields for task_metadata and other extensions
         extra = 'allow'
 
-# --- REVISED: Models for universal_config.yaml ---
 
 class GlobalSettings(BaseModel):
     """Global processing settings."""
@@ -270,6 +275,12 @@ class UniversalVLMProvider:
             self.logger.info(f"Overriding API endpoint: {api_endpoint}")
             
         self.model_profile = model_profile or self._load_model_profile(model_name)
+        
+        # Override endpoint from profile if it's a cloud model
+        if self.model_profile.cloud_config and not api_endpoint:
+            self.config.api_endpoint = self.model_profile.cloud_config.api_endpoint
+            self.logger.info(f"Using Cloud API endpoint: {self.config.api_endpoint}")
+
         self.task_definition = task_definition or self._load_task_definition(task_type)
 
         # Detect API type and initialize appropriate client
@@ -282,10 +293,10 @@ class UniversalVLMProvider:
         # Check if the model is actually available before finishing initialization
         # OPTIMIZATION: Allow skipping this for temporary/internal providers spawned per-page
         # Skip check for Gemini models (they don't have a local server to check)
-        if not skip_validation and self.api_type != "gemini":
+        if not skip_validation and self.api_type not in ["gemini", "openai_cloud"]:
             self._check_model_availability()
         else:
-            reason = "Gemini cloud API" if self.api_type == "gemini" else "skip_validation=True"
+            reason = self.api_type if self.api_type in ["gemini", "openai_cloud"] else "skip_validation=True"
             self.logger.info(f"Skipping model availability check ({reason})")
         
         self.logger.info(f"Universal Provider initialized and validated: {self.model_profile.model_name} -> {self.task_definition.task_name}")
@@ -319,7 +330,6 @@ class UniversalVLMProvider:
                 page_num = page_indices[i]
                 self.logger.info(f"Processing page {page_num}...")
                 
-                # --- INTEGRATION OF RETRY LOGIC ---
                 # Call the new wrapper method instead of the original one
                 raw_output = self._process_single_page_with_retry(page_image)
                 
@@ -337,7 +347,6 @@ class UniversalVLMProvider:
                     "quality_score": page_quality  # Add quality score to page results
                 })
 
-            # --- INTEGRATION OF ENHANCED AGGREGATION ---
             # Replace simple aggregation with a call to the new helper method
             aggregated_results = self._aggregate_multi_page_results(all_page_results)
 
@@ -395,7 +404,6 @@ class UniversalVLMProvider:
             self.logger.error(f"process_page failed: {e}", exc_info=True)
             return {'success': False, 'error': str(e)}
 
-    # --- HELPER METHOD: PAGE QUALITY SCORING ---
     def _calculate_page_quality_score(self, content: str, metadata: Dict[str, Any]) -> float:
         """
         Calculates a quality score (0.0-1.0) for a processed page.
@@ -420,7 +428,6 @@ class UniversalVLMProvider:
         ]
         scores['text_quality'] = sum(indicators) / len(indicators)
 
-        # --- NEW TASK-AWARE METADATA SCORING ---
         if self.task_type in ['title_page_metadata_extraction', 'structured_analysis_title_page']:
             # Check for the specific fields from the title page task
             expected_fields = ['title', 'authors', 'doi']
@@ -459,7 +466,6 @@ class UniversalVLMProvider:
             # Log breakdown for body page
             self.logger.info(f"  Metadata Fields (Body): {present_fields}/{len(expected_fields)} present")
             self.logger.info(f"  Metadata Validity (Body): {valid_fields}/{len(expected_fields)} checks passed")
-        # --- END OF NEW LOGIC ---
 
         # Final weighted score calculation (unchanged)
         weights = {'content_length': 0.3, 'structural_markers': 0.1, 'text_quality': 0.2, 'metadata_presence': 0.2, 'metadata_validity': 0.2}
@@ -471,7 +477,6 @@ class UniversalVLMProvider:
         self.logger.info(f"  → Final Quality Score: {final_score:.2f} ({final_score:.1%})")
         return final_score
 
-    # --- NEW HELPER METHOD 1: RETRY LOGIC ---
 
     def _process_single_page_with_retry(
         self, 
@@ -556,7 +561,6 @@ class UniversalVLMProvider:
         # Safeguard (should never reach here)
         raise RuntimeError("Retry loop completed unexpectedly without success or exception.")
 
-    # --- NEW HELPER METHOD 2: ENHANCED AGGREGATION ---
 
     def _aggregate_multi_page_results(self, all_page_results: List[Dict]) -> Dict[str, Any]:
         """
@@ -633,7 +637,6 @@ class UniversalVLMProvider:
             "document_structure": document_structure  # Additional analysis
         }
 
-    # --- EXISTING HELPER METHODS ---
 
     def _convert_pdf_to_images(self, pdf_path: str, pages: Optional[List[int]]) -> List[Image.Image]:
         """
@@ -739,6 +742,16 @@ class UniversalVLMProvider:
         # Original llama.cpp /v1/chat/completions processing
         base64_image = self._encode_image_to_base64(page_image)
         headers = {"Content-Type": "application/json"}
+        
+        # Inject Authorization header for Cloud APIs
+        if self.api_type == "openai_cloud":
+            api_key = self._get_cloud_api_key()
+            headers["Authorization"] = f"Bearer {api_key}"
+            # OpenRouter specific headers (optional but good practice)
+            if "openrouter" in str(self.config.api_endpoint):
+                headers["HTTP-Referer"] = "https://github.com/mku1988-oss/Prajnya-Academic-PDF-Processor"
+                headers["X-Title"] = "Shastrasaara V4"
+
         api_params = self.model_profile.get_api_params()
 
         prompt_text = effective_task.prompt
@@ -747,7 +760,6 @@ class UniversalVLMProvider:
             prompt_text = prompt_text.format(base_text=base_text)
             self.logger.info(f"Document anchoring enabled: {len(base_text)} chars base_text")
 
-        # --- THIS IS THE CORRECT LOGIC FOR /v1/chat/completions ---
         payload = {
             "model": self.model_profile.model_name,
             "messages": [
@@ -765,20 +777,23 @@ class UniversalVLMProvider:
             **api_params
         }
 
-        # === RE-ENABLED: response_format DOES WORK (confirmed via OlmOCR_run_hybrid_v2.py) ===
         # Add response_format for JSON tasks to force valid JSON output
-        # This eliminates issues with:
         # - Python boolean syntax (True/False instead of true/false)
         # - Markdown code blocks (```json ... ```)
         # - Unescaped newlines in strings
-        if (effective_task.output_format.get("type") == "json" and 
-                "schema" in effective_task.output_format):
+        #
+        # Testing shows prompt-based JSON + post-processing is faster and more reliable
+        # Cloud APIs work best with prompt engineering, not schema constraints
+        if (effective_task.output_format.get("type") == "json" and
+                "schema" in effective_task.output_format and
+                self.api_type not in ["gemini", "openai_cloud"]):
             payload['response_format'] = {
                 "type": "json_object",
                 "schema": effective_task.output_format["schema"]
             }
             self.logger.info("Requesting schema-constrained JSON via response_format")
-        # === END RE-ENABLED SECTION ===
+        elif effective_task.output_format.get("type") == "json" and self.api_type == "openai_cloud":
+            self.logger.info("Skipping response_format for cloud API - using prompt-based JSON extraction")
 
         # CRITICAL: llama.cpp build 6660+ rejects requests with BOTH response_format AND grammar.
         # This causes 400 Bad Request errors. The response_format JSON schema is sufficient
@@ -1102,16 +1117,29 @@ class UniversalVLMProvider:
 
     def _detect_api_type(self) -> str:
         """
-        Detect API type based on model profile configuration.
-
-        Returns:
-            "gemini" if model_type contains "gemini"
-            "openai_compatible" otherwise (default for llama.cpp)
+        Detects the API type based on the model configuration.
+        Returns: 'gemini', 'openai_cloud', or 'openai_local'
         """
-        model_type = getattr(self.model_profile, 'model_type', 'local')
-        if 'gemini' in model_type.lower():
+        if self.model_profile.model_type == "gemini_cloud":
             return "gemini"
-        return "openai_compatible"
+        elif self.model_profile.model_type == "cloud_api_openai":
+            return "openai_cloud"
+        else:
+            # Default to local OpenAI-compatible server (llama.cpp)
+            return "openai_local"
+
+    def _get_cloud_api_key(self) -> str:
+        """Retrieves the API key for cloud providers from environment variables."""
+        if not self.model_profile.cloud_config:
+            raise ValueError("Cloud config missing for cloud model")
+            
+        env_var_name = self.model_profile.cloud_config.api_key_env
+        api_key = os.environ.get(env_var_name)
+        
+        if not api_key:
+            raise ValueError(f"Missing API key environment variable: {env_var_name}")
+            
+        return api_key
 
     def _initialize_gemini_client(self):
         """Initialize Gemini API client with API key from environment."""
@@ -1340,7 +1368,6 @@ class UniversalVLMProvider:
         return logger
 
 
-# --- Enhanced Factory Functions for Easy and Resilient Usage ---
 
 def create_best_available_provider(task_type: str = "auto") -> UniversalVLMProvider:
     """Create the best available provider based on task and model availability."""
@@ -1375,7 +1402,6 @@ def create_current_provider(task_type: str = "basic_ocr") -> UniversalVLMProvide
     return UniversalVLMProvider("olmocr-7b", task_type)
 
 
-# --- Enhanced Backwards Compatibility Wrapper ---
 
 class HybridOlmOCRProvider(UniversalVLMProvider):
     """Backwards compatibility wrapper for existing code."""
@@ -1413,7 +1439,6 @@ if __name__ == "__main__":
     # Configure logging to see detailed output
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - [%(name)s] %(levelname)s - %(message)s')
 
-    # --- DEFINE YOUR TEST PARAMETERS HERE ---
     TEST_PDF_PATH = "path/to/your/test_document.pdf" # IMPORTANT: Change this path
     
     print("\n--- [TEST 1] ---")

@@ -5,7 +5,7 @@ Central version definition for the entire Prajnya project.
 Update this file when releasing new versions.
 """
 
-__version__ = "5.0.0"
+__version__ = "5.1.0"
 """Project version (semantic versioning: MAJOR.MINOR.PATCH)"""
 
 PIPELINE_VERSION = "v5.0.0"

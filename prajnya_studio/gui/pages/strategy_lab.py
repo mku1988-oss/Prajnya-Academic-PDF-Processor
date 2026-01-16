@@ -72,12 +72,86 @@ AVAILABLE_MODELS_LOCAL, AVAILABLE_MODELS_CLOUD = discover_vlm_models()
 AVAILABLE_MODELS = {**AVAILABLE_MODELS_LOCAL, **AVAILABLE_MODELS_CLOUD}
 
 
+# =============================================================================
+# =============================================================================
+import os
+
+def get_cloud_provider(model_id: str) -> str:
+    """Detect cloud provider from model ID."""
+    if 'openrouter' in model_id.lower():
+        return 'openrouter'
+    elif 'gemini' in model_id.lower():
+        return 'gemini'
+    else:
+        return 'unknown'
+
+def get_cloud_mode_description(model_id: str) -> str:
+    """Generate provider-specific mode description."""
+    provider = get_cloud_provider(model_id)
+    if provider == 'openrouter':
+        return (
+            '• Requires: OPENROUTER_API_KEY in .env file\n'
+            '• Cost: FREE (Nemotron 12B VL)\n'
+            '• Rate Limit: ~200 requests/minute\n'
+            '• Speed: Fast (cloud processing, no GPU needed)'
+        )
+    else:  # Gemini or unknown
+        return (
+            '• Requires: GEMINI_API_KEY in .env file\n'
+            '• Cost: ~$0.011/page (3 Pro), ~$0.001/page (Flash)\n'
+            '• Free tier: 100 pages/day\n'
+            '• Speed: Fast (cloud processing, no GPU needed)'
+        )
+
+def get_model_info_text(model_id: str) -> str:
+    """Generate provider-specific routing info."""
+    provider = get_cloud_provider(model_id)
+    if provider == 'openrouter':
+        return 'Uses Lite Router: Title→OpenRouter, Text→PyMuPDF, Visual→OpenRouter'
+    else:
+        return 'Uses Lite Router: Title→Gemini, Text→PyMuPDF, Visual→Gemini'
+
+def get_api_key_name(model_id: str) -> str:
+    """Get the API key environment variable name for the provider."""
+    provider = get_cloud_provider(model_id)
+    if provider == 'openrouter':
+        return 'OPENROUTER_API_KEY'
+    else:
+        return 'GEMINI_API_KEY'
+
+def get_default_cloud_model() -> str:
+    """Select default cloud model based on available API keys."""
+    # Prefer free OpenRouter model if key is available
+    if os.getenv('OPENROUTER_API_KEY'):
+        if 'openrouter-nemotron-v2-vl' in AVAILABLE_MODELS_CLOUD:
+            return 'openrouter-nemotron-v2-vl'
+
+    # Fall back to Gemini if key is available
+    if os.getenv('GEMINI_API_KEY'):
+        if 'gemini-3-pro' in AVAILABLE_MODELS_CLOUD:
+            return 'gemini-3-pro'
+        elif 'gemini-3-flash' in AVAILABLE_MODELS_CLOUD:
+            return 'gemini-3-flash'
+
+    # Last resort: first available cloud model
+    return list(AVAILABLE_MODELS_CLOUD.keys())[0] if AVAILABLE_MODELS_CLOUD else 'gemini-3-flash'
+
+def get_fallback_model(model_id: str) -> str:
+    """Get appropriate fallback model based on provider."""
+    provider = get_cloud_provider(model_id)
+    if provider == 'openrouter':
+        # Use same Nemotron model as fallback (no alternative OpenRouter model available)
+        return 'openrouter-nemotron-v2-vl'
+    else:
+        return 'gemini-2-5-flash'
+
+# =============================================================================
+
+
 def mount():
     """Mount the Strategy Lab Level 1 UI component."""
     state = AppState.get_instance()
 
-    # --- CSS: Force Standard Radios to match Vedic Palette ---
-    # FIX: Added specific rules for Sliders (Indigo) alongside Radios (Vermillion)
     ui.add_head_html(f'''
         <style>
             /* Radios & Checkboxes -> Vermillion (Agni) */
@@ -99,16 +173,13 @@ def mount():
         </style>
     ''')
 
-    # --- State Variables ---
     current_config = {}
     selected_preset = "balanced"
     config_loaded = False
     use_cloud_mode = False  # Cloud mode disabled by default
 
-    # --- UI Layout ---
     with ui.column().classes('w-full p-4'):
         
-        # --- Sticky Action Header ---
         with ui.row().classes('w-full items-center justify-between sticky top-0 z-50 py-4 px-6 mb-6').style(
             f'background: {theme.THEME_LIGHT["canvas"]}; '
             f'border-bottom: 2px solid {theme.THEME_LIGHT["gold"]};'
@@ -171,7 +242,7 @@ def mount():
 
                 # Cloud mode toggle switch
                 cloud_switch = ui.switch(
-                    'Use Cloud API (Gemini)',
+                    'Use Cloud API',
                     value=False
                 ).classes('text-base font-medium')
 
@@ -406,7 +477,6 @@ def mount():
                 # Radio Cards Container
                 radio_container = ui.column().classes('w-full gap-3')
 
-            # --- Logic Functions for Cards ---
 
             def render_radio_cards():
                 """Renders the radio cards based on current selection state."""
@@ -465,16 +535,59 @@ def mount():
             def on_model_change(e):
                 """Update configuration preview when model changes."""
                 nonlocal current_config
+
+                # Use model_selector.value which always has the correct model ID string
+                selected_model = model_selector.value
+
+                logger.info(f"[DEBUG] on_model_change triggered: e.args={e.args}, actual model={selected_model}")
+                logger.info(f"[DEBUG] use_cloud_mode={use_cloud_mode}, current_config exists={bool(current_config)}")
+
+                if use_cloud_mode:
+                    model_info_text.text = get_model_info_text(selected_model)
+                    mode_desc.text = get_cloud_mode_description(selected_model)
+                    # Update routing display if function exists
+                    try:
+                        update_cloud_routing_display(selected_model)
+                    except:
+                        pass  # Function may not be defined yet
+
+                try:
+                    logger.info(f"[DEBUG] Syncing primary_model_adv: current={primary_model_adv.value}, new={selected_model}")
+                    logger.info(f"[DEBUG] primary_model_adv.options: {list(primary_model_adv.options.keys()) if hasattr(primary_model_adv.options, 'keys') else 'N/A'}")
+
+                    # Also update options if needed
+                    if selected_model in AVAILABLE_MODELS_CLOUD:
+                        primary_model_adv.options = AVAILABLE_MODELS_CLOUD
+                        fallback_model_adv.options = AVAILABLE_MODELS_CLOUD
+                        logger.info(f"[DEBUG] Switched options to CLOUD")
+                    elif selected_model in AVAILABLE_MODELS_LOCAL:
+                        primary_model_adv.options = AVAILABLE_MODELS_LOCAL
+                        fallback_model_adv.options = AVAILABLE_MODELS_LOCAL
+                        logger.info(f"[DEBUG] Switched options to LOCAL")
+
+                    primary_model_adv.value = selected_model
+                    primary_model_adv.update()
+                    logger.info(f"[DEBUG] primary_model_adv.value after update: {primary_model_adv.value}")
+
+                    # Also update fallback if in cloud mode
+                    if use_cloud_mode:
+                        new_fallback = get_fallback_model(selected_model)
+                        fallback_model_adv.value = new_fallback
+                        fallback_model_adv.update()
+                        logger.info(f"[DEBUG] fallback_model_adv set to: {new_fallback}")
+                except Exception as ex:
+                    logger.error(f"[DEBUG] Failed to sync primary_model_adv: {ex}", exc_info=True)
+
                 if current_config:
                     preview_config = apply_preset_to_config(
                         current_config,
                         PRESETS[selected_preset],
-                        e.args,
+                        selected_model,
                         use_cloud_mode
                     )
                     update_config_preview(preview_config, selected_preset)
                 else:
-                    update_preset_preview(selected_preset, e.args)
+                    update_preset_preview(selected_preset, selected_model)
 
             def on_cloud_mode_toggle(e):
                 """Handle cloud mode toggle and update UI."""
@@ -484,9 +597,10 @@ def mount():
                 if e.args:  # Cloud mode ON
                     # Update available models to cloud options
                     model_selector.options = AVAILABLE_MODELS_CLOUD
-                    model_selector.value = "gemini-3-pro"
+                    default_model = get_default_cloud_model()
+                    model_selector.value = default_model
                     model_selector.update()
-                    model_info_text.text = 'Uses Lite Router: Title→Gemini, Text→PyMuPDF, Visual→Gemini'
+                    model_info_text.text = get_model_info_text(default_model)
 
                     # Update UI indicators
                     mode_badge.text = 'Cloud'
@@ -497,23 +611,32 @@ def mount():
                     mode_icon.props('class=text-blue-700')
                     mode_title.text = 'Cloud Mode'
                     mode_title.props('class=text-blue-900')
-                    
-                    mode_desc.text = (
-                        '• Requires: GEMINI_API_KEY in .env file\n'
-                        '• Cost: ~$0.011/page (Gemini 3 Pro), ~$0.001/page (2.5 Flash)\n'
-                        '• Free tier: 100 pages/day\n'
-                        '• Speed: Fast (cloud processing, no GPU needed)'
-                    )
 
+                    # Dynamic description based on default model provider
+                    mode_desc.text = get_cloud_mode_description(default_model)
+
+                    # Dynamic notification based on provider
+                    api_key_name = get_api_key_name(default_model)
                     ui.notify(
-                        'Cloud mode enabled. Ensure GEMINI_API_KEY is set in .env file',
+                        f'Cloud mode enabled. Ensure {api_key_name} is set in .env file',
                         type='info',
                         position='top',
                         timeout=3000
                     )
+                    
+                    # Phase 4.8.2: Disable Quick Settings
                     processing_mode_card.style('opacity: 0.6; pointer-events: none; filter: grayscale(0.5);')
                     cloud_banner.set_visibility(True)
+
+                    # Phase 4.8.3: Disable Advanced Settings
                     try:
+                        primary_model_adv.options = AVAILABLE_MODELS_CLOUD
+                        primary_model_adv.value = default_model
+                        primary_model_adv.update()
+                        fallback_model_adv.options = AVAILABLE_MODELS_CLOUD
+                        fallback_model_adv.value = get_fallback_model(default_model)
+                        fallback_model_adv.update()
+
                         fallback_model_adv.disable()
                         title_mode_adv.disable()
                         title_resolution_adv.disable()
@@ -521,8 +644,12 @@ def mount():
                         temperature_adv.disable()
                         max_tokens_adv.disable()
                         repeat_penalty_adv.disable()
+
+                        # Phase 4.8.4: Switch Routing Panel
                         local_routing_container.set_visibility(False)
                         cloud_routing_container.set_visibility(True)
+
+                        update_cloud_routing_display(default_model)
                     except:
                         pass # UI elements might not be initialized yet on first load
 
@@ -551,9 +678,20 @@ def mount():
                     )
 
                     ui.notify('Local mode enabled', type='info', position='top', timeout=2000)
+
+                    # Phase 4.8.2: Enable Quick Settings
                     processing_mode_card.style('opacity: 1.0; pointer-events: auto; filter: none;')
                     cloud_banner.set_visibility(False)
+
+                    # Phase 4.8.3: Enable Advanced Settings
                     try:
+                        primary_model_adv.options = AVAILABLE_MODELS_LOCAL
+                        primary_model_adv.value = "olmocr-2-7b"
+                        primary_model_adv.update()
+                        fallback_model_adv.options = AVAILABLE_MODELS_LOCAL
+                        fallback_model_adv.value = "olmocr-7b"
+                        fallback_model_adv.update()
+
                         fallback_model_adv.enable()
                         title_mode_adv.enable()
                         title_resolution_adv.enable()
@@ -561,10 +699,25 @@ def mount():
                         temperature_adv.enable()
                         max_tokens_adv.enable()
                         repeat_penalty_adv.enable()
+
+                        # Phase 4.8.4: Switch Routing Panel
                         local_routing_container.set_visibility(True)
                         cloud_routing_container.set_visibility(False)
                     except:
                         pass
+
+                # (programmatic model_selector.value change doesn't trigger on_model_change)
+                current_model = model_selector.value
+                if current_config:
+                    preview_config = apply_preset_to_config(
+                        current_config,
+                        PRESETS[selected_preset],
+                        current_model,
+                        use_cloud_mode
+                    )
+                    update_config_preview(preview_config, selected_preset)
+                else:
+                    update_preset_preview(selected_preset, current_model)
 
                 # Enable Apply button (configuration changed)
                 btn_apply.enable()
@@ -598,7 +751,6 @@ def mount():
                         quality_tab = ui.tab('Quality', icon='verified')
                         routing_tab = ui.tab('Routing', icon='route')
 
-                    # FIXED: bg-transparent prevents white block overlay on cream card
                     with ui.tab_panels(tabs, value=models_tab).classes('w-full bg-transparent'):
                         # ================================================================
                         # MODELS TAB
@@ -830,6 +982,8 @@ def mount():
                             with ui.column().classes('w-full gap-4'):
                                 ui.label('Adaptive Routing Configuration').classes('text-lg font-bold')
                                 ui.label('Enable/disable 5-tier adaptive routing system').classes('text-sm text-gray-500 mb-2')
+
+                                # Phase 4.8.4: Cloud/Local Routing Containers
                                 local_routing_container = ui.column().classes('w-full gap-4')
                                 cloud_routing_container = ui.column().classes('w-full gap-4').style(
                                     f'background: {theme.THEME_LIGHT["canvas"]}; padding: 16px; border-radius: 8px; border: 1px solid {theme.THEME_LIGHT["indigo"]};'
@@ -891,20 +1045,20 @@ def mount():
 
                                 # ================= CLOUD ROUTING (Lite Router) =================
                                 with cloud_routing_container:
-                                    ui.label('☁️ Cloud Lite Router').classes('text-lg font-bold text-blue-900')
-                                    ui.label('Optimized 3-tier routing strategy for Cloud APIs').classes('text-sm text-blue-800 mb-2')
-                                    
-                                    # Cost Efficiency Banner
-                                    with ui.row().classes('w-full p-2 bg-blue-100 rounded items-center gap-2 mb-2'):
+                                    cloud_router_title = ui.label('☁️ Cloud Lite Router').classes('text-lg font-bold text-blue-900')
+                                    cloud_router_subtitle = ui.label('Optimized 3-tier routing strategy for Cloud APIs').classes('text-sm text-blue-800 mb-2')
+
+                                    # Cost Efficiency Banner (dynamic)
+                                    with ui.row().classes('w-full p-2 bg-blue-100 rounded items-center gap-2 mb-2') as cost_banner_row:
                                         ui.icon('savings', size='sm').classes('text-blue-700')
-                                        ui.label('Estimated Cost: $0.005 / document (avg)').classes('text-sm font-bold text-blue-800')
+                                        cloud_cost_label = ui.label('Estimated Cost: $0.005 / document (avg)').classes('text-sm font-bold text-blue-800')
 
                                     # Tier A: Title Page
                                     with ui.card().classes('w-full p-3 mt-2').style('background: white; border-left: 4px solid #3b82f6;'):
                                         with ui.row().classes('w-full items-center gap-2'):
                                             ui.icon('title', size='sm').classes('text-blue-600')
                                             ui.label('Tier A: Title Page Analysis').classes('font-bold text-blue-800')
-                                        ui.label('Gemini 2.0 Flash').classes('text-sm text-gray-700 mt-1')
+                                        cloud_tier_a_model = ui.label('Cloud Vision Model').classes('text-sm text-gray-700 mt-1')
                                         ui.label('Extracts precise metadata (DOI, Title, Authors)').classes('text-xs text-gray-500')
 
                                     # Tier B: Text Content
@@ -920,10 +1074,26 @@ def mount():
                                         with ui.row().classes('w-full items-center gap-2'):
                                             ui.icon('image', size='sm').classes('text-purple-600')
                                             ui.label('Tier C: Complex/Visual Pages').classes('font-bold text-purple-800')
-                                        ui.label('Gemini 1.5 Pro').classes('text-sm text-gray-700 mt-1')
+                                        cloud_tier_c_model = ui.label('Cloud Vision Model').classes('text-sm text-gray-700 mt-1')
                                         ui.label('Deep reasoning for tables, figures, and diagrams').classes('text-xs text-gray-500')
 
-                                    ui.label('Note: Routing is handled automatically by the Cloud API.').classes('text-xs italic text-blue-800 mt-2')
+                                    cloud_router_note = ui.label('Note: Routing is handled automatically by the Cloud API.').classes('text-xs italic text-blue-800 mt-2')
+
+                                def update_cloud_routing_display(model_id: str):
+                                    """Update cloud routing container labels based on provider."""
+                                    provider = get_cloud_provider(model_id)
+                                    if provider == 'openrouter':
+                                        cloud_router_title.text = '☁️ OpenRouter Lite Router'
+                                        cloud_cost_label.text = 'Cost: FREE (Nemotron 12B VL)'
+                                        cloud_tier_a_model.text = 'NVIDIA Nemotron 12B VL'
+                                        cloud_tier_c_model.text = 'NVIDIA Nemotron 12B VL'
+                                        cloud_router_note.text = 'Note: Uses OpenRouter API with Nemotron vision model.'
+                                    else:  # Gemini
+                                        cloud_router_title.text = '☁️ Gemini Lite Router'
+                                        cloud_cost_label.text = 'Estimated Cost: $0.005 / document (avg)'
+                                        cloud_tier_a_model.text = 'Gemini 2.0 Flash'
+                                        cloud_tier_c_model.text = 'Gemini 1.5 Pro'
+                                        cloud_router_note.text = 'Note: Routing is handled automatically by the Cloud API.'
 
                                 ui.separator().classes('my-4')
 
@@ -967,7 +1137,6 @@ def mount():
                         on_click=lambda: open_yaml_editor()
                     ).props('color=orange-7 size=sm')
 
-    # --- Helper Functions (Defined AFTER mount, never inside) ---
 
     async def load_config_async():
         """Load the current strategy configuration from YAML file."""
@@ -1077,11 +1246,16 @@ def mount():
             except ValueError as reload_err:
                 # Catch configuration errors (e.g., missing API key for cloud mode)
                 error_str = str(reload_err)
-                if "GEMINI_API_KEY" in error_str:
-                    logger.error(f"❌ Cloud mode enabled but API key missing: {reload_err}")
+                if "GEMINI_API_KEY" in error_str or "OPENROUTER_API_KEY" in error_str:
+                    # Determine which key is missing based on selected model
+                    if use_cloud_mode:
+                        key_name = get_api_key_name(model_selector.value)
+                    else:
+                        key_name = "API_KEY"
+                    logger.error(f"❌ Cloud mode enabled but {key_name} missing: {reload_err}")
                     try:
                         ui.notify(
-                            'Config saved, but GEMINI_API_KEY is missing. Add it to .env file to use cloud mode.',
+                            f'Config saved, but {key_name} is missing. Add it to .env file to use cloud mode.',
                             type='warning',
                             icon='cloud_off',
                             timeout=5000
@@ -1115,9 +1289,7 @@ def mount():
                 pass
             logger.info(f"✅ Successfully applied preset '{preset_key}' with model '{model}'")
 
-            # ---------------------------------------------------------
             # Router Mode Integration (Phase 5.5)
-            # ---------------------------------------------------------
             # If server manager is available, switch the active model immediately
             state = AppState.get_instance()
             if state.server_manager and not use_cloud_mode:
@@ -1391,8 +1563,27 @@ def mount():
         """Update ONLY Advanced Settings panel from config (doesn't touch Quick Settings)."""
         try:
             # Models Tab
-            primary_model_adv.value = config.get('profile_registry', {}).get('default', 'olmocr-2-7b')
-            fallback_model_adv.value = config.get('profile_registry', {}).get('fallback', 'olmocr-7b')
+            profile = config.get('profile_registry', {}).get('default', 'olmocr-2-7b')
+            fallback = config.get('profile_registry', {}).get('fallback', 'olmocr-7b')
+
+            logger.info(f"[DEBUG] update_advanced_settings: profile={profile}, fallback={fallback}")
+            logger.info(f"[DEBUG] primary_model_adv.options before: {list(primary_model_adv.options.keys()) if hasattr(primary_model_adv.options, 'keys') else primary_model_adv.options}")
+
+            is_cloud_profile = profile in AVAILABLE_MODELS_CLOUD
+            if is_cloud_profile:
+                primary_model_adv.options = AVAILABLE_MODELS_CLOUD
+                fallback_model_adv.options = AVAILABLE_MODELS_CLOUD
+                logger.info(f"[DEBUG] Switched advanced settings options to CLOUD")
+            else:
+                primary_model_adv.options = AVAILABLE_MODELS_LOCAL
+                fallback_model_adv.options = AVAILABLE_MODELS_LOCAL
+                logger.info(f"[DEBUG] Switched advanced settings options to LOCAL")
+
+            primary_model_adv.value = profile
+            primary_model_adv.update()
+            fallback_model_adv.value = fallback
+            fallback_model_adv.update()
+            logger.info(f"[DEBUG] primary_model_adv.value set to: {primary_model_adv.value}")
 
             # Processing Tab
             vlm_provider = config.get('vlm_provider', {})
@@ -1489,8 +1680,25 @@ def mount():
 
             # Update model selector (Quick Settings)
             profile = config.get('profile_registry', {}).get('default', 'olmocr-2-7b')
+            logger.info(f"[DEBUG] Config default profile: {profile}")
+            logger.info(f"[DEBUG] Current use_cloud_mode: {use_cloud_mode}")
+            logger.info(f"[DEBUG] model_selector.options before: {list(model_selector.options.keys()) if hasattr(model_selector.options, 'keys') else model_selector.options}")
+
+            is_cloud_profile = profile in AVAILABLE_MODELS_CLOUD
+            logger.info(f"[DEBUG] Profile '{profile}' is_cloud_profile: {is_cloud_profile}")
+
+            if is_cloud_profile:
+                # Switch to cloud mode if not already
+                model_selector.options = AVAILABLE_MODELS_CLOUD
+                logger.info(f"[DEBUG] Switched model_selector.options to CLOUD models")
+            else:
+                model_selector.options = AVAILABLE_MODELS_LOCAL
+                logger.info(f"[DEBUG] Switched model_selector.options to LOCAL models")
+
             model_selector.value = profile
-            
+            model_selector.update()
+            logger.info(f"[DEBUG] model_selector.value set to: {model_selector.value}")
+
             # Update Server Path Input
             server_exe = config.get('vlm_provider', {}).get('local_server', {}).get('server_executable', '')
             if server_exe:
@@ -1501,6 +1709,7 @@ def mount():
 
             # Update preview
             update_config_preview(config, detected_preset or "custom")
+            logger.info(f"[DEBUG] update_ui_from_config completed")
 
         except Exception as e:
             logger.warning(f"Failed to update UI from config: {e}")
@@ -1892,10 +2101,10 @@ def apply_preset_to_config(
         updated_config['profile_registry']['default'] = model
 
         if use_cloud:
-            # Cloud mode: Use Gemini models
-            updated_config['profile_registry']['fallback'] = "gemini-2-5-flash"
+            fallback = get_fallback_model(model)
+            updated_config['profile_registry']['fallback'] = fallback
             updated_config['profile_registry']['title_detection'] = model
-            logger.info(f"Cloud mode enabled: default={model}, fallback=gemini-2-5-flash")
+            logger.info(f"Cloud mode enabled: default={model}, fallback={fallback}")
         else:
             # Local mode: Use local VLM models
             updated_config['profile_registry']['fallback'] = "olmocr-7b"

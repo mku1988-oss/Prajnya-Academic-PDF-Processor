@@ -222,7 +222,11 @@ Unlike academic demos (Marker, Nougat), Prajnya is **production-grade** infrastr
     # Option 1: Google Gemini (Recommended)
     GEMINI_API_KEY=AIzaSy...
     
-    # Option 2: Local VLM (Privacy-first)
+    # Option 2: OpenAI-Compatible Cloud (OpenRouter / OpenAI)
+    OPENROUTER_API_KEY=sk-or-...
+    OPENAI_API_KEY=sk-...
+
+    # Option 3: Local VLM (Privacy-first)
     LOCAL_VLM_SERVER=http://localhost:8080/v1/chat/completions
     ```
 

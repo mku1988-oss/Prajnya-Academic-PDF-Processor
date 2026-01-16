@@ -152,9 +152,9 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
             api_endpoint=self.api_endpoint
         )
         
-        # Detect if we are using a Cloud API (e.g., Gemini) to enable the simplified
+        # Detect if we are using a Cloud API (e.g., Gemini, OpenRouter) to enable the simplified
         # "Early Branching" pipeline, bypassing the complex 5-Tier local router.
-        self.use_cloud_pipeline = self.body_vlm_profile.get('model_type') == 'cloud_api_gemini'
+        self.use_cloud_pipeline = self.body_vlm_profile.get('model_type') in ['cloud_api_gemini', 'cloud_api_openai']
         if self.use_cloud_pipeline:
             self.logger.info("Cloud API Profile Detected: Enabling Simplified Hybrid Pipeline (Lite Router)")
         
@@ -246,6 +246,25 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                 else:
                      # Fallback to standard extraction if TOML parsing failed
                      bibliographic_metadata = self._extract_metadata_from_page1(title_page, profile.pdf_path)
+
+                # Same enrichment as local pipeline - uses Zotero to fill missing DOI, etc.
+                try:
+                    page_obj = profile.pdf_doc.load_page(profile.title_page_index)
+                    title_page_raw_text = page_obj.get_text("text") or ""
+                except Exception:
+                    title_page_raw_text = ""
+
+                if not title_page_raw_text.strip() and title_page:
+                    self.logger.info("PyMuPDF text empty (scanned doc?), using VLM extracted text as referee.")
+                    title_page_raw_text = title_page.content or ""
+
+                # Enrich and merge metadata using cache + Zotero + referee text
+                bibliographic_metadata = self._enrich_metadata_with_cache_and_zotero(
+                    vlm_metadata=bibliographic_metadata,
+                    pdf_path=profile.pdf_path,
+                    title_page_text=title_page_raw_text,
+                    profile=profile
+                )
 
                 # 3. Body Pages (Lite Router)
                 if test_pages_override:
