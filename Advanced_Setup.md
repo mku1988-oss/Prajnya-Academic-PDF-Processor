@@ -1,10 +1,70 @@
 # Advanced Setup & Configuration Guide
 
-> **This guide covers advanced deployment scenarios including Local VLM (Privacy-First), Zotero Integration (Triple-Referee Verification), and Performance Tuning.**
+> **This guide covers advanced deployment scenarios including OpenRouter Cloud API, Local VLM (Privacy-First), Zotero Integration (Triple-Referee Verification), and Performance Tuning.**
 
 ---
 
-## 1. Local VLM Deployment (Privacy-First)
+## 1. OpenRouter Cloud API (NEW in v5.1.0)
+
+**OpenRouter** provides access to 100+ AI models through a unified API, including FREE tier models perfect for document processing.
+
+### Why OpenRouter?
+
+- **FREE Models**: NVIDIA Nemotron 12B VL, Meta Llama 3.2 Vision - zero cost
+- **100+ Models**: Access GPT-4o, Claude, Gemini, and open-source models via single API
+- **No Vendor Lock-in**: Switch models with 1 line of YAML
+- **Pay-as-you-go**: No subscriptions, only pay for what you use
+
+### Step 1: Get Your API Key
+
+1. Visit [OpenRouter.ai](https://openrouter.ai) and create an account
+2. Go to **Keys** → **Create Key**
+3. Copy your API key (starts with `sk-or-v1-`)
+
+### Step 2: Configure Environment
+
+Add to your `.env` file:
+
+```env
+OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+### Step 3: Select a Model Profile
+
+Prajnya includes pre-configured OpenRouter profiles:
+
+| Profile | Model | Cost | Best For |
+| :--- | :--- | :--- | :--- |
+| `openrouter-nemotron-v2-vl.yaml` | **NVIDIA Nemotron 12B VL** | **FREE** | General document processing |
+| `openrouter-llama-vision.yaml` | **Meta Llama 3.2 11B** | **FREE** | Fast extraction |
+
+**Use in Strategy Lab (GUI)**:
+1. Open Prajnya Studio
+2. Go to **Strategy Lab** → **VLM Configuration**
+3. Select the OpenRouter profile from dropdown
+
+**Use via CLI**:
+```bash
+python run_Prajnya.py --pdf "paper.pdf" --profile "src/processing/strategies/config/vlm_profiles/openrouter-nemotron-v2-vl.yaml"
+```
+
+### Step 4: Verify Connection
+
+Test your setup:
+```bash
+python -c "from src.llm.providers.universal_vlm_provider import UniversalVLMProvider; print('OpenRouter ready!')"
+```
+
+### Recommended FREE Models for Document Processing
+
+| Model | Strengths | OpenRouter ID |
+| :--- | :--- | :--- |
+| **NVIDIA Nemotron 12B VL** | Vision + Reasoning, CoT capable | `nvidia/nemotron-nano-12b-v2-vl:free` |
+| **Meta Llama 3.2 11B Vision** | Fast, reliable extraction | `meta-llama/llama-3.2-11b-vision-instruct:free` |
+
+---
+
+## 2. Local VLM Deployment (Privacy-First)
 
 For **100% privacy** and zero API costs, deploy local Vision Language Models using llama.cpp.
 
@@ -161,7 +221,7 @@ python run_Prajnya.py --pdf test_paper.pdf --preset balanced
 
 ---
 
-## 2. Zotero Integration (Triple-Referee)
+## 3. Zotero Integration (Triple-Referee)
 
 Enable **triple-referee metadata validation** by connecting Prajnya to your Zotero library.
 
@@ -224,7 +284,7 @@ zotero:
 
 ---
 
-## 3. Troubleshooting
+## 4. Troubleshooting
 
 ### llama.cpp Server Issues
 
@@ -246,7 +306,7 @@ zotero:
 
 ---
 
-## 4. Performance Tuning
+## 5. Performance Tuning
 
 ### llama.cpp GPU Layers
 

@@ -48,6 +48,13 @@ Tier 5 fallback OCR engine for scanned documents and corrupted text layers.
 
 ## Vision Language Models & AI
 
+**[OpenRouter](https://openrouter.ai/)** by OpenRouter Inc.
+*Unified API for 100+ AI models*
+Our recommended cloud provider offering access to GPT-4o, Claude, Gemini, Llama, and many open-source models through a single API. Features FREE tier models perfect for document processing.
+- Website: https://openrouter.ai/
+- Documentation: https://openrouter.ai/docs
+- **NEW in v5.1.0**: Primary cloud integration with free NVIDIA Nemotron 12B VL support
+
 **[Google Gemini API](https://ai.google.dev/)** by Google DeepMind
 *Multimodal AI models (Gemini 2.0 Flash, Gemini 2.5 Pro)*
 Cloud VLM provider for fast, accurate document analysis. Powers our hybrid cloud pipeline option.
@@ -56,7 +63,7 @@ Cloud VLM provider for fast, accurate document analysis. Powers our hybrid cloud
 
 **[OpenAI Vision API](https://platform.openai.com/)** by OpenAI
 *GPT-4o, GPT-4-Vision models*
-Alternative cloud VLM provider for highest-quality reasoning on complex layouts.
+Alternative cloud VLM provider for highest-quality reasoning on complex layouts. Accessible directly or via OpenRouter.
 - Documentation: https://platform.openai.com/docs/guides/vision
 - Python SDK: [openai](https://pypi.org/project/openai/)
 
