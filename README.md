@@ -20,7 +20,8 @@ you configure yourself.
 - [What's new in V6](#whats-new-in-v6)
 - [Requirements](#requirements) · [Installation](#installation) · [Quick start](#quick-start)
 - [Two front ends](#two-front-ends-one-pipeline) · [Prajnya Studio](#prajnya-studio--the-eight-screens) · [The CLI](#the-cli) · [Recipes](#recipes)
-- [Books](#books-cost-hours-so-they-are-asked-about) · [Metadata review](#metadata-review) · [What you get](#what-you-get)
+- [Books](#books-cost-hours-so-they-are-asked-about) · [Metadata review](#metadata-review)
+- [What you get](#what-you-get) · [Figures](#figures--the-manifest) · [Tables](#tables--crop-and-structure)
 - [Performance](#performance) · [How it works](#how-it-works) · [Design principles](#design-principles)
 - [Configuration](#configuration) · [Troubleshooting](#troubleshooting) · [Running notes](#running-notes)
 - [Testing](#testing) · [Relationship to v5.x](#relationship-to-v5x) · [Licence](#licence)
@@ -49,6 +50,41 @@ layout, then decides the **minimum** set of VLM calls. Vision is used only where
 vision is genuinely required — which is why a book, mostly plain prose, is
 *cheaper per page* than a dense paper.
 
+### Figures and tables become retrievable objects
+
+This is the upgrade with the longest reach. V6 does not merely *notice* that a
+page has a figure — it **crops it, captions it, gives it a stable identity, and
+groups its panels under the printed label a human would cite**. The same is true
+of tables, which additionally carry a reconstructed grid.
+
+The result is that every figure and table leaves the pipeline as an addressable
+object with its text attached, which is precisely what a **downstream
+multimodal RAG** needs: an image it can embed, a caption it can index, and a
+page and label that let an answer cite *"Figure 4 of Smith et al."* rather than
+"somewhere in this PDF".
+
+| | measured on the 485-page corpus |
+|---|---|
+| figure crops extracted | **107** |
+| carrying their printed label (`Fig. 1`, `Figure 4b`, …) | **95 — 89%** |
+| crops that are panels of one printed figure | **26**, resolved into **12** figures |
+| distinct printed figures after grouping | **81** |
+| table crops, each with a reconstructed grid | **31** |
+| crops referenced by a manifest but missing on disk | **0** |
+
+Grouping matters more than it sounds. A multi-panel figure is detected as
+several separate boxes, so without it "Figure 11" arrives as three unrelated
+images and a retriever has no idea they are one exhibit. V6 reads the caption
+line from the text layer and gives every crop of one printed figure the same
+`label_key`.
+
+**Figure content is deliberately not described at parse time.** Captioning every
+figure with a VLM during extraction is work spent on figures nobody asks about.
+The crop, its caption, and the surrounding discussion are enough context to
+*retrieve* it; interpreting the image belongs to the multimodal model at query
+time, on the subset actually asked for. That is a design decision, not a gap —
+see [What you get](#what-you-get) for the exact records this produces.
+
 ### New capabilities
 
 - **Prajnya Studio, rebuilt** — eight screens including a **results viewer**,
@@ -66,8 +102,6 @@ vision is genuinely required — which is why a book, mostly plain prose, is
   Renaming a PDF does not create a duplicate.
 - **Strategy Lab** — change which model does which job, from the interface,
   with a diff before every save and a **Restore Defaults** that always works.
-- **Figures are grouped by their printed label**, so the three crops of
-  "Figure 4" arrive as one figure rather than three.
 
 ### Correctness work you would not otherwise see
 
@@ -418,8 +452,56 @@ Each document JSON:
 `glm_fullpage` (a VLM read), `glm_repair` (a table crop re-read),
 `two_shot_title_page`.
 
-Figure crops carry a `manifest.json` naming each one and its caption, which is
-what links a cropped figure back to the text that discusses it.
+### Figures — the manifest
+
+Every document's figure directory carries a `manifest.json`. This is the record
+a retrieval layer indexes:
+
+```jsonc
+{
+  "document": "An_NMR_method_to_characterize_multiple_water_compartments…",
+  "figure_count": 5,
+  "figures": [
+    {
+      "figure_id": "p2_fig1",          // stable within the document
+      "image_path": "figures/<document>/p2_fig1.png",   // relative to the run root
+      "caption":  "Fig. 1. T1 analysis of a saturation recovery curve …",
+      "page": 2,                        // 1-based, as printed in the PDF
+      "bbox": [1376, 2190, 2342, 2870], // pixels, at the detection DPI
+      "printed_label": "Fig. 1",        // what a human would cite
+      "label_key": "figure 1",          // normalised — panels of one figure share it
+      "panel_group_size": 1             // >1 when this crop is one panel of several
+    }
+  ]
+}
+```
+
+**Every path is relative to the run root, never absolute.** The whole output
+tree can be moved or copied to another machine and every crop still resolves —
+verified by moving a completed run and re-checking all 107 references.
+
+### Tables — crop *and* structure
+
+A table is extracted twice over: as an image, and as a reconstructed grid.
+
+```jsonc
+{
+  "table_id": "p4_tab1",
+  "image_path": "tables/<document>/p4_tab1.png",
+  "caption": "Table 1 Multi-segment or zonal fast exchange equations …",
+  "page": 4,
+  "bbox": [1298, 303, 2384, 820],
+  "grid": "<table>…</table>"     // machine-readable structure
+}
+```
+
+The crop preserves what the table *looks* like; the grid makes its numbers
+queryable. A retrieval layer can index the grid's text and still hand the
+original image to a multimodal model when the layout itself carries meaning.
+
+Where a page's text layer produced a table that came out mangled, that one crop
+is re-read by the VLM (`glm_repair`) rather than the whole page — 3.1% of pages
+on the corpus, against re-reading everything.
 
 ---
 
