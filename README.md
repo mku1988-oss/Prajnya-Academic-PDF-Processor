@@ -453,7 +453,7 @@ Grep the log for `openrouter` (must be 0 hits) and `localhost:8080` (must be
 repository, where it is run before anything ships:
 
 ```bash
-python -m pytest tests/ -q          # 1313 tests, no GPU needed
+python -m pytest tests/ -q          # 1316 tests, no GPU needed
 
 # The parity gate against a fresh run
 python -m pytest tests/test_parity_nmr.py -v \
