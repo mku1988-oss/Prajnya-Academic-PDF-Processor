@@ -1,17 +1,37 @@
-# Shastrasaara V6
+# Prajnya: The Reference Architecture for Academic RAG
 
-Offline academic-PDF processing for literature review: text, tables and figures
-extracted into a structured, RAG-ready form — running entirely on a single 8GB GPU.
+> **"Don't compromise between Speed, Quality, and Privacy. Prajnya is the Intelligent Broker that negotiates all three on a per-page basis."**
 
-**Status: working end to end, and measured.** On a 9-document, 485-page corpus
-it produced **0 failures, 107 figures and 31 tables**, with **61.9% of all pages
-never reaching the GPU** at all. The same corpus has been run twice — once from
-the command line and once through the graphical interface — with **identical
-output, document for document, and zero metadata differences**.
+![Status](https://img.shields.io/badge/Status-Production%20Ready-green?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.0.0-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge) ![Tests](https://img.shields.io/badge/Tests-1316%20passing-green?style=for-the-badge)
 
-Everything here runs **offline**. No page, no title and no citation is sent
-anywhere; the only network call the pipeline makes is an optional Zotero lookup
-you configure yourself.
+---
+
+## What is Prajnya?
+
+Prajnya is a **Modular Document Intelligence Engine** built for high-precision
+**RAG (Retrieval-Augmented Generation)** pipelines. It turns academic PDFs into
+rigorous structured JSON — text, metadata, tables and figures — rather than the
+flat text a generic parser produces, so that what reaches your vector database
+is verified, structured and semantically rich.
+
+**V6 is a rewrite of the engine.** Same purpose, same output philosophy, an
+entirely new routing core: a cheap CPU pre-pass now decides the *minimum* set of
+model calls, and **61.9% of pages never reach the GPU at all**. On a 9-document,
+485-page corpus it produced **0 failures, 107 figures and 31 tables**, and the
+8-page benchmark fell from **413s to 194s**.
+
+The same corpus has been run twice — once from the command line, once through
+the graphical interface — with **identical output, document for document, and
+zero metadata differences**.
+
+Everything runs **offline**. No page, no title and no citation leaves your
+machine; the only network call is an optional Zotero lookup you configure
+yourself.
+
+> **A note on names.** **Prajnya** is the product. **Shastrasaara** is the
+> engine's internal codename — you will see it in the source tree, in the
+> `SARA_*` environment variables, and as the suggested conda environment name.
+> **Prajnya Studio** is the graphical interface. They are one project.
 
 ---
 
@@ -24,7 +44,8 @@ you configure yourself.
 - [What you get](#what-you-get) · [Figures](#figures--the-manifest) · [Tables](#tables--crop-and-structure)
 - [Performance](#performance) · [How it works](#how-it-works) · [Design principles](#design-principles)
 - [Configuration](#configuration) · [Troubleshooting](#troubleshooting) · [Running notes](#running-notes)
-- [Testing](#testing) · [Relationship to v5.x](#relationship-to-v5x) · [Licence](#licence)
+- [Testing](#testing) · [Competitive landscape](#competitive-landscape) · [Roadmap](#roadmap)
+- [Citation](#citation) · [Acknowledgments](#acknowledgments) · [Relationship to v5.x](#relationship-to-v5x) · [Licence](#licence)
 
 ---
 
@@ -120,7 +141,27 @@ see [What you get](#what-you-get) for the exact records this produces.
 
 V6 ships only **OSI-permissive** components. PyMuPDF (AGPL-3.0) is no longer on
 the shipping path, and DocLayout-YOLO (AGPL-3.0, via Ultralytics) was dropped
-in favour of PP-DocLayoutV3 (Apache-2.0). See [Licence](#licence).
+in favour of PP-DocLayoutV3 (Apache-2.0). **The project licence is now
+Apache-2.0.** See [Licence](#licence).
+
+### What carried over unchanged
+
+The things v5.x got right are still here, and still the reason to use this over
+a generic parser:
+
+- **"Trust, but verify" — the golden record.** Metadata is not taken from one
+  source and believed. A VLM reading, the raw text layer, and an authority
+  (Zotero, by DOI) are reconciled, and the result carries a
+  `validation_source` and a `validation_confidence` saying how well they
+  agreed. Bad metadata is bad RAG, caught at the source.
+- **Sovereign intelligence.** No model name appears anywhere in `src/`. Roles
+  are bound to models in YAML, so switching between a local model and a cloud
+  one is a configuration change — see [Configuration](#configuration).
+- **Surgical precision.** A chart is cropped and sent as a high-resolution
+  patch rather than shrinking a whole 2000×3000 page into a model's context.
+- **Atomic state.** The ledger is written `.csv.tmp` → `.csv`, keyed by
+  SHA-256, so an interrupted batch loses nothing and a renamed file is not
+  reprocessed.
 
 ---
 
@@ -766,6 +807,79 @@ needs the benchmark PDF and a live llama-server, several tests read the sample
 corpus, and the deployment tests import `tools/`, which a release also does not
 contain. Shipping a suite that fails on a clean clone says less about the
 project's quality than not shipping one.
+
+---
+
+## Competitive landscape
+
+Rather than score other projects on features they may not aim at, here is what
+Prajnya does that a document parser generally does not — each one measured on
+the corpus above, not asserted:
+
+| | Prajnya V6 |
+|---|---|
+| **Per-page cost routing** | a CPU pre-pass decides the cheapest capable reader for each page; **61.9% of pages never reach the GPU** |
+| **Metadata verification** | reconciles a model reading, the text layer and an authority (Zotero by DOI), and records `validation_source` and `validation_confidence` |
+| **Figures as retrievable objects** | 107 crops, **89% carrying their printed label**, multi-panel figures grouped under one label |
+| **Tables twice over** | the crop *and* a reconstructed grid, so the numbers are queryable and the layout is still inspectable |
+| **Books and edited volumes** | front matter, a parsed contents page, and **per-chapter authorship** — a passage cites its chapter's authors, not the editors' |
+| **Operational state** | an atomic SHA-256 ledger, resumable batches, and a review queue for anything incomplete |
+| **Privacy** | fully local; the cloud path exists but is opt-in and off |
+
+The trade Prajnya makes deliberately: it is **not the fastest per page**. Tools
+that read every page with one model can be quicker on a short, clean paper.
+Prajnya optimises for what a RAG pipeline actually inherits — verified metadata,
+addressable assets, and a cost that does not scale linearly with page count.
+
+---
+
+## Roadmap
+
+v5.x's roadmap named three things for the next phase. Two have landed:
+
+- ✅ **A faster layout engine** — delivered, though not as planned. The
+  Dolphin-V2 experiment was measured and **rejected** (it bought no speed); the
+  win came instead from an Apache-2.0 **CPU ONNX detector**, replacing a VLM
+  that had been holding VRAM.
+- ✅ **An asset ledger for extracted images** — delivered as the figure and
+  table manifests, with printed labels, panel grouping and page anchoring.
+- 🔜 **Multimodal RAG — "search by chart".** Not built here, and deliberately
+  so: this repository's job is to produce retrievable, addressable assets. The
+  vector-DB ingestion and query-time interpretation belong to the layer above,
+  and the output format is shaped to make that layer easy to write.
+
+Also open: caption capture is the weakest link in the figure path (89% of crops
+carry a printed label; the rest have no label text anywhere on the page), and
+the book pipeline is measured against one publisher's layout conventions.
+
+---
+
+## Citation
+
+If you use Prajnya in your research, please cite:
+
+```bibtex
+@software{prajnya2026,
+  title   = {Prajnya: Reference Architecture for Academic RAG Pipelines},
+  author  = {Manu Unni},
+  year    = {2026},
+  version = {6.0.0},
+  url     = {https://github.com/mku1988-oss/Prajnya-Academic-PDF-Processor}
+}
+```
+
+---
+
+## Acknowledgments
+
+Prajnya stands on the shoulders of giants, and V6's licence rule means every one
+of them is permissively licensed. Full attributions are in [`NOTICE`](NOTICE).
+
+- **Serving**: [llama.cpp](https://github.com/ggml-org/llama.cpp) · **Interface**: [NiceGUI](https://github.com/zauberzeug/nicegui)
+- **PDF & imaging**: [pypdfium2 / PDFium](https://github.com/pypdfium2-team/pypdfium2) · [Pillow](https://github.com/python-pillow/Pillow) · [OpenCV](https://opencv.org/) · [NumPy](https://numpy.org/)
+- **Layout**: [PP-DocLayoutV3](https://github.com/PaddlePaddle/PaddleX) (Apache-2.0) via [onnxruntime](https://onnxruntime.ai/)
+- **Reading**: [GLM-OCR](https://huggingface.co/zai-org) · [AllenAI olmOCR-2](https://huggingface.co/allenai/olmOCR-2-7B-1025) · [DeepSeek-OCR](https://huggingface.co/deepseek-ai)
+- **Metadata**: [Zotero](https://www.zotero.org/) via [pyzotero](https://github.com/urschrei/pyzotero)
 
 ---
 

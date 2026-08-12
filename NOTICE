@@ -1,5 +1,6 @@
-Shastrasaara V6
-Copyright 2026 Shastrasaara contributors
+Prajnya — The Reference Architecture for Academic RAG
+Version 6.0.0 (engine codename: Shastrasaara)
+Copyright 2026 Prajnya contributors
 
 This product includes software and models developed by third parties.
 All components listed below are OSI-permissive (Apache-2.0 / MIT / BSD), per the
@@ -55,7 +56,7 @@ PyMuPDF (fitz)  -- NOT A DEPENDENCY OF THIS PRODUCT
   Copyright (c) Artifex Software, Inc.
   Licensed under AGPL-3.0, or a commercial licence from Artifex.
 
-  RESOLVED 2026-08-05: Shastrasaara ships under Apache-2.0. Distributing
+  RESOLVED 2026-08-05: Prajnya ships under Apache-2.0. Distributing
   Apache-2.0 code combined with an AGPL library would relicense the whole
   product as AGPL, so PyMuPDF is NOT a dependency of this product and is
   deliberately absent from requirements.txt.
