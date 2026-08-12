@@ -3,18 +3,152 @@
 Offline academic-PDF processing for literature review: text, tables and figures
 extracted into a structured, RAG-ready form — running entirely on a single 8GB GPU.
 
-**Status: working end to end.** Measured on a 9-document, 485-page corpus:
-**48.9 minutes, 0 failures**, with **58.6% of all pages never reaching the GPU**.
-The 8-page benchmark runs in **160s against V5's 410s** and passes the parity
-gate at 36/38 (see [Performance](#performance)).
+**Status: working end to end, and measured.** On a 9-document, 485-page corpus
+it produced **0 failures, 107 figures and 31 tables**, with **61.9% of all pages
+never reaching the GPU** at all. The same corpus has been run twice — once from
+the command line and once through the graphical interface — with **identical
+output, document for document, and zero metadata differences**.
+
+Everything here runs **offline**. No page, no title and no citation is sent
+anywhere; the only network call the pipeline makes is an optional Zotero lookup
+you configure yourself.
 
 ---
 
 ## Contents
 
-- [Quick start](#quick-start) · [The CLI](#the-cli) · [Recipes](#recipes)
-- [Books](#books-cost-hours-so-they-are-asked-about) · [Metadata review](#metadata-review)
-- [Output](#what-you-get) · [Performance](#performance) · [Testing](#testing)
+- [What's new in V6](#whats-new-in-v6)
+- [Requirements](#requirements) · [Installation](#installation) · [Quick start](#quick-start)
+- [Two front ends](#two-front-ends-one-pipeline) · [Prajnya Studio](#prajnya-studio--the-eight-screens) · [The CLI](#the-cli) · [Recipes](#recipes)
+- [Books](#books-cost-hours-so-they-are-asked-about) · [Metadata review](#metadata-review) · [What you get](#what-you-get)
+- [Performance](#performance) · [How it works](#how-it-works) · [Design principles](#design-principles)
+- [Configuration](#configuration) · [Troubleshooting](#troubleshooting) · [Running notes](#running-notes)
+- [Testing](#testing) · [Relationship to v5.x](#relationship-to-v5x) · [Licence](#licence)
+
+---
+
+## What's new in V6
+
+V6 is a rewrite, not an increment. The previous release (v5.x) had adopted
+better OCR models and become **slower** — because on a single 8GB GPU, wall
+time is simply total GPU compute, and each better model added compute rather
+than removing it. V6 starts from the opposite premise: **the only real lever is
+not making the model call at all.**
+
+### The engine
+
+| | v5.x | **V6** |
+|---|---|---|
+| 8-page benchmark | 413s | **194s** |
+| how pages are read | every page to the VLM | **61.9% never reach the GPU** |
+| layout detection | a second VLM held in VRAM | **a 131 MB CPU ONNX model** |
+| a 345-page book | not supported in practice | **345 pages in 23.5 min**, 4.1s/page |
+
+A cheap CPU pre-pass reads the text layer, classifies each page and detects
+layout, then decides the **minimum** set of VLM calls. Vision is used only where
+vision is genuinely required — which is why a book, mostly plain prose, is
+*cheaper per page* than a dense paper.
+
+### New capabilities
+
+- **Prajnya Studio, rebuilt** — eight screens including a **results viewer**,
+  which v5.x did not have at all: 107 figures and 31 tables were extracted and
+  then invisible. Also new: a review queue, a book chapter map, and a **dark
+  theme** (v5.x offered the menu item but it changed nothing).
+- **Books are first-class.** Front matter, a parsed contents page, per-chapter
+  authorship, and chapter-scoped reading. A passage from page 178 of an edited
+  volume cites *that chapter's* authors, not the editors'.
+- **Documents are classified before anything is processed**, and routed to a
+  research-article, book, or book-chapter pipeline. A whole folder is
+  pre-flighted on the CPU first, so a 345-page volume hiding in a batch is
+  visible while it still costs nothing.
+- **A permanent ledger**, keyed by file SHA-256, with a metadata review flow.
+  Renaming a PDF does not create a duplicate.
+- **Strategy Lab** — change which model does which job, from the interface,
+  with a diff before every save and a **Restore Defaults** that always works.
+- **Figures are grouped by their printed label**, so the three crops of
+  "Figure 4" arrive as one figure rather than three.
+
+### Correctness work you would not otherwise see
+
+- **Every figure on a page containing equations used to be silently discarded**
+  — a classification rule returned before the visual scan ran. Fixing it
+  recovered **+22% more figures** across the corpus (88 → 107). Nothing had
+  failed; `figure_count: 0` simply looked like an honest answer.
+- **A reference list draws a box around every "CrossRef" link**, and clustered
+  those look exactly like a figure. Measured word-density separates them
+  cleanly (decoration 51–72% coverage, real figures 0–8%), so bibliography
+  pages no longer go to the GPU.
+- **`--force` now genuinely re-derives metadata** instead of re-reading every
+  page and then returning the value the first run had cached.
+
+### Licensing
+
+V6 ships only **OSI-permissive** components. PyMuPDF (AGPL-3.0) is no longer on
+the shipping path, and DocLayout-YOLO (AGPL-3.0, via Ultralytics) was dropped
+in favour of PP-DocLayoutV3 (Apache-2.0). See [Licence](#licence).
+
+---
+
+## Requirements
+
+| | |
+|---|---|
+| **OS** | Windows 10/11 or Linux. Developed and measured on Windows 11. |
+| **Python** | **3.10** — pinned. Both entrypoints refuse to start on anything else, for a reason worth reading in [The Python environment](#the-python-environment). |
+| **GPU** | An **8 GB** NVIDIA card is enough, and is what every number here was measured on. More VRAM lets you run larger models; see [Configuration](#configuration). |
+| **[llama.cpp](https://github.com/ggml-org/llama.cpp)** | `llama-server`, built with your GPU backend. Not bundled — it is a separate project with its own build. |
+| **Disk** | **~13 GB** of model weights (measured: 12.7 GB of GGUF pairs + a 131 MB layout model), plus your output. |
+
+A CPU-only machine will run the pre-flight scan, the ledger, and every screen of
+the interface, but cannot process pages.
+
+---
+
+## Installation
+
+**1. Get the code and the Python environment.**
+
+```bash
+git clone https://github.com/mku1988-oss/Prajnya-Academic-PDF-Processor.git
+cd Prajnya-Academic-PDF-Processor
+
+conda create -n shastrasaara python=3.10
+conda activate shastrasaara
+pip install -r requirements.txt
+```
+
+**2. Download the models.** Weights are not in the repository — they are tens of
+gigabytes. [`models/README.md`](models/README.md) lists every file, its licence,
+and where to put it. The short version: one `curl` for the 131 MB layout model,
+and three `model`/`mmproj` GGUF pairs (6 files, 12.7 GB) into `models/<vendor>/`.
+
+| model | role | licence |
+|---|---|---|
+| PP-DocLayoutV3 (ONNX) | layout detection, on the CPU | Apache-2.0 |
+| GLM-OCR | page reading and table repair | MIT / Apache-2.0 |
+| olmOCR-2-7B | title pages, scanned fallback | Apache-2.0 |
+| DeepSeek-OCR-2 | figure second opinion | Apache-2.0 |
+
+**3. Point the launcher at `llama-server`**, once:
+
+```bash
+# in .env, or your environment
+SARA_LLAMA_SERVER=/path/to/llama.cpp/build/bin/llama-server
+```
+
+**4. Check the install before running anything real:**
+
+```bash
+python run_llama_server.py --check
+```
+
+It resolves every model path in `config/vlm_profiles/model.ini` and names
+anything missing. A clean result means the configuration and the files agree.
+
+**Optional — Zotero enrichment.** Put `ZOTERO_API_KEY` and `ZOTERO_LIBRARY_ID`
+in `.env` to let metadata be cross-checked against your library. Without them
+the run says so plainly and continues; nothing degrades silently.
 
 ---
 
@@ -296,38 +430,57 @@ the run — see [the VRAM rule](#the-vram-rule)):
 
 | document | type | pages | time | s/page |
 |---|---|---:|---:|---:|
-| NMR benchmark | article | 8 | 160.3s | 20.0 |
-| Collagen structure | article | 25 | 488.5s | 19.5 |
-| Collagen review | article | 11 | 168.3s | 15.3 |
-| CollagenFibrilAssembly | book_chapter | 36 | 366.0s | 10.2 |
-| Hydration-induced | article | 20 | 199.0s | 9.9 |
-| JRuberti | article | 26 | 174.7s | 6.7 |
-| Saturated Solutions | article | 7 | 234.1s | 33.4 |
-| Silberbush-2019 | article | 7 | 117.9s | 16.8 |
-| **Tendon assembly** | **book** | **345** | **1026.7s** | **3.0** |
-| **total** | | **485** | **48.9 min** | **6.1** |
+| NMR benchmark | article | 8 | 194.7s | 24.3 |
+| Collagen structure | article | 25 | 456.5s | 18.3 |
+| Collagen review | article | 11 | 186.3s | 16.9 |
+| CollagenFibrilAssembly | book_chapter | 36 | 491.1s | 13.6 |
+| Hydration-induced | article | 20 | 321.9s | 16.1 |
+| JRuberti | article | 26 | 306.4s | 11.8 |
+| Saturated Solutions | article | 7 | 279.5s | 39.9 |
+| Silberbush-2019 | article | 7 | 139.5s | 19.9 |
+| **Tendon assembly** | **book** | **345** | **1410.3s** | **4.1** |
+| **total** | | **485** | **63.7 min** | **7.8** |
 
-**How the 485 pages were read:** 58.6% from the text layer, 34.6% a full VLM
-read, 3.1% a table repair, 1.6% the title two-shot. 88 figures and 17 tables
-recovered, zero errors.
+**How the 485 pages were read:**
 
-Two numbers are worth dwelling on:
+| route | pages | share |
+|---|---:|---:|
+| text layer — **no GPU at all** | 300 | **61.9%** |
+| full VLM read | 162 | 33.4% |
+| table repair (a crop re-read) | 15 | 3.1% |
+| title page, two-shot | 8 | 1.6% |
 
-- **A book is cheaper per page than a paper** — 3.0s against 14.8s — because 246
+**107 figures and 31 tables recovered, zero errors, and 0 of 9 documents flagged
+for review.** Every crop referenced by a manifest was present on disk: 138
+referenced, 138 found, 0 orphaned.
+
+Three numbers are worth dwelling on:
+
+- **A book is cheaper per page than a paper** — 4.1s against ~17s — because most
   of its 345 pages were read on the CPU. That is the entire V6 thesis, measured.
 - **The slowest document is the one with no text layer.** *Saturated Solutions*
-  is an old scan: 0 pages harvestable, 4 of 7 needing table repair, 33.4s/page.
-  The pre-pass cannot help a scan, and does not pretend to.
+  is an old scan: nothing harvestable, most pages needing table repair,
+  39.9s/page. The pre-pass cannot help a scan, and does not pretend to.
+- **The same corpus through the graphical interface produced identical output** —
+  same 485 pages, same 107 figures, same 31 tables, and **zero metadata
+  differences** across title, DOI, journal, year, authors, publisher and
+  validation fields for all nine documents. Two front ends, one pipeline, and
+  the claim is measured rather than asserted.
+
+> **Timings are only comparable on a clean GPU.** The same benchmark measures
+> 148s or 260s depending purely on whether a model was left resident by the
+> previous run — with byte-identical output. See [the VRAM rule](#the-vram-rule).
 
 ---
 
-## Why V6 exists
+## How it works
 
-V5 adopted better OCR models and got *slower*: 413s on the 8-page benchmark
-against the older pipeline's 324s. The reason is structural — on one 8GB GPU
-wall time is just total GPU compute, and V5 added a second model (layout
+The previous release adopted better OCR models and got *slower*: 413s on the 8-page benchmark
+against its own predecessor's 324s. The reason is structural — on one 8GB GPU
+wall time is just total GPU compute, and it had added a second model (layout
 grounding) plus crop re-reads on top of the reading pass. Concurrency was tested
-four ways and every arrangement netted zero or worse.
+in four configurations and every one netted zero or worse: scheduling
+redistributes compute, it never removes it.
 
 **V6's thesis: the only lever is not making the VLM call at all.**
 
@@ -364,21 +517,86 @@ licence" components are banned — this ruled out DocLayout-YOLO (AGPL-3.0 via
 Ultralytics) and HunyuanOCR-1.5 (Tencent Community Licence), both otherwise
 attractive.
 
-**Every stage is gated.** `tests/test_parity_nmr.py` asserts metadata, table
-recovery, figure crops and word coverage against archived known-good output. No
-optimization ships without passing it.
+**Every stage is gated.** A parity harness asserts metadata, table recovery,
+figure crops and word coverage against archived known-good output. No
+optimization ships without passing it — see [Testing](#testing).
 
 ---
 
-## Setup
+## Configuration
 
-```bash
-python -m pip install -r requirements.txt
-```
+Everything model-specific lives in `config/`, and **no model name appears
+anywhere in `src/`.** The pipeline asks only for a *role*; the configuration
+decides which model answers. Swapping a model is therefore a configuration
+change, not a code change — which is what lets the tool outlive the models it
+was written against.
 
-Model weights are not tracked in git — see [`models/README.md`](models/README.md).
-Zotero credentials go in `.env` (`ZOTERO_API_KEY`, `ZOTERO_LIBRARY_ID`); without
-them the run degrades loudly to no-Zotero rather than silently.
+### The six roles
+
+| role | what it does | shipped default |
+|---|---|---|
+| `default` | general reading | `olmocr-2-7b` |
+| `title_detection` | the title-page two-shot | `olmocr-2-7b` |
+| `extraction` | body pages and table repair | `glm-ocr` |
+| `layout_detector` | finds figures and tables | `onnx` (CPU) |
+| `figure_escalation` | second opinion where the cheap pass contradicts itself | `deepseek-ocr-v2` |
+| `understanding` | reserved; unused today | `olmocr-2-7b` |
+
+Deleting a role's line disables that feature rather than breaking the run.
+
+### The three coupled layers
+
+| file | holds |
+|---|---|
+| `config/research_article_strategy.yaml` | the role registry, and the pipeline's own settings |
+| `config/vlm_profiles/<model>.yaml` | prompt mode, fixed prompts, target DPI, VRAM estimate, co-residency |
+| `config/vlm_profiles/model.ini` | the llama-server preset: GGUF paths, context size, sampling |
+
+They must agree — a profile naming a preset that does not exist is a run that
+fails at the first page. **Strategy Lab checks all three**, shows a diff before
+every save, backs up the file it touches, and warns before you assign two models
+your card cannot hold at once. It can also duplicate a profile, so you can point
+the tool at a model this codebase has never heard of without editing Python.
+
+`config/factory_defaults/` is a frozen copy of the shipped configuration. Every
+tab's **Restore Defaults** reads from it, so no sequence of edits is
+unrecoverable. Nothing ever writes *into* that directory.
+
+### Environment variables
+
+| variable | effect |
+|---|---|
+| `SARA_LLAMA_SERVER` | where the `llama-server` binary is |
+| `SARA_LEDGER_PATH` | keep the ledger outside the repository |
+| `SARA_CACHE_PATH` | move the Zotero cache |
+| `SARA_GUI_STORAGE_SECRET` | makes GUI sessions survive a restart |
+| `ZOTERO_API_KEY`, `ZOTERO_LIBRARY_ID` | enable Zotero enrichment |
+
+All are read from `.env` if present. An unset variable resolves to nothing and
+says so — it never becomes the literal string `${VAR}`.
+
+---
+
+## Troubleshooting
+
+Every entry here is a failure that has actually happened, not a hypothetical.
+
+| symptom | cause and fix |
+|---|---|
+| **"the wrong Python is running this file"** | Something other than the project environment started it. `conda activate shastrasaara`, then re-run. The message prints which interpreter it actually got. |
+| **A run dies mid-way with a model error, after pre-flight passed** | `llama-server` was started from the wrong directory, so its preset's relative model paths resolve to nothing — and it validates none of them at startup. Start it with `python run_llama_server.py`. |
+| **Everything is ~3× slower than the table above, with identical output** | A model from the previous run is still resident and the current one has spilled to system RAM. Start the server with `--models-max 1` (the launcher's default) and see [the VRAM rule](#the-vram-rule). |
+| **"Port 8850 is already in use"** | Prajnya Studio is probably open in another window. Otherwise `--port 8851`. |
+| **The interface loads but processing fails immediately** | `llama-server` is not running. Scanning a folder needs no server; reading pages does. |
+| **A document is re-processed although it ran before** | The ledger is keyed by file SHA-256, so an edited PDF is correctly a new document. To force it either way, use `--force`. |
+| **Zotero metadata is not being used** | `ZOTERO_API_KEY` / `ZOTERO_LIBRARY_ID` are unset. The log says so explicitly at startup rather than degrading quietly. |
+| **A book "finished" in seconds** | That is the default: front matter and the chapter map only. Add `--chapters` to read bodies — and see what that costs first. |
+
+---
+
+## Running notes
+
+Four things that are worth understanding before something behaves oddly.
 
 ### The Python environment
 
@@ -469,12 +687,26 @@ project's quality than not shipping one.
 
 ---
 
-## Relationship to V5
+## Relationship to v5.x
 
-V5 lives at `../v4/gemini_refactor` and keeps running. It is a **separate git
-repository** — V6 work does not go there. The decomposition table in
-[`plan.md`](plan.md) is the migration order; roughly 900 lines of V5's strategy
-file were unreachable dead code and were never carried over.
+**v5.x is still on `main` and still runs.** V6 is a rewrite rather than an
+upgrade: the output schema, the configuration layout and the GUI are all
+different, and there is no in-place migration. Run whichever you need — they
+share no state except, if you point them at it, a Zotero library.
+
+If you are coming from v5.x, the differences that will bite first:
+
+| | v5.x | V6 |
+|---|---|---|
+| CLI entrypoint | `run_Prajnya.py` | `run_prajnya.py` |
+| GUI entrypoint | `prajnya_studio/studio_app.py` | `run_prajnya_studio.py` |
+| GUI port | 8080 | **8850** (8080 is llama-server's) |
+| configuration | inside `prajnya_studio/` | one `config/` tree |
+| output | beside the PDF, or beside your shell | always `run_outputs/` in the repo |
+| ledger | none written | `persistence/semantic_ledger.csv` |
+
+Roughly 900 lines of v5.x's strategy code were unreachable and were not carried
+over.
 
 ---
 

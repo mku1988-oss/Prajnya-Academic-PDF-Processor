@@ -1,6 +1,6 @@
 # Shastrasaara V6 — dependencies
 #
-# LICENCE RULE (see CLAUDE.md): every line must be OSI-permissive
+# LICENCE RULE: every line must be OSI-permissive
 # (Apache-2.0 / MIT / BSD). Annotate each entry with its licence.
 # AGPL and "community licence" components are banned.
 
@@ -18,18 +18,18 @@ Pillow>=10.0.0             # MIT-CMU
 numpy>=1.24.0              # BSD-3-Clause
 opencv-python>=4.8.0       # Apache-2.0
 # ^ used ONLY by layout/regions.find_unclaimed_ink (dilate + connected
-#   components), to recover table footnotes no detector boxed. V5 imported cv2
-#   without ever declaring it — the same undeclared-dependency trap as fitz.
+#   components), to recover table footnotes no detector boxed. It used to be
+#   imported without ever being declared — the same trap as fitz.
 #   Declared here deliberately. It is the one heavy wheel in this list; if that
 #   ever matters, the function is small enough to reimplement in numpy.
 
 # --- Layout detection (Stage 2) ---------------------------------------------
 onnxruntime>=1.17.0        # MIT
 # Model weights: PP-DocLayoutV3 (Apache-2.0), fetched per models/README.md.
-# (PP-DocLayout-S, named in plan.md, ships only in Paddle format — see that file.)
 # Deliberately NOT installing paddlex/paddleocr — we run the exported ONNX
 # directly to keep the dependency surface to one wheel.
-# DO NOT add doclayout-yolo / ultralytics: AGPL-3.0. See CLAUDE.md.
+# DO NOT add doclayout-yolo / ultralytics: AGPL-3.0 — see the Licence section
+# of README.md.
 
 # --- Page classification ----------------------------------------------------
 scikit-learn>=1.3.0        # BSD-3-Clause  (DBSCAN, visual region clustering)
@@ -52,12 +52,12 @@ nicegui>=1.4.0              # MIT
 # =============================================================================
 #
 # PyMuPDF / fitz  —  AGPL-3.0 (or paid Artifex licence)
-#   V5 imports `fitz` in ~8 modules but never declared it in requirements.txt.
-#   V6 does not add it as a direct dependency. All PDF text/geometry access goes
+#   The previous release imported `fitz` in ~8 modules without ever declaring
+#   it here. V6 does not add it as a direct dependency. All PDF access goes
 #   through the PdfBackend interface (src/processing/pdf/), whose default
 #   implementation may use PyMuPDF *if installed locally*, with pypdfium2
 #   (Apache-2.0/BSD-3) as the permissive path. Resolve before any closed-source
-#   or SaaS distribution. See CLAUDE.md, "The Licence Rule".
+#   or SaaS distribution. See the Licence section of README.md.
 #
 # pytesseract  —  Apache-2.0 wrapper, but Tesseract itself is Apache-2.0.
-#   Carried in V5; re-add only if the scanned-document path actually needs it.
+#   Carried previously; re-add only if the scanned-document path needs it.
