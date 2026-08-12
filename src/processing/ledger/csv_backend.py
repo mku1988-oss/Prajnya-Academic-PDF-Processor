@@ -36,11 +36,15 @@ class CsvLedgerBackend(SemanticLedger):
                     # Ensure metadata_flag exists
                     if "metadata_flag" not in record_dict:
                         record_dict["metadata_flag"] = None
+
+                    # Phase 3.6: ensure new field exists
                     if "pdf_filename" not in record_dict:
                         record_dict["pdf_filename"] = ""
 
                     # JSON-serialize complex fields
                     record_dict["authors"] = json.dumps(record_dict.get("authors", []))
+                    record_dict["editors"] = json.dumps(record_dict.get("editors", []))
+                    record_dict["review_needed_fields"] = json.dumps(record_dict.get("review_needed_fields", []))
                     record_dict["semantic_fingerprint"] = json.dumps(record_dict.get("semantic_fingerprint", []))
                     record_dict["chunk_index_map"] = json.dumps(record_dict.get("chunk_index_map", []))
                     record_dict["retrieval_provenance"] = json.dumps(record_dict.get("retrieval_provenance", {}))
@@ -80,6 +84,7 @@ class CsvLedgerBackend(SemanticLedger):
                 for row in reader:
                     try:
                         # ================================
+                        # PHASE 3.8 ROBUST DESERIALIZATION
                         # ================================
 
                         # -------- retrieval_provenance --------
@@ -128,6 +133,18 @@ class CsvLedgerBackend(SemanticLedger):
                                     for a in authors.strip("[]").split(",")
                                     if a.strip()
                                 ]
+
+                        # -------- editors --------
+                        # A ledger written before session 9 has no such column,
+                        # so `None` here means "old row", not "no editors".
+                        editors = row.get("editors")
+                        if isinstance(editors, str):
+                            try:
+                                row["editors"] = json.loads(editors or "[]")
+                            except Exception:
+                                row["editors"] = []
+                        elif editors is None:
+                            row["editors"] = []
 
                         # -------- review_needed_fields (NEW) --------
                         rnf = row.get("review_needed_fields")
@@ -189,6 +206,10 @@ class CsvLedgerBackend(SemanticLedger):
             record.last_updated = datetime.utcnow().isoformat()
         self._records[record.document_id] = record
         self.logger.info(f"Updated in-memory record for document_id: {record.document_id}")
+
+    def delete_record(self, document_id: str) -> bool:
+        """Remove a record from the in-memory ledger store, if present."""
+        return self._records.pop(document_id, None) is not None
 
     def link_chunks(self, document_id: str, chunk_data: List[Dict[str, Any]]):
         super().link_chunks(document_id, chunk_data)

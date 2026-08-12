@@ -1,0 +1,89 @@
+# Gemini 3 Flash Vision API Profile
+# ./src/processing/strategies/config/vlm_profiles/gemini-3-flash.yaml
+# Cloud-based VLM - "Pro-level intelligence at Flash speeds"
+# Created: December 18, 2025
+
+model_name: "gemini-3-flash-preview"
+model_type: "cloud_api_gemini"
+benchmark_score: null  # To be measured
+status: "testing"
+
+# ============================================================================
+# API PARAMETERS (Sent to Gemini API)
+# ============================================================================
+# Optimized for speed and cost-effectiveness
+api_parameters:
+  temperature: 0.4          # Balanced for OCR tasks
+  max_tokens: 16384         # Increased for complex reasoning
+  thinking_level: "low"     # Default thinking level for Flash
+
+# ============================================================================
+# APPLICATION CONFIGURATION
+# ============================================================================
+# Shastrasaara pipeline settings for Gemini processing
+app_config:
+  target_image_size: 1024    # Resize before sending (cost optimization)
+  preferred_image_format: "png"
+  target_anchor_text_len: 1000
+
+# ============================================================================
+# HYBRID PROCESSING (Enable Pattern Classifier)
+# ============================================================================
+# Inherits from Flash series efficiency
+hybrid_processing:
+  enabled: true
+  page_classifier:
+    confidence_threshold: 0.90
+    visual_threshold: 1
+    equation:
+      total_confidence_threshold: 1.5
+      high_confidence_count: 2
+  visual_clustering:
+    dbscan_eps: 50
+    dbscan_min_samples: 2
+    reference_dpi: 300
+
+# ============================================================================
+# CAPABILITIES
+# ============================================================================
+capabilities:
+  - vision
+  - document_understanding
+  - ocr
+  - cloud_api
+  - reasoning  # New capability for Gemini 3
+
+# ============================================================================
+# PERFORMANCE & COST (Gemini 3 Flash)
+# ============================================================================
+performance:
+  speed: "very_fast"
+  cost_per_page: 0.003
+  pricing:
+    input_cost_per_million: 0.50
+    output_cost_per_million: 3.00
+  rate_limit_free: "100 requests/day"
+  rate_limit_paid: "1000 requests/day"
+
+# ============================================================================
+# RATE LIMITS (Google AI Studio / Vertex AI)
+# ============================================================================
+rate_limits:
+  free_tier:
+    requests_per_minute: 15
+    requests_per_day: 100
+    tokens_per_minute: 1000000
+
+  paid_tier:
+    requests_per_minute: 1000
+    requests_per_day: 10000
+    tokens_per_minute: 4000000
+
+# ============================================================================
+# NOTES
+# ============================================================================
+notes:
+  - "Requires GEMINI_API_KEY in .env file"
+  - "Pro-level intelligence at Flash speeds"
+  - "Includes thinking/reasoning config support"
+  - "Pricing: $0.50/M input, $3.00/M output"

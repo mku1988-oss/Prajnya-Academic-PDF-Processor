@@ -1,0 +1,27 @@
+# Line endings — declared here so they do NOT depend on a machine setting.
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# Git for Windows ships a system-wide `core.autocrlf = true`
+# (C:/Program Files/Git/etc/gitconfig). That setting makes `git checkout`
+# write CRLF into the working tree, while every editor and script in this
+# project writes LF. The result was a working tree with a 123/73 LF/CRLF
+# split and files that `git status` reported as modified while `git diff`
+# showed nothing — pure noise, on a file nobody had edited.
+#
+# A `.gitattributes` entry OVERRIDES `core.autocrlf`, and it lives in the
+# repository rather than in one developer's config, so every clone behaves
+# the same way. LF is chosen because it is what the stored blobs already
+# contain, what the editors produce, and what Python, YAML and configparser
+# all read without complaint.
+#
+# The matching half of this fix is in the code: `src/gui/strategy_editor.py`
+# writes with `newline="\n"` so Python's text mode cannot translate LF to
+# CRLF on the way out. BOTH halves are required — this file governs what git
+# does, that one governs what the GUI does.
+
+# Everything git recognises as text is stored LF and checked out LF.
+* text=auto eol=lf
+
+# Images: never touched, never converted.
+*.png binary

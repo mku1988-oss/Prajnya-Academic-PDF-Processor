@@ -1,0 +1,137 @@
+# GLM-OCR (0.9B, zai-org) — primary OFFLINE reading engine
+# .\src\processing\strategies\config\vlm_profiles\glm-ocr.yaml
+# Tier overhaul: GLM-OCR does the READING; OlmOCR-2 is reserved for UNDERSTANDING.
+# Validated 2026-07-10 on llama.cpp build b9936 through llama-server (the path the pipeline uses).
+
+model_name: "glm-ocr"          # Must match the [glm-ocr] preset in model.ini
+model_type: "specialized_ocr"
+benchmark_score: 94.62         # OmniDocBench V1.5, #1 overall (upstream claim)
+status: "production_ready"
+
+# ============================================================================
+# FIXED-PROMPT MODEL
+# ============================================================================
+# GLM-OCR is recognition-only. It does NOT follow instructions -- it responds to three
+# fixed prompts and ignores anything else. Sending it a rich task prompt (e.g. "describe
+# the figure and infer the trend") produces recognition output regardless, so the provider
+# must substitute the correct fixed prompt for the task instead of passing ours through.
+#
+# Measured on NMR p4's two tables (see deepseek_ocr_v2_exploration/glm_formula_table/):
+#   Table Recognition:    100.0% numeric recall, structured HTML, legend kept   <-- best
+#   Text Recognition:      96.7% / 100%, plain text, legend kept
+#   Formula Recognition:   96.7% / 98.1%, LaTeX array, LEGEND SILENTLY DROPPED
+#
+# The dropped "legend" is the footnote defining R_o, R_im, R_c, R_bp, R_pr. Without it the
+# equations cannot be interpreted, so Formula Recognition is reserved for isolated display
+# equations that carry no surrounding prose.
+prompt_mode: "fixed"
+
+fixed_prompts:
+  # Reading a whole page, or any region that is mostly prose.
+  raw_ocr_extraction: "Text Recognition:"
+  basic_ocr_legacy: "Text Recognition:"
+  olmocr_document_processing: "Text Recognition:"
+
+  # A cropped table region -> structured HTML we can parse downstream.
+  table_description: "Table Recognition:"
+
+  # An isolated display equation, no surrounding prose.
+  equation_to_latex: "Formula Recognition:"
+
+# Tasks GLM CANNOT do. These require instruction-following and must be routed to the
+# understanding model (olmocr-2-7b) in Phase B. The provider raises rather than silently
+# returning recognition output that looks like an answer.
+ineligible_tasks:
+  - figure_description
+  - title_page_detection
+  - structured_analysis_body_page
+  - structured_analysis_title_page
+  - comprehensive_single_pass_extraction
+  - extract_bibliographic_metadata_legacy
+
+# ============================================================================
+# BASE API PARAMETERS
+# ============================================================================
+# temperature/seed also live in the [glm-ocr] model.ini preset, which is what actually
+# governs the server. They are repeated here because api_parameters are sent per request
+# and would otherwise override the preset defaults.
+#
+# SEED IS LOAD-BEARING. At temp 0.02 with no seed, three identical calls returned three
+# different outputs -- one of which silently switched table format from markdown to LaTeX.
+api_parameters:
+  temperature: 0.02
+  seed: 3407
+  max_tokens: 4096
+
+  # NO DRY SAMPLER. It was tried to suppress the dot-leader repetition loop on high-res table
+  # crops ("BaI2.2H2O........ 44.0"), but on GLM-OCR the DRY sampler causes a hard HTTP 500:
+  # "the model produced output that does not match the expected peg-native format". GLM-OCR's
+  # generated output is validated against a PEG grammar; DRY penalises the repeated dot tokens,
+  # pushes the model onto a token the grammar rejects, and the server aborts the request.
+  # Reproduced deterministically on scanned p4's dense table (every DRY call 500s, every
+  # non-DRY call succeeds). The dot-leader loop it was meant to fix is instead solved
+  # STRUCTURALLY by reading table crops with `Table Recognition:` -- the HTML cell structure
+  # has no place to emit a run of dots, so there is no loop and every value is preserved.
+
+# ============================================================================
+# RESOURCE REQUIREMENTS
+# ============================================================================
+# Measured on an 8188 MiB card: glm-ocr alone = 2535 MiB resident.
+# GLM (2535) + deepseek-ocr-v2 (4929) = 7464 MiB co-resident, peak 7940 during inference.
+# So the table-repair escalation costs NO model swap. OlmOCR-2-7B (~7907 MiB alone) still
+# cannot co-reside with anything and remains a swap-in target for Phase B.
+resource_requirements:
+  vram_per_instance_gb: 2.5
+  co_resident_with:
+    - deepseek-ocr-v2
+
+# ============================================================================
+# APPLICATION CONFIGURATION
+# ============================================================================
+app_config:
+  target_dpi: 300
+  preferred_image_format: "png"
+  target_image_size: 1288   # Full native page; flash-attn + q8_0 KV keeps this on 8 GB
+  target_anchor_text_len: 0 # GLM ignores anchor text -- it is recognition-only
+
+# ============================================================================
+# CONTENT-DROP SANITY CHECK
+# ============================================================================
+# GLM has NO internal layout model. On a page where a table competes with prose it silently
+# DROPS the table and confabulates to cover the gap (reproduced on two independent documents).
+# It reads the same table correctly when handed a clean crop, and reads a full-page table fine.
+#
+# So every page GLM reads is checked against the PyMuPDF text layer. A collapse in word
+# coverage IS the drop signal -- we never try to predict which pages hold tables (PyMuPDF's
+# find_tables() is blind to booktabs-style tables, and the PageClassifier has no table concept).
+#
+# Measured coverage: dropped-table pages 82.9% / 60.6%; clean prose pages 98.7% / 99.2%.
+content_drop_check:
+  enabled: true
+  min_word_coverage: 0.90   # 16-point margin between the two populations
+  escalate_to: "deepseek-ocr-v2"   # layout detector: emits table / table_caption / table_footnote boxes
+
+# ============================================================================
+# CAPABILITIES
+# ============================================================================
+capabilities:
+  - advanced_ocr
+  - text_extraction
+  - table_extraction      # via `Table Recognition:` -> HTML
+  - math_equations        # inline math in Text Recognition; display eqns via Formula Recognition
+  - multi_column_text
+
+limitations:
+  - "No layout model: silently drops tables on mixed prose+table pages. Requires content_drop_check."
+  - "Recognition-only: cannot describe figures, classify pages, or emit structured JSON."
+  - "Reading a dot-leader table crop with `Text Recognition:` loops on the dots; read table
+     crops with `Table Recognition:` instead (structured HTML has no place to emit the run)."
+  - "The DRY sampler triggers a hard HTTP 500 (breaks GLM's peg-native output grammar). Never enable it."
+
+# ============================================================================
+# PERFORMANCE (measured, 300 DPI, llama-server REST)
+# ============================================================================
+performance:
+  full_page_avg_time: 8.6     # seconds, born-digital page
+  table_crop_avg_time: 3.5    # seconds per cropped table
+  prose_word_recall: 0.99     # vs PyMuPDF text layer, table-free pages

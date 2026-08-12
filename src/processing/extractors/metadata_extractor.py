@@ -13,11 +13,12 @@ Blueprint Reference: Section 1.3
 V3 Reference: book_metadata_extractor.py lines 300-425
 """
 
+# .\src\processing\extractors\metadata_extractor.py
 
 import re
 from typing import Union
 
-from ..utils import roman_to_arabic
+from ..utils.regex_patterns import roman_to_arabic
 
 
 class MetadataExtractor:
@@ -64,7 +65,13 @@ class MetadataExtractor:
         self.bare_doi_pattern = re.compile(
             r'\b(10\.[0-9]{4,}/[-._;()/:A-Za-z0-9]+)\b'
         )
-        
+
+        # Line-wrapped DOI repair (see _join_wrapped_dois). Narrow journals set
+        # the DOI in a thin margin column and break it after the '/'.
+        self.wrapped_doi_pattern = re.compile(
+            r'(10\.[0-9]{4,}[-._;()/:A-Za-z0-9]*/)[ \t]*\r?\n[ \t]*(?=[-._;()/:A-Za-z0-9])'
+        )
+
         # Chapter Number Patterns (pre-compiled for performance)
         self.arabic_chapter_pattern = re.compile(
             r'chapter[\s:]+([0-9]{1,2})\b',
@@ -168,6 +175,9 @@ class MetadataExtractor:
             >>> extract_doi_from_text("doi: 10.1038/s41578-020-00251-2")
             ('10.1038/s41578-020-00251-2', 0.98)
         """
+        # Step 0: repair DOIs broken across a line break (see _join_wrapped_dois)
+        text = self._join_wrapped_dois(text)
+
         # Pattern 1: Labeled DOI (highest confidence - 0.98)
         # Matches: "doi: 10.xxxx", "DOI: 10.xxxx", "doi:10.xxxx"
         labeled_match = self.labeled_doi_pattern.search(text)
@@ -192,7 +202,42 @@ class MetadataExtractor:
         
         # No DOI found
         return (None, 0.0)
-    
+
+    def _join_wrapped_dois(self, text: str) -> str:
+        """
+        Re-join a DOI that the journal's typesetter broke across two lines.
+
+        For biology researchers: some journals (Nature Reviews, for one) print
+        the DOI down a narrow column in the bottom-left margin, so it wraps:
+
+            https://doi.org/10.1038/
+            s41578-020-00251-2
+
+        Every DOI pattern here needs at least one character after the '/', so
+        the wrapped form matches nothing and the paper looks like it has no
+        DOI at all — which costs a VLM call to recover something that was
+        sitting in the text layer the whole time.
+
+        We only repair the UNAMBIGUOUS case: a line break falling immediately
+        after the '/' of a `10.dddd/` prefix, where the next line resumes with
+        a DOI-legal character. A break elsewhere (mid-suffix, or at a hyphen)
+        is NOT repaired, because a real hyphen and a hyphenation hyphen are
+        indistinguishable here and joining the wrong pair would invent a DOI
+        that does not exist. A missed DOI is recoverable downstream; a
+        fabricated one is not.
+
+        Args:
+            text: raw text-layer content of a page
+
+        Returns:
+            The same text with wrapped DOIs re-joined.
+
+        Example:
+            >>> MetadataExtractor()._join_wrapped_dois("doi.org/10.1038/\\ns41578-1")
+            'doi.org/10.1038/s41578-1'
+        """
+        return self.wrapped_doi_pattern.sub(r'\1', text)
+
     def extract_chapter_number(self, text: str) -> tuple[Union[int, None], float]:
         """
         Extract chapter number from text with confidence scoring.

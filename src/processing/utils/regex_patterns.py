@@ -252,3 +252,30 @@ JOURNAL_SOURCE_PATTERNS = [
 PEER_REVIEW_DATE_PATTERNS = [
     re.compile(r'\b(Received|Accepted|Published):', re.IGNORECASE)
 ]
+# ============================================================================
+# TABLE-OF-CONTENTS DOT LEADERS
+# ============================================================================
+# A book's contents page is typeset with dot leaders running from the entry
+# title to its page number:
+#
+#     1 Introduction . . . . . . . . . . . . . . . . . 1
+#     Preface ....................................... ix
+#
+# This is how a book's contents page is recognised at all: the real page is
+# headed with a roman numeral, not the words "Table of Contents", so V5's
+# keyword search never fired on it.
+#
+# Two forms are accepted and the distinction is load-bearing. SPACED dots need
+# only three, because a narrow column may print as few as ". . . 5". CONTIGUOUS
+# dots need four, so that an ellipsis in prose ("as shown ... in 2018") is not
+# read as a contents entry — measured, that exact sentence shape is why the
+# spaced and contiguous cases cannot share one threshold.
+DOT_LEADER_RUN = r'(?:(?:\.[ \t]+){3,}\.?|\.{4,})'
+
+#: What a contents entry's page number may look like: arabic (12), roman front
+#: matter (xii), or a publisher's section code (C1).
+TOC_PAGE_NUMBER = r'(?:[0-9]{1,4}|[ivxlc]{1,7}|[A-Z][0-9]{1,3})'
+
+#: A whole leader line, for detection (see the classifier's structure signals).
+DOT_LEADER_LINE_PATTERN = re.compile(
+    rf'{DOT_LEADER_RUN}[ \t]*{TOC_PAGE_NUMBER}[ \t]*$', re.MULTILINE)

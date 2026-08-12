@@ -1,0 +1,126 @@
+# Shastrasaara V6 strategy config.
+# Ported from V5 (src/processing/strategies/config/research_article_strategy.yaml)
+# minus the plan.md delete list: the 5-tier adaptive routing (tiers 2-5 +
+# adaptive_routing_rules), the concurrency block (dead end on this hardware),
+# and the version_history archaeology. Body pages run the GLM two-phase path.
+strategy_name: research_article
+strategy_type: academic_paper_processing
+version: '2.0'
+description: V6 processing strategy - CPU pre-pass decides the minimum set of VLM calls
+pipeline:
+  log_level: DEBUG
+  text_threshold: 200
+processing:
+  continue_on_error: true
+  fail_on_title_page_error: true
+  max_retries_per_page: 3
+  retry_delay_seconds: 2
+  log_level: INFO
+  detailed_logging: false
+zotero:
+  enabled: true
+  offline_mode: false
+  # Interpolated by config/loader.py from the environment (V6 has real ${ENV}
+  # interpolation; unset variables resolve to null so guards fire early).
+  # The entrypoint must call load_dotenv() first.
+  api_key: ${ZOTERO_API_KEY}
+  library_id: ${ZOTERO_LIBRARY_ID}
+  library_type: user
+profile_registry:
+  default: olmocr-2-7b
+  title_detection: olmocr-2-7b
+  # --- Role-based offline roster ---
+  # When `extraction` is present AND local_server.enabled is true, the strategy
+  # runs the GLM two-phase offline body-page path:
+  #   Phase A (co-resident): GLM reads the pages the planner routes to it; a
+  #           word-coverage gate catches silently-dropped tables; the layout
+  #           detector locates them and GLM re-reads the crop.
+  #   Phase B (one swap):    the `understanding` model drains the figure-
+  #           description queue.
+  # Removing `extraction` (or disabling local_server) is a configuration error
+  # in V6: there is no 5-tier fallback any more. The strategy will refuse to
+  # start rather than silently degrade. The cloud path is selected by giving
+  # `default` a cloud profile (model_type: cloud_api_*), not by removing keys.
+  extraction: glm-ocr          # reads the pixels (recognition-only, never fabricates)
+  understanding: olmocr-2-7b   # figure description / structuring (Phase B, one swap)
+  layout_detector: onnx        # PP-DocLayoutV3 on CPU (Stage 2); 'deepseek-ocr-v2'
+                               # selects the VLM grounding fallback
+  # A SECOND OPINION on figures, asked for only where the cheap pass
+  # contradicts itself: the classifier saw visual content on the page and the
+  # ONNX detector then found no figure. Measured on the sample corpus that is
+  # ~2% of pages (~5 min across a 49-minute run), and it recovers figures that
+  # would otherwise be lost silently — a missed figure never announces itself.
+  # Remove this line to turn the feature off; the fast path alone is exactly
+  # what V6 shipped before it existed.
+  figure_escalation: deepseek-ocr-v2
+task_registry:
+  raw_ocr: raw_ocr_extraction
+  structured_body: structured_analysis_body_page
+  structured_title: structured_analysis_title_page
+  legacy_ocr: olmocr_document_processing
+  figure_desc: figure_description
+  table_desc: table_description
+  title_detection: title_page_detection
+vlm_provider:
+  api_endpoint: http://localhost:8080/v1/chat/completions
+  local_server:
+    enabled: true
+    backend: router_mode
+    host: localhost
+    port: 8080
+    timeout: 300
+    model_profiles: config/vlm_profiles/model.ini
+    models_max: 1
+    log_directory: run_outputs/logs
+  title_page:
+    processing_mode: two_shot
+    profile: '@profile_registry.default'
+    resolution_override: 1288
+    shot1_task: '@task_registry.raw_ocr'
+    shot2_task: '@task_registry.structured_title'
+  body_pages:
+    resolution_override: 1024
+    profile: '@profile_registry.default'
+quality:
+  minimum_overall_score: 0.5
+  minimum_page_score: 0.3
+  minimum_metadata_completeness: 0.6
+  warn_below_score: 0.7
+metadata:
+  doi_confidence_threshold: 0.85
+  isbn_confidence_threshold: 0.85
+  validate_doi_format: true
+  validate_year_range: true
+  fallback_to_pdf_metadata: true
+performance:
+  image_format: png
+  image_padding: 200
+  enable_caching: false
+  cache_directory: null
+  page_timeout_seconds: 300
+  total_timeout_seconds: 1800
+  clear_pdf_after_processing: true
+output:
+  include_raw_vlm_output: false
+  include_page_metadata: true
+  include_quality_scores: true
+  markdown_format: true
+  preserve_structure: true
+  detailed_errors: true
+  include_warnings: true
+limitations:
+- DOI extraction depends on footer visibility - may fail if footer is cropped
+- Title page metadata requires high resolution (1288px) for accurate DOI capture
+- Some articles don't include DOI on first page - will attempt extraction but may fail
+validation:
+  required_metadata_fields:
+  - title
+  - authors
+  - doi
+  required_content_fields:
+  - pages
+  - metadata
+vlm_parameter_overrides:
+  temperature: 0.4
+  max_tokens: 4096
+  repeat_penalty: 1.15

@@ -56,13 +56,67 @@ def split_name(name: str) -> Tuple[Optional[str], Optional[str]]:
     last = tokens[-1]
     return first or None, last or None
 
+#: Characters journals hang off an author's name to point at an affiliation
+#: footnote: digits, the classic footnote symbols, and Unicode superscripts.
+_AFFILIATION_MARKER_CHARS = "0-9*†‡§¶‖#¹²³⁰-⁹"
+
+#: A trailing run of those markers, plus any commas/spaces binding them
+#: together ("*1", "1,2", " †,‡").
+_TRAILING_AFFILIATION = re.compile(
+    rf"[\s,]*[{_AFFILIATION_MARKER_CHARS}][{_AFFILIATION_MARKER_CHARS},\s]*$"
+)
+
+
+def strip_affiliation_markers(name: str) -> str:
+    """
+    Remove the affiliation footnote markers a journal glues onto a name.
+
+    For biology researchers: papers print authors as "Jordi Bella*1" or
+    "Michael J. Mienaltowski1,2", where the trailing symbols are pointers to
+    the affiliation list, not part of anybody's name. The VLM reads the page
+    faithfully and hands those markers straight through.
+
+    Leaving them in did real damage, because `canonicalize_author` keys on the
+    string: "Jordi Bella*1" canonicalizes to 'bella*1, J' while Zotero's clean
+    "Jordi Bella" gives 'bella, J'. Two different keys for one person means
+    the dedupe cannot pair them, so the dirty VLM form survives into the final
+    record — and is then stamped `validation_source: zotero_api`, claiming a
+    canonical provenance the value does not have. On a multi-author paper the
+    same mismatch can list one person twice.
+
+    Only a TRAILING run is stripped, and only of markers — never letters. A
+    name is never reduced to nothing: if stripping would empty it (a
+    "name" that is all digits), the original is returned untouched.
+
+    Args:
+        name: an author name, possibly carrying markers
+
+    Returns:
+        The name with trailing affiliation markers removed.
+
+    Example:
+        >>> strip_affiliation_markers("Jordi Bella*1")
+        'Jordi Bella'
+        >>> strip_affiliation_markers("Michael J. Mienaltowski1,2")
+        'Michael J. Mienaltowski'
+    """
+    if not name:
+        return ""
+    stripped = _TRAILING_AFFILIATION.sub("", name).strip().strip(",").strip()
+    return stripped or name.strip()
+
+
 def canonicalize_author(name: str) -> str:
     """
     Return 'lastname, f' canonical short form for matchup.
     Example: 'Johanna Myllyharju' -> 'myllyharju, j'
+
+    Affiliation markers are stripped first, so "Jordi Bella*1" and
+    "Jordi Bella" produce the SAME key — see `strip_affiliation_markers`.
     """
     if not name:
         return ""
+    name = strip_affiliation_markers(name)
     first, last = split_name(name)
     if not last:
         # fallback to normalized raw name
@@ -123,6 +177,7 @@ def names_match(candidate: str, raw_text: str, threshold: int = 90) -> Tuple[boo
     if candidate_norm in raw:
         return True, 100
 
+    # FIX BUG #13: Special handling for abbreviated first names
     # Check if candidate is "Initial Lastname" format
     candidate_parts = candidate.strip().split()
     if len(candidate_parts) == 2:
@@ -151,6 +206,7 @@ def names_match(candidate: str, raw_text: str, threshold: int = 90) -> Tuple[boo
         if candidate_norm in line_norm:
             return True, 100
         
+        # FIX BUG #13: Also check initial pattern per line
         if len(candidate_parts) == 2 and len(candidate_parts[0]) == 1:
             pattern = f"{candidate_parts[0].lower()}[a-z]*[\\s\\.]*.*?{candidate_parts[1].lower()}"
             if re.search(pattern, line_norm):
@@ -189,17 +245,28 @@ def merge_author_lists(
     # randomises per process, so an earlier version of this function returned the authors
     # in a different order on every run.)
     if not title_page_text:
-        return _dedupe_preserving_order((vlm_authors or []) + (zotero_authors or [])), []
+        return _dedupe_preserving_order(
+            [strip_affiliation_markers(a)
+             for a in (vlm_authors or []) + (zotero_authors or []) if a]), []
 
+    # --- Step 1: unified candidate pool (VLM order first, then any Zotero extras) ---
+    # Affiliation markers come off HERE, before anything keys on the string:
+    # otherwise "Jordi Bella*1" and Zotero's "Jordi Bella" never pair up and
+    # the dirty form wins on pool order. See `strip_affiliation_markers`.
     candidate_pool = _dedupe_preserving_order(
-        [a.strip().strip("[]").rstrip(",") for a in (vlm_authors or []) if a]
-        + [a.strip().strip("[]").rstrip(",") for a in (zotero_authors or []) if a]
+        [strip_affiliation_markers(a.strip().strip("[]").rstrip(","))
+         for a in (vlm_authors or []) if a]
+        + [strip_affiliation_markers(a.strip().strip("[]").rstrip(","))
+           for a in (zotero_authors or []) if a]
     )
 
+    # --- Step 2: identity scoring against reference authors ---
+    # References are cleaned too, so a stripped candidate is not scored against
+    # a marker-carrying reference of the same person.
     if vlm_authors:
-        reference_authors = [a for a in vlm_authors if a.strip()]
+        reference_authors = [strip_affiliation_markers(a) for a in vlm_authors if a.strip()]
     else:
-        reference_authors = [a for a in zotero_authors if a.strip()]
+        reference_authors = [strip_affiliation_markers(a) for a in zotero_authors if a.strip()]
 
     confirmed_candidates = []
     for cand in candidate_pool:
@@ -209,12 +276,14 @@ def merge_author_lists(
                 confirmed_candidates.append(cand)
                 break
 
+    # --- fallback BEFORE redundancy filter and dedupe ---
     if not confirmed_candidates:
         confirmed_candidates = [
             cand for cand in candidate_pool
             if names_match(cand, title_page_text)[0]
         ]
 
+    # --- Step 3: filter summary/superset strings ---
     # e.g. drop "A. Smith, B. Jones" when "A. Smith" and "B. Jones" are both present.
     suspicious_authors = [
         a for a in confirmed_candidates
@@ -225,6 +294,7 @@ def merge_author_lists(
 
     good_authors = [a for a in confirmed_candidates if a not in suspicious_lookup]
 
+    # --- Step 4: canonical dedupe (dict preserves first-insertion order) ---
     author_map = {}
     for name in good_authors:
         canonical_key = canonicalize_author(name)

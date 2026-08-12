@@ -1,0 +1,98 @@
+Shastrasaara V6
+Copyright 2026 Shastrasaara contributors
+
+This product includes software and models developed by third parties.
+All components listed below are OSI-permissive (Apache-2.0 / MIT / BSD), per the
+licence rule in CLAUDE.md.
+
+================================================================================
+Layout detection
+================================================================================
+
+PP-DocLayout / PP-DocLayoutV2 / PP-DocLayoutV3
+  Copyright (c) PaddlePaddle Authors
+  Licensed under the Apache License, Version 2.0
+  https://huggingface.co/PaddlePaddle/PP-DocLayoutV2
+
+ONNX Runtime
+  Copyright (c) Microsoft Corporation
+  Licensed under the MIT License
+  https://github.com/microsoft/onnxruntime
+
+================================================================================
+Vision-language models (loaded via llama-server; weights not redistributed here)
+================================================================================
+
+GLM-OCR
+  Copyright (c) Z.ai / zai-org
+  Model weights: MIT License. Repository code: Apache License, Version 2.0
+  https://github.com/zai-org/GLM-OCR
+
+olmOCR / olmOCR-2
+  Copyright (c) The Allen Institute for Artificial Intelligence
+  Licensed under the Apache License, Version 2.0
+  https://github.com/allenai/olmocr
+
+DeepSeek-OCR (MIT) / DeepSeek-OCR-2 (Apache-2.0)
+  Copyright (c) DeepSeek
+  https://github.com/deepseek-ai/DeepSeek-OCR
+
+llama.cpp / llama-server
+  Copyright (c) 2023-2026 The ggml authors
+  Licensed under the MIT License
+  https://github.com/ggml-org/llama.cpp
+
+================================================================================
+PDF handling
+================================================================================
+
+pypdfium2 / PDFium
+  pypdfium2: Apache-2.0 OR BSD-3-Clause
+  PDFium: Copyright 2014 The PDFium Authors, BSD-3-Clause
+  https://github.com/pypdfium2-team/pypdfium2
+
+PyMuPDF (fitz)  -- NOT A DEPENDENCY OF THIS PRODUCT
+  Copyright (c) Artifex Software, Inc.
+  Licensed under AGPL-3.0, or a commercial licence from Artifex.
+
+  RESOLVED 2026-08-05: Shastrasaara ships under Apache-2.0. Distributing
+  Apache-2.0 code combined with an AGPL library would relicense the whole
+  product as AGPL, so PyMuPDF is NOT a dependency of this product and is
+  deliberately absent from requirements.txt.
+
+  It remains selectable as an optional local-development backend for its speed
+  and exact word boxes. Distributed builds use pypdfium2 (above), which is the
+  default. Measured agreement between the two on the benchmark paper is 93-100%
+  of words per page, with figure boxes identical.
+
+  All PDF access goes through the PdfBackend interface in src/processing/pdf/,
+  and available_backends() reports each backend's licence so an AGPL fallback
+  cannot happen silently. See CLAUDE.md, "The Licence Rule".
+
+================================================================================
+GUI (Prajnya Studio)
+================================================================================
+
+NiceGUI
+  Copyright (c) Zauberzeug GmbH
+  Licensed under the MIT License
+  https://github.com/zauberzeug/nicegui
+
+================================================================================
+Metadata enrichment
+================================================================================
+
+pyzotero
+  Copyright (c) Stephan Hügel and contributors
+  Licensed under the Blue Oak Model License 1.0.0 (permissive, OSI-approved)
+  https://github.com/urschrei/pyzotero
+
+================================================================================
+Excluded components (documented so they are not reintroduced)
+================================================================================
+
+DocLayout-YOLO -- AGPL-3.0 (built on Ultralytics / YOLO-v10). Commercial use
+  requires an Ultralytics enterprise licence. NOT USED.
+
+HunyuanOCR-1.5 -- Tencent Hunyuan Community License. Not OSI-permissive.
+  NOT USED.

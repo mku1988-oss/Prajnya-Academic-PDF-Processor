@@ -1,0 +1,47 @@
+#.\src\llm\providers\config\task_definitions\structured_analysis_title_page.yaml
+task_name: "structured_analysis_title_page"
+description: "Shot 2 (Title Page): Convert raw OCR text into structured bibliographic JSON."
+# The placeholder MUST be {base_text}: that is the only name the provider
+# substitutes (see llm/providers/prompts.py BASE_TEXT_PLACEHOLDER). V5 wrote
+# {raw_text} here, which nothing ever replaced, so shot 2 was handed the
+# literal string "{raw_text}" under a heading promising the transcription --
+# and had to re-read the page from pixels instead. Fixed in session 8.
+prompt: |
+  You are a bibliographic metadata extraction expert. Extract the following information from the academic paper title page below and return it as a JSON object.
+
+  **Required JSON structure:**
+  {
+    "metadata": {
+      "title": "Full paper title" or null,
+      "authors": ["Author One", "Author Two", ...],
+      "doi": "DOI string (e.g., 10.1234/example)" or null,
+      "journal_name": "Journal name" or null,
+      "publication_year": integer (e.g., 2004) or null
+    }
+  }
+
+  **Instructions:**
+  - Extract ONLY what is visible in the text below
+  - For authors: Create a list with each author as a separate string
+  - If a field is not visible, use null (for strings/numbers) or [] (for authors array)
+  - Return ONLY valid JSON, no additional text
+
+  **RAW_TEXT_TO_ANALYZE:**
+  ---
+  {base_text}
+  ---
+output_format:
+  type: "json"
+  schema:
+    type: "object"
+    properties:
+      metadata:
+        type: "object"
+        properties:
+          title: { "type": ["string", "null"] }
+          authors: { "type": "array", "items": { "type": "string" } }
+          doi: { "type": ["string", "null"] }
+          journal_name: { "type": ["string", "null"] }
+          publication_year: { "type": ["integer", "null"] }
+        required: ["title", "authors", "doi", "journal_name", "publication_year"]
+    required: ["metadata"]

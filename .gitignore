@@ -1,90 +1,31 @@
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual Environment
+.pytest_cache/
+.venv/
 venv/
-env/
-ENV/
-env.bak/
-venv.bak/
 
-# Environment Variables
+# Model weights — large binaries, fetched per README instructions
+models/*
+!models/README.md
+
+# Runtime output
+run_outputs/
+# Any additional run tree (a gate run, a comparison run) and its detached log.
+run_outputs*/
+run_outputs*.err
+run_outputs*.log
+persistence/
+*.log
+
+# Secrets
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
-# IDEs
+# Editor / OS
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Logs
-*.log
-run_debug.log
-debug*.log
-
-# Output directories
-output/
-temp_images/
-test_outputs/
-run_outputs/
-
-# Data files
-persistence/
-*.csv
-*.db
-*.sqlite
-
-# Test cache
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-
-# Documentation builds
-docs/_build/
-site/
-
-# OS
 Thumbs.db
-.DS_Store
-
-# Temporary files
-*.tmp
-*.temp
-*.bak
-*.swp
-*~
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# Distribution / packaging
-*.tar.gz
-*.zip
-
-# Internal Agent Protocols (Lab only)
-GEMINI.md
-CLAUDE.md
+desktop.ini

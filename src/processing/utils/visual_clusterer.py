@@ -1,106 +1,113 @@
+#!/usr/bin/env python3
 """
-Visual Region Clusterer
-A utility for clustering vector drawings into coherent figure/table regions
-using a DPI-aware DBSCAN algorithm.
+Visual Region Clusterer — group scattered vector drawings into whole figures.
+
+For biology researchers: a chart in a born-digital PDF is not stored as one
+picture. It is hundreds of tiny vector strokes — every axis tick, bar, and
+gridline is a separate drawing object. To decide whether a page "has a figure"
+we must first gather those strokes back into coherent regions, which is a
+clustering problem: strokes that sit close together belong to the same figure.
+
+We use DBSCAN (a standard density-based clustering algorithm) on the centre
+point of each stroke's bounding box. Strokes within `eps` page points of a
+neighbour join its cluster; isolated strokes (a single horizontal rule, a stray
+underline) are noise and are ignored — which is exactly the behaviour we want,
+because `min_samples=2` means one lone stroke never counts as a figure.
+
+Ported from V5's `visual_clusterer.py`. Two deliberate changes:
+- Input is now `List[Rect]` from the `PdfBackend` seam (V5 took raw PyMuPDF
+  drawing dicts).
+- V5 carried a "DPI-aware epsilon adjustment" that always evaluated to
+  `eps * (300/300) = eps` on the live path, so it was a no-op; it is dropped.
+  `eps` is calibrated in PDF points (the seam's unit), default 50.
 """
 
+from __future__ import annotations
+
 import logging
-from typing import List, Dict, Any
+from dataclasses import dataclass
+from typing import List, Sequence
+
 import numpy as np
 from sklearn.cluster import DBSCAN
 
+from src.processing.pdf.base import Rect
+
+
+@dataclass(frozen=True)
+class DrawingCluster:
+    """
+    One clustered visual region — probably a figure or a ruled table.
+
+    Attributes:
+        rect: the merged bounding box of every stroke in the cluster.
+        component_count: how many strokes were merged (useful for debugging —
+            a real figure merges dozens; a table's rules merge a handful).
+    """
+
+    rect: Rect
+    component_count: int
+
+
 class VisualRegionClusterer:
     """
-    Clusters vector drawings from a PDF page into precise figure regions.
-
-    The key feature is its DPI-aware adjustment of the DBSCAN `eps` parameter,
-    ensuring consistent clustering regardless of the document's rendering resolution.
+    Clusters vector drawing boxes from a PDF page into figure-sized regions.
 
     Args:
-        eps (float): The maximum distance between two samples for one to be
-                     considered as in the neighborhood of the other. This value is
-                     calibrated for the `reference_dpi`.
-        min_samples (int): The number of samples in a neighborhood for a point
-                           to be considered as a core point.
-        reference_dpi (int): The DPI for which the `eps` value was calibrated.
+        eps: the maximum centre-to-centre distance, in PDF points, for two
+            strokes to be considered neighbours (default 50 — about 1.8 cm).
+        min_samples: how many neighbours a stroke needs to seed a cluster
+            (default 2, so an isolated stroke is never a "figure").
     """
-    
-    def __init__(self, eps: float = 50, min_samples: int = 2, reference_dpi: int = 300):
+
+    def __init__(self, eps: float = 50.0, min_samples: int = 2) -> None:
         self.eps = eps
         self.min_samples = min_samples
-        self.reference_dpi = reference_dpi
         self.logger = logging.getLogger(__name__)
 
-    def cluster_drawings(self, drawings: List[Dict], actual_dpi: int) -> List[Dict[str, Any]]:
+    def cluster_drawings(self, drawing_rects: Sequence[Rect]) -> List[DrawingCluster]:
         """
-        Groups nearby vector drawings into logical clusters (e.g., a single figure).
+        Group nearby vector drawings into logical clusters (e.g. one figure).
 
         Args:
-            drawings: A list of drawing dictionaries from PyMuPDF's `page.get_drawings()`.
-            actual_dpi: The DPI at which the page was rendered for this analysis.
+            drawing_rects: bounding boxes of the page's vector drawings, from
+                `PdfPage.drawings()`.
 
         Returns:
-            A list of dictionaries, where each dictionary represents the
-            bounding box of a clustered visual region.
+            One `DrawingCluster` per region found. Isolated strokes (DBSCAN
+            noise) are dropped.
         """
-        if not drawings:
-            return []
-            
-        # --- DPI-Aware Epsilon Adjustment ---
-        # Scale the epsilon value based on the ratio of the actual DPI to the reference DPI.
-        # This ensures that the physical distance for clustering remains constant.
-        adjusted_eps = self.eps * (actual_dpi / self.reference_dpi)
-        self.logger.debug(
-            f"Clustering {len(drawings)} drawings with DPI-adjusted eps={adjusted_eps:.2f} "
-            f"(Reference: {self.eps} @ {self.reference_dpi} DPI, Actual: {actual_dpi} DPI)"
-        )
-
-        # We need representative points for each drawing. The centroid is a good choice.
-        points = [self._get_centroid(drawing['rect']) for drawing in drawings]
-        
-        if not points:
+        if not drawing_rects:
             return []
 
-        # Perform DBSCAN clustering
-        points_array = np.array(points)
-        db = DBSCAN(eps=adjusted_eps, min_samples=self.min_samples).fit(points_array)
-        
-        labels = db.labels_
-        unique_labels = set(labels)
-        
-        clustered_regions = []
-        # Loop through each found cluster (ignoring noise, label -1)
-        for label in unique_labels:
+        # Each stroke is represented by its centre point for clustering.
+        centres = np.array([
+            [(r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2] for r in drawing_rects
+        ])
+        labels = DBSCAN(eps=self.eps, min_samples=self.min_samples).fit(centres).labels_
+
+        clusters: List[DrawingCluster] = []
+        for label in sorted(set(labels)):
             if label == -1:
-                continue
+                continue  # noise: isolated strokes are not figures
+            members = [drawing_rects[i] for i in np.where(labels == label)[0]]
+            clusters.append(DrawingCluster(
+                rect=_merge_rects(members),
+                component_count=len(members),
+            ))
 
-            # Find all points belonging to the current cluster
-            cluster_points_indices = np.where(labels == label)[0]
-            
-            # Get the bounding boxes of all drawings in this cluster
-            cluster_rects = [drawings[i]['rect'] for i in cluster_points_indices]
-            
-            # Merge the bounding boxes to create one large rectangle for the whole figure
-            if cluster_rects:
-                merged_bbox = self._merge_bboxes(cluster_rects)
-                clustered_regions.append({
-                    'bbox': merged_bbox,
-                    'type': 'drawing_cluster',
-                    'component_count': len(cluster_rects)
-                })
-                
-        self.logger.debug(f"Found {len(clustered_regions)} clustered drawing regions.")
-        return clustered_regions
+        self.logger.debug(
+            "Clustered %d drawings into %d region(s) (eps=%.1f)",
+            len(drawing_rects), len(clusters), self.eps,
+        )
+        return clusters
 
-    def _get_centroid(self, rect: List[float]) -> List[float]:
-        """Calculates the center point (x, y) of a bounding box."""
-        x0, y0, x1, y1 = rect
-        return [(x0 + x1) / 2, (y0 + y1) / 2]
 
-    def _merge_bboxes(self, bboxes: List[List[float]]) -> List[float]:
-        """Merges a list of bounding boxes into a single encompassing bounding box."""
-        min_x0 = min(b[0] for b in bboxes)
-        min_y0 = min(b[1] for b in bboxes)
-        max_x1 = max(b[2] for b in bboxes)
-        max_y1 = max(b[3] for b in bboxes)
-        return [min_x0, min_y0, max_x1, max_y1]
+# --- helpers (after the main class, per CLAUDE.md) -------------------------
+
+def _merge_rects(rects: Sequence[Rect]) -> Rect:
+    """The smallest rectangle enclosing every rectangle in the list."""
+    return Rect(
+        min(r.x0 for r in rects), min(r.y0 for r in rects),
+        max(r.x1 for r in rects), max(r.y1 for r in rects),
+    )

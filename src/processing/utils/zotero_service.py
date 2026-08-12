@@ -112,6 +112,24 @@ class DiskCache:
 # Canonicalization helper
 # ============================================================
 
+#: Where each Zotero item type keeps its CONTAINER title, in priority order.
+#:
+#: For biology researchers: the "container" is the larger work a document sits
+#: inside — the journal for an article, the volume for a book chapter. Zotero
+#: stores it under a different key per item type, and reading only the journal
+#: key means a chapter's container silently reads as missing:
+#:
+#:     journalArticle  -> publicationTitle   "Cell Biology International"
+#:     bookSection     -> bookTitle          "Current Topics in Developmental Biology"
+#:     conferencePaper -> proceedingsTitle
+#:
+#: This was a real defect: the Elsevier chapter's `bookTitle` arrived in every
+#: API response and was dropped, so the chapter was flagged incomplete for a
+#: field we already had.
+CONTAINER_TITLE_KEYS = ("publicationTitle", "bookTitle", "proceedingsTitle",
+                        "encyclopediaTitle", "dictionaryTitle", "journal")
+
+
 def _canonicalize(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Converts Zotero 'data' or 'payload' dict into the canonical metadata format
@@ -132,11 +150,80 @@ def _canonicalize(payload: Dict[str, Any]) -> Dict[str, Any]:
         "title": payload.get("title"),
         "authors": authors,
         "doi": payload.get("DOI") or payload.get("doi"),
-        "journal": payload.get("publicationTitle") or payload.get("journal"),
+        "journal": _container_title(payload),
         "year": payload.get("date") or payload.get("year"),
         "publisher": payload.get("publisher"),
+        # NOTE: `volume` and `pages` also arrive in this payload and a chapter
+        # citation wants both ("…vol. 130, pp. 107-142"). They are NOT lifted
+        # here on purpose: `merge_metadata` consumes an explicit field list, so
+        # an unconsumed key would look supported while going nowhere. Add them
+        # to the merger and to ExtractedMetadata together, or not at all.
         "payload": payload,
     }
+
+
+def _record_from_cache(cached: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Rebuild the canonical record from a cache entry, mapping included.
+
+    For biology researchers: the cache saves what Zotero sent us (the raw
+    `payload`) **and** the tidied-up version we derived from it. Those are two
+    different things, and only the first is a fact — the second is our reading
+    of it, which changes whenever we fix a mapping.
+
+    THE DEFECT THIS FIXES. A cache hit used to return the stored derived
+    record verbatim. So when `_canonicalize` learned to read `bookTitle`, every
+    DOI already in the cache kept its old, wrong answer forever: the fix was
+    live, the tests passed, and a real re-run still produced `journal: None`
+    because the value came from a file written by the previous version.
+
+    A cache of derived values goes stale silently. A cache of raw payloads
+    cannot, so we re-derive on the way out — cheap (a dict walk, no network).
+
+    The older code deliberately did NOT re-derive, with the note "the cache
+    already has a canonicalized record with authors". That was fixing a real
+    bug the wrong way: it passed the *wrapper* to `_canonicalize` instead of
+    the record's own payload, and the wrapper has no `creators`, so the authors
+    vanished. Re-deriving from `record["payload"]` keeps them — pinned by
+    `test_container_title.py::TestTheCacheDoesNotFreezeTheMapping`.
+
+    Args:
+        cached: one cache entry — `{record: {..., payload: {...}}, ...}`.
+
+    Returns:
+        The canonical record. Falls back to the stored record when no payload
+        was saved (entries written before payloads were kept), because a stale
+        mapping still beats no metadata at all.
+    """
+    stored = cached.get("record") or {}
+    payload = stored.get("payload") or cached.get("payload")
+
+    if not isinstance(payload, dict) or not payload:
+        return stored or _canonicalize({})
+
+    return _canonicalize(payload)
+
+
+def _container_title(payload: Dict[str, Any]) -> Optional[str]:
+    """
+    The title of the work this document sits inside, whatever its item type.
+
+    For biology researchers: an article's container is its journal; a book
+    chapter's is the volume. Zotero names that field differently for each, so
+    we try each name in turn rather than assuming everything is an article.
+
+    Args:
+        payload: the Zotero item's `data` dict.
+
+    Returns:
+        The container title, or None if this item type has no container (a
+        whole book, for instance, IS the container).
+    """
+    for key in CONTAINER_TITLE_KEYS:
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 # ============================================================
@@ -190,7 +277,9 @@ class ZoteroService:
         else:
             self.logger.info("ZoteroService disabled or missing credentials.")
 
+    # -----------------------------------------------------------
     # Internal: Safe search wrapper
+    # -----------------------------------------------------------
 
     def _search_items(self, query: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         if not query or self.offline_mode or not self.zotero_api:
@@ -203,7 +292,9 @@ class ZoteroService:
             self.logger.warning(f"Zotero API search failed for query '{query[:50]}': {e}")
             return []
 
+    # -----------------------------------------------------------
     # Public API
+    # -----------------------------------------------------------
 
     def get_canonical_metadata(self, vlm_metadata: Any) -> Dict[str, Any]:
         """
@@ -211,6 +302,7 @@ class ZoteroService:
         Performs a multi-stage search: DOI-first, then a series of targeted
         text searches to maximize the chance of finding a match.
         """
+        # --- Input Normalization ---
         if isinstance(vlm_metadata, str):
             vlm_metadata = {"title": vlm_metadata}
         vlm_metadata = vlm_metadata or {}
@@ -218,10 +310,12 @@ class ZoteroService:
         title = vlm_metadata.get("title")
         authors = vlm_metadata.get("authors", [])
 
+        # --- Offline Mode ---
         if self.offline_mode:
             self.logger.info("Zotero in offline mode, returning VLM data.")
             return {"record": vlm_metadata, "confidence": 0.70, "source": "vlm_extraction", "provenance": {"source_key": "offline_vlm"}}
 
+        # --- Path 1: DOI-First Search (Highest Confidence) ---
         if doi:
             normalized_input_doi = normalize_doi_for_compare(doi)
             cache_key = f"doi_{normalized_input_doi}"
@@ -231,14 +325,8 @@ class ZoteroService:
             if cached:
                 self.logger.info(f"Zotero cache hit for DOI: {normalized_input_doi}")
                 
-                # The cache already has a canonicalized record with authors
-                record = cached.get("record")
-                
-                if not record:
-                    # Fallback: try to canonicalize payload if record missing
-                    payload = cached.get("payload", {})
-                    record = _canonicalize(payload)
-                
+                record = _record_from_cache(cached)
+
                 return {
                     "record": record,
                     "confidence": cached.get("confidence", 0.95),
@@ -276,6 +364,7 @@ class ZoteroService:
                     "source": "zotero_api"
                 }
 
+        # --- Path 2: Multi-Stage Text Search (Fuzzy Fallback) ---
         if title:
             # Strategy 1: Search by Title AND First Author's Last Name (high precision)
             first_author_lastname = ""
@@ -326,9 +415,11 @@ class ZoteroService:
                     self.logger.info(f"Found high-confidence fuzzy match (Score: {best_score}) for title.")
                     return {"record": record, "confidence": 0.85, "source": "zotero_fuzzy_match", "provenance": provenance}
 
+        # --- Path 3: Final Fallback ---
         self.logger.warning(f"Zotero could not find a canonical record for '{title[:50]}...'. Falling back to VLM data.")
         return {"record": vlm_metadata, "confidence": 0.70, "source": "vlm_extraction", "provenance": {"source_key": "vlm_fallback"}}
 
+    # -----------------------------------------------------------
     # Internal: local DOI index
     #
     # WHY THIS EXISTS: the Zotero Web API cannot search by DOI. Its `q` parameter searches
@@ -341,6 +432,7 @@ class ZoteroService:
     # run we ask for `items(since=<stored_version>)`, which returns ONLY what changed.
     # A library of any size therefore costs one full walk once, then a single ~0.3s call
     # per run when nothing has changed.
+    # -----------------------------------------------------------
 
     def _doi_index_path(self) -> Path:
         """Location of the on-disk DOI index (kept out of DiskCache, which expires by TTL)."""

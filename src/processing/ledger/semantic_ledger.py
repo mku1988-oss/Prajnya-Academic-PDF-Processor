@@ -15,9 +15,24 @@ class LedgerRecord(BaseModel):
     authors: List[str] = Field(default_factory=list)
     journal: Optional[str] = None
     year: Optional[int] = None
+
+    # Books and chapters, added session 9 with the type-specific completeness
+    # rule. A book is cited by its EDITORS and PUBLISHER, so a rule allowed to
+    # require them needs somewhere to store them and something to correct them
+    # with — otherwise a document is flagged for a field the review screen
+    # cannot even show.
+    editors: List[str] = Field(default_factory=list,
+                               description="Editor names (books, edited volumes)")
+    publisher: Optional[str] = Field(None, description="Publisher (books/chapters)")
+    document_type: Optional[str] = Field(
+        None, description="research_article | book_chapter | book — decides WHICH "
+                          "completeness rule applies when this record is reassessed")
+
     validation_confidence: float
     validation_source: str
     manual_entry: bool = False
+    
+    # PHASE 3.8: NEW FIELDS
     requires_review: bool = Field(default=False, description="Flagged for manual review")
     review_needed_fields: List[str] = Field(
         default_factory=list,
@@ -68,12 +83,32 @@ class SemanticLedger(ABC):
         """Add or update a record in the ledger's in-memory store."""
         pass
 
+    @abstractmethod
+    def get_all_records(self) -> List[LedgerRecord]:
+        """Return every record currently held by the ledger.
+
+        Promoted from CsvLedgerBackend-only (session S8) so the GUI's
+        Ledger screen can depend on this interface rather than importing
+        the CSV backend directly.
+        """
+        pass
+
+    @abstractmethod
+    def delete_record(self, document_id: str) -> bool:
+        """Remove a record from the ledger's in-memory store.
+
+        Returns True if a record existed and was removed, False otherwise.
+        Like update_record, this only touches the in-memory store —
+        commit() persists it.
+        """
+        pass
+
     # --- NEW METHOD FOR BATCH PERFORMANCE (YOUR SUGGESTION) ---
     @abstractmethod
     def commit(self):
         """Persist all in-memory changes to the backend storage."""
         pass
-    
+
     def flush(self):
         """Alias for commit() for semantic clarity."""
         self.commit()

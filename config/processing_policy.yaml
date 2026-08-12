@@ -1,0 +1,42 @@
+# Run-level processing policy — shared by the CLI and the GUI.
+# .\config\processing_policy.yaml
+#
+# This file sits ABOVE any single strategy: it decides what happens to a
+# document once it has been classified, whichever pipeline ends up reading it.
+# Both front ends read it, which is what keeps them complementary rather than
+# each owning its own copy of the same setting. The GUI may write it back
+# (as V5's Strategy Lab does for the strategy YAML); the CLI can override any
+# value for one run with a flag.
+#
+# Precedence, highest first:
+#   1. a CLI flag             (--chapters / --max-pages / --noninteractive)
+#   2. a per-run override     (what the GUI passes for a single run)
+#   3. this file
+#   4. the built-in default, which is always the CHEAP one
+
+books:
+  # What to do when a document is classified `book` or `book_chapter`.
+  #
+  #   skip      read the front matter and chapter map only. Seconds, no GPU.
+  #             The default, and what every fallback resolves to.
+  #   ask       show the book and let the user decide. Only actually asks when
+  #             the caller supplied a way to ask — a terminal prompt from the
+  #             CLI, a dialog from the GUI. With no handler this behaves as
+  #             `skip`, so an unattended run can never hang or overspend.
+  #   all       read every chapter. For a full volume this is HOURS of GPU.
+  #   chapters  read the chapter numbers listed below.
+  policy: ask
+
+  # Used only when policy is `chapters`.
+  chapters: []
+
+  # A ceiling on body pages read, whatever the policy. null means no ceiling.
+  # Worth setting in a GUI profile that non-technical users share.
+  max_pages: null
+
+  # A document classified `book_chapter` but longer than this is almost
+  # certainly a misclassified book, and its bodies are NOT read whatever the
+  # policy says. This guard exists because the opt-in above protects the book
+  # path only: a `book_chapter` otherwise goes to the article pipeline and is
+  # read in full with no ceiling.
+  implausible_chapter_pages: 80
