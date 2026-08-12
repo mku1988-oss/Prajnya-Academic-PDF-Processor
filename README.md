@@ -10,7 +10,7 @@
 
 Prajnya is a **Modular Document Intelligence Engine** built for high-precision
 **RAG (Retrieval-Augmented Generation)** pipelines. It turns academic PDFs into
-rigorous structured JSON — text, metadata, tables and figures — rather than the
+rigorous structured JSON (text, metadata, tables and figures) rather than the
 flat text a generic parser produces, so that what reaches your vector database
 is verified, structured and semantically rich.
 
@@ -20,16 +20,18 @@ model calls, and **61.9% of pages never reach the GPU at all**. On a 9-document,
 485-page corpus it produced **0 failures, 107 figures and 31 tables**, and the
 8-page benchmark fell from **413s to 194s**.
 
-The same corpus has been run twice — once from the command line, once through
-the graphical interface — with **identical output, document for document, and
+The same corpus has been run twice, once from the command line, once through
+the graphical interface, with **identical output, document for document, and
 zero metadata differences**.
 
-Everything runs **offline**. No page, no title and no citation leaves your
-machine; the only network call is an optional Zotero lookup you configure
-yourself.
+**Fully offline by default.** In the shipped configuration no page, no title
+and no citation leaves your machine. Prajnya can also be pointed at a cloud
+vision model instead, per role, which needs no local GPU at all: see
+[Local or cloud](#local-or-cloud-both-are-first-class). That is a choice you
+make, never a default.
 
 > **A note on names.** **Prajnya** is the product. **Shastrasaara** is the
-> engine's internal codename — you will see it in the source tree, in the
+> engine's internal codename: you will see it in the source tree, in the
 > `SARA_*` environment variables, and as the suggested conda environment name.
 > **Prajnya Studio** is the graphical interface. They are one project.
 
@@ -39,9 +41,10 @@ yourself.
 
 - [What's new in V6](#whats-new-in-v6)
 - [Requirements](#requirements) · [Installation](#installation) · [Quick start](#quick-start)
-- [Two front ends](#two-front-ends-one-pipeline) · [Prajnya Studio](#prajnya-studio--the-eight-screens) · [The CLI](#the-cli) · [Recipes](#recipes)
+- [Two front ends](#two-front-ends-one-pipeline) · [Prajnya Studio](#prajnya-studio-the-eight-screens)
+- [Local or cloud](#local-or-cloud-both-are-first-class) · [The CLI](#the-cli) · [Recipes](#recipes)
 - [Books](#books-cost-hours-so-they-are-asked-about) · [Metadata review](#metadata-review)
-- [What you get](#what-you-get) · [Figures](#figures--the-manifest) · [Tables](#tables--crop-and-structure)
+- [What you get](#what-you-get) · [Figures](#the-figure-manifest) · [Tables](#tables-crop-and-structure)
 - [Performance](#performance) · [How it works](#how-it-works) · [Design principles](#design-principles)
 - [Configuration](#configuration) · [Troubleshooting](#troubleshooting) · [Running notes](#running-notes)
 - [Testing](#testing) · [Competitive landscape](#competitive-landscape) · [Roadmap](#roadmap)
@@ -52,7 +55,7 @@ yourself.
 ## What's new in V6
 
 V6 is a rewrite, not an increment. The previous release (v5.x) had adopted
-better OCR models and become **slower** — because on a single 8GB GPU, wall
+better OCR models and become **slower**, because on a single 8GB GPU, wall
 time is simply total GPU compute, and each better model added compute rather
 than removing it. V6 starts from the opposite premise: **the only real lever is
 not making the model call at all.**
@@ -68,47 +71,47 @@ not making the model call at all.**
 
 A cheap CPU pre-pass reads the text layer, classifies each page and detects
 layout, then decides the **minimum** set of VLM calls. Vision is used only where
-vision is genuinely required — which is why a book, mostly plain prose, is
+vision is genuinely required, which is why a book, mostly plain prose, is
 *cheaper per page* than a dense paper.
 
 ### Figures and tables become retrievable objects
 
 This is the upgrade with the longest reach. V6 does not merely *notice* that a
-page has a figure — it **crops it, captions it, gives it a stable identity, and
+page has a figure, it **crops it, captions it, gives it a stable identity, and
 groups its panels under the printed label a human would cite**. The same is true
 of tables, which additionally carry a reconstructed grid.
 
 The result is that every figure and table leaves the pipeline as an addressable
 object with its text attached, which is precisely what a **downstream
 multimodal RAG** needs: an image it can embed, a caption it can index, and a
-page and label that let an answer cite *"Figure 4 of Smith et al."* rather than
-"somewhere in this PDF".
+page and label that let an answer cite a specific numbered figure in a named
+paper, rather than "somewhere in this PDF".
 
 | | measured on the 485-page corpus |
 |---|---|
 | figure crops extracted | **107** |
-| carrying their printed label (`Fig. 1`, `Figure 4b`, …) | **95 — 89%** |
+| carrying their printed label, as the paper prints it | **95 (89%)** |
 | crops that are panels of one printed figure | **26**, resolved into **12** figures |
 | distinct printed figures after grouping | **81** |
 | table crops, each with a reconstructed grid | **31** |
 | crops referenced by a manifest but missing on disk | **0** |
 
 Grouping matters more than it sounds. A multi-panel figure is detected as
-several separate boxes, so without it "Figure 11" arrives as three unrelated
-images and a retriever has no idea they are one exhibit. V6 reads the caption
-line from the text layer and gives every crop of one printed figure the same
-`label_key`.
+several separate boxes, so without it a single numbered figure arrives as
+several unrelated images and a retriever has no way to know they are one
+exhibit. V6 reads the caption line from the text layer and gives every crop of
+one printed figure the same `label_key`.
 
 **Figure content is deliberately not described at parse time.** Captioning every
 figure with a VLM during extraction is work spent on figures nobody asks about.
 The crop, its caption, and the surrounding discussion are enough context to
 *retrieve* it; interpreting the image belongs to the multimodal model at query
-time, on the subset actually asked for. That is a design decision, not a gap —
+time, on the subset actually asked for. That is a design decision, not a gap:
 see [What you get](#what-you-get) for the exact records this produces.
 
 ### New capabilities
 
-- **Prajnya Studio, rebuilt** — eight screens including a **results viewer**,
+- **Prajnya Studio, rebuilt**: eight screens including a **results viewer**,
   which v5.x did not have at all: 107 figures and 31 tables were extracted and
   then invisible. Also new: a review queue, a book chapter map, and a **dark
   theme** (v5.x offered the menu item but it changed nothing).
@@ -119,20 +122,24 @@ see [What you get](#what-you-get) for the exact records this produces.
   research-article, book, or book-chapter pipeline. A whole folder is
   pre-flighted on the CPU first, so a 345-page volume hiding in a batch is
   visible while it still costs nothing.
-- **A permanent ledger**, keyed by file SHA-256, with a metadata review flow.
+- **A permanent ledger**: keyed by file SHA-256, with a metadata review flow.
   Renaming a PDF does not create a duplicate.
-- **Strategy Lab** — change which model does which job, from the interface,
+- **Local or cloud, chosen per role.** Bind a role to a cloud vision model and
+  the pipeline switches to its cloud path, with no GPU required at all. The
+  routing discipline still applies, so you pay only for pages that need a
+  model. See [Local or cloud](#local-or-cloud-both-are-first-class).
+- **Strategy Lab**: change which model does which job, from the interface,
   with a diff before every save and a **Restore Defaults** that always works.
 
 ### Correctness work you would not otherwise see
 
-- **Every figure on a page containing equations used to be silently discarded**
-  — a classification rule returned before the visual scan ran. Fixing it
+- **Every figure on a page containing equations used to be silently discarded.**
+  A classification rule returned before the visual scan ran. Fixing it
   recovered **+22% more figures** across the corpus (88 → 107). Nothing had
   failed; `figure_count: 0` simply looked like an honest answer.
 - **A reference list draws a box around every "CrossRef" link**, and clustered
   those look exactly like a figure. Measured word-density separates them
-  cleanly (decoration 51–72% coverage, real figures 0–8%), so bibliography
+  cleanly (decoration 51-72% coverage, real figures 0-8%), so bibliography
   pages no longer go to the GPU.
 - **`--force` now genuinely re-derives metadata** instead of re-reading every
   page and then returning the value the first run had cached.
@@ -149,14 +156,14 @@ Apache-2.0.** See [Licence](#licence).
 The things v5.x got right are still here, and still the reason to use this over
 a generic parser:
 
-- **"Trust, but verify" — the golden record.** Metadata is not taken from one
+- **"Trust, but verify", the golden record.** Metadata is not taken from one
   source and believed. A VLM reading, the raw text layer, and an authority
   (Zotero, by DOI) are reconciled, and the result carries a
   `validation_source` and a `validation_confidence` saying how well they
   agreed. Bad metadata is bad RAG, caught at the source.
 - **Sovereign intelligence.** No model name appears anywhere in `src/`. Roles
   are bound to models in YAML, so switching between a local model and a cloud
-  one is a configuration change — see [Configuration](#configuration).
+  one is a configuration change, see [Configuration](#configuration).
 - **Surgical precision.** A chart is cropped and sent as a high-resolution
   patch rather than shrinking a whole 2000×3000 page into a model's context.
 - **Atomic state.** The ledger is written `.csv.tmp` → `.csv`, keyed by
@@ -170,13 +177,16 @@ a generic parser:
 | | |
 |---|---|
 | **OS** | Windows 10/11 or Linux. Developed and measured on Windows 11. |
-| **Python** | **3.10** — pinned. Both entrypoints refuse to start on anything else, for a reason worth reading in [The Python environment](#the-python-environment). |
-| **GPU** | An **8 GB** NVIDIA card is enough, and is what every number here was measured on. More VRAM lets you run larger models; see [Configuration](#configuration). |
-| **[llama.cpp](https://github.com/ggml-org/llama.cpp)** | `llama-server`, built with your GPU backend. Not bundled — it is a separate project with its own build. |
-| **Disk** | **~13 GB** of model weights (measured: 12.7 GB of GGUF pairs + a 131 MB layout model), plus your output. |
+| **Python** | **3.10**, pinned. Both entrypoints refuse to start on anything else, for a reason worth reading in [The Python environment](#the-python-environment). |
+| **GPU** *(local mode only)* | An **8 GB** NVIDIA card is enough, and is what every number here was measured on. More VRAM lets you run larger models; see [Configuration](#configuration). Not needed at all in cloud mode. |
+| **[llama.cpp](https://github.com/ggml-org/llama.cpp)** *(local mode only)* | `llama-server`, built with your GPU backend. Not bundled; it is a separate project with its own build. |
+| **Disk** | **~13 GB** of model weights for local mode (measured: 12.7 GB of GGUF pairs plus a 131 MB layout model), plus your output. In cloud mode, only the 131 MB layout model. |
 
-A CPU-only machine will run the pre-flight scan, the ledger, and every screen of
-the interface, but cannot process pages.
+**A GPU is not mandatory.** Prajnya also runs against a cloud vision model, in
+which case no local GPU is used at all. See
+[Local or cloud](#local-or-cloud-both-are-first-class). A CPU-only machine with
+no cloud key configured still runs the pre-flight scan, the ledger, the review
+queue and every screen of the interface.
 
 ---
 
@@ -193,7 +203,7 @@ conda activate shastrasaara
 pip install -r requirements.txt
 ```
 
-**2. Download the models.** Weights are not in the repository — they are tens of
+**2. Download the models.** Weights are not in the repository, they are tens of
 gigabytes. [`models/README.md`](models/README.md) lists every file, its licence,
 and where to put it. The short version: one `curl` for the 131 MB layout model,
 and three `model`/`mmproj` GGUF pairs (6 files, 12.7 GB) into `models/<vendor>/`.
@@ -221,7 +231,7 @@ python run_llama_server.py --check
 It resolves every model path in `config/vlm_profiles/model.ini` and names
 anything missing. A clean result means the configuration and the files agree.
 
-**Optional — Zotero enrichment.** Put `ZOTERO_API_KEY` and `ZOTERO_LIBRARY_ID`
+**Optional. Zotero enrichment.** Put `ZOTERO_API_KEY` and `ZOTERO_LIBRARY_ID`
 in `.env` to let metadata be cross-checked against your library. Without them
 the run says so plainly and continues; nothing degrades silently.
 
@@ -239,12 +249,12 @@ python run_llama_server.py
 # 2a. Process a paper from the command line
 python -u run_prajnya.py --pdf "paper.pdf"
 
-# 2b. ...or open the graphical interface instead
+# 2b..or open the graphical interface instead
 python -u run_prajnya_studio.py
 ```
 
-Step 0 is not optional, and step 1 is not `llama-server.exe` typed by hand —
-both for reasons worth knowing before something fails oddly. See
+Step 0 is not optional, and step 1 is not `llama-server.exe` typed by hand.
+Both for reasons worth knowing before something fails oddly. See
 [The Python environment](#the-python-environment) and
 [Starting the model server](#starting-the-model-server).
 
@@ -254,7 +264,7 @@ both for reasons worth knowing before something fails oddly. See
 
 | entrypoint | what it is |
 |---|---|
-| `run_prajnya.py` | the command line — one PDF, a folder, or the review screen |
+| `run_prajnya.py` | the command line, one PDF, a folder, or the review screen |
 | `run_prajnya_studio.py` | Prajnya Studio, the graphical interface (opens in your browser) |
 
 Both end up in `src/processing/runner.py`; the GUI's call arrives there through
@@ -267,18 +277,18 @@ run_prajnya_studio.py --port 8973     # a different port
 run_prajnya_studio.py --no-browser    # don't open a tab
 ```
 
-**The default port is 8850, not 8080, on purpose** — 8080 is the local
+**The default port is 8850, not 8080, on purpose**, 8080 is the local
 llama-server's, so defaulting there would stop the GUI starting on exactly the
 machine that is set up correctly to run the pipeline. If the port you pick is
 already busy the launcher refuses and says so; it does not start and quietly
 serve nothing.
 
-### Prajnya Studio — the eight screens
+### Prajnya Studio: the eight screens
 
 | screen | shortcut | what it is for |
 |---|---|---|
 | **Library / Batch** | `Ctrl+L` | Type a folder path, **Scan** to classify every PDF on the CPU (~1s each, no GPU), then **Start**. Live transcript, hard **Stop**, and the book question asked as a dialog. |
-| **Results** | | Metadata, page text, the figure gallery grouped by printed label, tables beside their reconstructed grids, and the raw JSON. **V5 had no results screen at all** — 107 figures and 31 tables were invisible. |
+| **Results** | | Metadata, page text, the figure gallery grouped by printed label, tables beside their reconstructed grids, and the raw JSON. **V5 had no results screen at all**, 107 figures and 31 tables were invisible. |
 | **Ledger** | `Ctrl+G` | Every document ever processed, searchable. Per-row edit, CSV and BibTeX export. |
 | **Review Queue** | | Whatever is flagged incomplete, with exactly which fields are missing. Same correction logic as the CLI's `--review`, so the two cannot disagree. |
 | **Chapter Map** | | Books only: every chapter's authors and start page, and a per-chapter **Read** button. |
@@ -287,12 +297,57 @@ serve nothing.
 | **Help** | | Quick start and FAQ. |
 
 Scanning a folder works with no model server running; **processing pages does
-not** — start `llama-server` first, exactly as for the CLI.
+not**, start `llama-server` first, exactly as for the CLI.
 
 A run is **one subprocess per PDF**, so a batch cannot freeze the interface and
 **Stop** is a real kill of the document currently running, not a flag checked
 between documents. Only one run is active at a time (there is one GPU); opening
 a second tab joins the run in progress rather than starting another.
+
+---
+
+## Local or cloud: both are first-class
+
+Prajnya is model-agnostic by design, and that extends past which local model
+reads a page. A **role can be bound to a cloud vision model instead**, and the
+pipeline switches to its cloud path automatically.
+
+```yaml
+# config/research_article_strategy.yaml
+profile_registry:
+  default: "gemini-3-flash"       # a cloud profile instead of a local one
+```
+
+```bash
+# .env
+GEMINI_API_KEY=your-key-here
+```
+
+That is the whole change. No code is touched, and the shipped cloud profiles
+(`gemini-2-5-flash`, `gemini-2-5-pro`, `gemini-3-flash`, `gemini-3-pro`) already
+carry their API parameters, image sizing and rate limits.
+
+| | fully local | cloud |
+|---|---|---|
+| hardware | an 8 GB GPU | any machine, including CPU-only |
+| privacy | nothing leaves the machine | pages are sent to the provider |
+| cost | electricity | per page, at the provider's rate |
+| setup | download the weights, run the server | one API key |
+
+**The cost discipline survives the switch.** The cloud path is not "send every
+page to the API": a lite router still harvests the free text layer wherever a
+page is unambiguously plain, and calls the model only where it is not. You pay
+for the pages that genuinely need a model, which on a born-digital corpus is a
+minority of them.
+
+**Choose per role, not per run.** Because binding is per role, mixed setups are
+possible: a cloud model for the title page, where reasoning pays, and a local
+model for the body, where volume dominates. The
+[Strategy Lab](#configuration) screen edits these bindings with a diff before
+every save.
+
+> Privacy note: the default configuration is **entirely local**, and no cloud
+> profile is active unless you assign one. Nothing is sent anywhere by default.
 
 ---
 
@@ -320,16 +375,16 @@ run_prajnya.py --review
 
 | flag | what it does |
 |---|---|
-| *(omitted)* | front matter and chapter map only — seconds, no GPU |
+| *(omitted)* | front matter and chapter map only, seconds, no GPU |
 | `--chapters 3 4` | read those chapters. Accepts `3-5` ranges too |
-| `--chapters` *(no numbers)* | read **every** chapter — hours of GPU on a full volume |
+| `--chapters` *(no numbers)* | read **every** chapter, hours of GPU on a full volume |
 | `--max-pages N` | hard ceiling on body pages read, whatever else was asked |
 
 ### Everything else
 
 | flag | default | what it does |
 |---|---|---|
-| `--out PATH` | `run_outputs/` inside this repo | where results go — a JSON path for one PDF, a run directory for a folder |
+| `--out PATH` | `run_outputs/` inside this repo | where results go, a JSON path for one PDF, a run directory for a folder |
 | `--noninteractive` | off | never prompt. Books take the cheap default; review is deferred to a later `--review` |
 | `--front-matter-pages N` | 10 | leading pages scanned for DOI / ISBN / ISSN |
 | `--backend NAME` | `pypdfium2` | PDF backend (`pypdfium2` or `pymupdf`) |
@@ -340,7 +395,7 @@ run_prajnya.py --review
 | code | meaning |
 |---|---|
 | `0` | everything processed |
-| `1` | nothing could run — no such file, no ledger to review |
+| `1` | nothing could run, no such file, no ledger to review |
 | `2` | finished, but at least one document failed. **A batch never stops for one bad PDF.** |
 
 ---
@@ -381,7 +436,7 @@ The difference between a paper and a 345-page volume is minutes versus hours of
 GPU. So V6 never guesses:
 
 - **A folder is pre-flighted first.** Every PDF is classified on the CPU (~1s
-  each) and the whole list is printed — books included — **before any GPU work
+  each) and the whole list is printed, books included, **before any GPU work
   starts.** A 345-page volume hiding in a batch is visible while it still costs
   nothing to change your mind.
 - **Then the batch runs without interruption**, so it can be left alone.
@@ -431,7 +486,7 @@ assessed, written to the ledger, and flagged if something required is missing.
 | `book_chapter` | title + authors + (journal \| publisher) + DOI |
 
 The either-or groups are bibliography, not laxity: an edited volume is cited by
-its editors and a monograph by its authors. A book needs no DOI — many have none
+its editors and a monograph by its authors. A book needs no DOI, many have none
 and the ISBN is the identifier that matters.
 
 A record is also flagged when validation confidence is below 0.75, or when the
@@ -446,7 +501,7 @@ merge marked the authors suspicious.
 | `--noninteractive` | nothing asks; the log says how many are waiting |
 | any time later | `run_prajnya.py --review` picks up everything still flagged |
 
-Corrections go into the ledger *and* back into the affected output JSON — and
+Corrections go into the ledger *and* back into the affected output JSON, and
 only the metadata block. Pages, figures and tables are never touched by a
 correction.
 
@@ -471,7 +526,7 @@ run_outputs/                      ← always here, whatever your working directo
 ```
 
 The location is anchored to this repository, not to your PDFs and not to the
-directory you launched from — so results are always in one findable place, and
+directory you launched from, so results are always in one findable place, and
 a reference library never accumulates generated JSON. `--out` overrides it.
 
 Each document JSON:
@@ -493,24 +548,24 @@ Each document JSON:
 `glm_fullpage` (a VLM read), `glm_repair` (a table crop re-read),
 `two_shot_title_page`.
 
-### Figures — the manifest
+### The figure manifest
 
 Every document's figure directory carries a `manifest.json`. This is the record
 a retrieval layer indexes:
 
 ```jsonc
 {
-  "document": "An_NMR_method_to_characterize_multiple_water_compartments…",
+  "document": "<sanitised document name>",
   "figure_count": 5,
   "figures": [
     {
       "figure_id": "p2_fig1",          // stable within the document
       "image_path": "figures/<document>/p2_fig1.png",   // relative to the run root
-      "caption":  "Fig. 1. T1 analysis of a saturation recovery curve …",
+      "caption":  "Figure 1. <the figure's printed caption>",
       "page": 2,                        // 1-based, as printed in the PDF
       "bbox": [1376, 2190, 2342, 2870], // pixels, at the detection DPI
       "printed_label": "Fig. 1",        // what a human would cite
-      "label_key": "figure 1",          // normalised — panels of one figure share it
+      "label_key": "figure 1",          // normalised, panels of one figure share it
       "panel_group_size": 1             // >1 when this crop is one panel of several
     }
   ]
@@ -518,10 +573,10 @@ a retrieval layer indexes:
 ```
 
 **Every path is relative to the run root, never absolute.** The whole output
-tree can be moved or copied to another machine and every crop still resolves —
+tree can be moved or copied to another machine and every crop still resolves:
 verified by moving a completed run and re-checking all 107 references.
 
-### Tables — crop *and* structure
+### Tables: crop *and* structure
 
 A table is extracted twice over: as an image, and as a reconstructed grid.
 
@@ -529,7 +584,7 @@ A table is extracted twice over: as an image, and as a reconstructed grid.
 {
   "table_id": "p4_tab1",
   "image_path": "tables/<document>/p4_tab1.png",
-  "caption": "Table 1 Multi-segment or zonal fast exchange equations …",
+  "caption": "Table 1. <the table's printed caption>",
   "page": 4,
   "bbox": [1298, 303, 2384, 820],
   "grid": "<table>…</table>"     // machine-readable structure
@@ -541,7 +596,7 @@ queryable. A retrieval layer can index the grid's text and still hand the
 original image to a multimodal model when the layout itself carries meaning.
 
 Where a page's text layer produced a table that came out mangled, that one crop
-is re-read by the VLM (`glm_repair`) rather than the whole page — 3.1% of pages
+is re-read by the VLM (`glm_repair`) rather than the whole page, 3.1% of pages
 on the corpus, against re-reading everything.
 
 ---
@@ -549,26 +604,26 @@ on the corpus, against re-reading everything.
 ## Performance
 
 Full sample corpus, measured on a **verified clean GPU** (0 MiB resident before
-the run — see [the VRAM rule](#the-vram-rule)):
+the run, see [the VRAM rule](#the-vram-rule)):
 
 | document | type | pages | time | s/page |
 |---|---|---:|---:|---:|
-| NMR benchmark | article | 8 | 194.7s | 24.3 |
-| Collagen structure | article | 25 | 456.5s | 18.3 |
-| Collagen review | article | 11 | 186.3s | 16.9 |
-| CollagenFibrilAssembly | book_chapter | 36 | 491.1s | 13.6 |
-| Hydration-induced | article | 20 | 321.9s | 16.1 |
-| JRuberti | article | 26 | 306.4s | 11.8 |
-| Saturated Solutions | article | 7 | 279.5s | 39.9 |
-| Silberbush-2019 | article | 7 | 139.5s | 19.9 |
-| **Tendon assembly** | **book** | **345** | **1410.3s** | **4.1** |
+| journal article, born-digital | article | 8 | 194.7s | 24.3 |
+| journal article, figure-heavy | article | 25 | 456.5s | 18.3 |
+| review article | article | 11 | 186.3s | 16.9 |
+| chapter from an edited volume | book_chapter | 36 | 491.1s | 13.6 |
+| journal article, multi-panel figures | article | 20 | 321.9s | 16.1 |
+| journal article, long reference list | article | 26 | 306.4s | 11.8 |
+| **older scanned article, no text layer** | article | 7 | 279.5s | **39.9** |
+| short article | article | 7 | 139.5s | 19.9 |
+| **edited volume, read in full** | **book** | **345** | **1410.3s** | **4.1** |
 | **total** | | **485** | **63.7 min** | **7.8** |
 
 **How the 485 pages were read:**
 
 | route | pages | share |
 |---|---:|---:|
-| text layer — **no GPU at all** | 300 | **61.9%** |
+| text layer, **no GPU at all** | 300 | **61.9%** |
 | full VLM read | 162 | 33.4% |
 | table repair (a crop re-read) | 15 | 3.1% |
 | title page, two-shot | 8 | 1.6% |
@@ -579,12 +634,13 @@ referenced, 138 found, 0 orphaned.
 
 Three numbers are worth dwelling on:
 
-- **A book is cheaper per page than a paper** — 4.1s against ~17s — because most
+- **A book is cheaper per page than a paper**, 4.1s against ~17s, because most
   of its 345 pages were read on the CPU. That is the entire V6 thesis, measured.
-- **The slowest document is the one with no text layer.** *Saturated Solutions*
-  is an old scan: nothing harvestable, most pages needing table repair,
-  39.9s/page. The pre-pass cannot help a scan, and does not pretend to.
-- **The same corpus through the graphical interface produced identical output** —
+- **The slowest document is the one with no text layer.** An older scanned
+  article has nothing to harvest, so every page costs a full model read and
+  most also need table repair. The pre-pass cannot help a scan, and does not
+  pretend to.
+- **The same corpus through the graphical interface produced identical output**:
   same 485 pages, same 107 figures, same 31 tables, and **zero metadata
   differences** across title, DOI, journal, year, authors, publisher and
   validation fields for all nine documents. Two front ends, one pipeline, and
@@ -592,14 +648,14 @@ Three numbers are worth dwelling on:
 
 > **Timings are only comparable on a clean GPU.** The same benchmark measures
 > 148s or 260s depending purely on whether a model was left resident by the
-> previous run — with byte-identical output. See [the VRAM rule](#the-vram-rule).
+> previous run, with byte-identical output. See [the VRAM rule](#the-vram-rule).
 
 ---
 
 ## How it works
 
 The previous release adopted better OCR models and got *slower*: 413s on the 8-page benchmark
-against its own predecessor's 324s. The reason is structural — on one 8GB GPU
+against its own predecessor's 324s. The reason is structural, on one 8GB GPU
 wall time is just total GPU compute, and it had added a second model (layout
 grounding) plus crop re-reads on top of the reading pass. Concurrency was tested
 in four configurations and every one netted zero or worse: scheduling
@@ -631,18 +687,18 @@ models is a config change.
 
 **Pluggable seams.** `LayoutDetector` returns `List[Detection]` whether an ONNX
 model or a grounding VLM produced them. `PdfBackend` abstracts PDF text and
-geometry. **Asking is a capability the caller supplies** — `book_prompt.py` and
+geometry. **Asking is a capability the caller supplies**, `book_prompt.py` and
 `review_prompt.py` hold conversations and no decisions, so a GUI replaces those
 two files and nothing else.
 
 **Permissive licences only.** Apache-2.0 / MIT / BSD. AGPL and "community
-licence" components are banned — this ruled out DocLayout-YOLO (AGPL-3.0 via
+licence" components are banned, this ruled out DocLayout-YOLO (AGPL-3.0 via
 Ultralytics) and HunyuanOCR-1.5 (Tencent Community Licence), both otherwise
 attractive.
 
 **Every stage is gated.** A parity harness asserts metadata, table recovery,
 figure crops and word coverage against archived known-good output. No
-optimization ships without passing it — see [Testing](#testing).
+optimization ships without passing it. See [Testing](#testing).
 
 ---
 
@@ -651,7 +707,7 @@ optimization ships without passing it — see [Testing](#testing).
 Everything model-specific lives in `config/`, and **no model name appears
 anywhere in `src/`.** The pipeline asks only for a *role*; the configuration
 decides which model answers. Swapping a model is therefore a configuration
-change, not a code change — which is what lets the tool outlive the models it
+change, not a code change, which is what lets the tool outlive the models it
 was written against.
 
 ### The six roles
@@ -675,7 +731,7 @@ Deleting a role's line disables that feature rather than breaking the run.
 | `config/vlm_profiles/<model>.yaml` | prompt mode, fixed prompts, target DPI, VRAM estimate, co-residency |
 | `config/vlm_profiles/model.ini` | the llama-server preset: GGUF paths, context size, sampling |
 
-They must agree — a profile naming a preset that does not exist is a run that
+They must agree, a profile naming a preset that does not exist is a run that
 fails at the first page. **Strategy Lab checks all three**, shows a diff before
 every save, backs up the file it touches, and warns before you assign two models
 your card cannot hold at once. It can also duplicate a profile, so you can point
@@ -696,7 +752,7 @@ unrecoverable. Nothing ever writes *into* that directory.
 | `ZOTERO_API_KEY`, `ZOTERO_LIBRARY_ID` | enable Zotero enrichment |
 
 All are read from `.env` if present. An unset variable resolves to nothing and
-says so — it never becomes the literal string `${VAR}`.
+says so, it never becomes the literal string `${VAR}`.
 
 ---
 
@@ -707,13 +763,13 @@ Every entry here is a failure that has actually happened, not a hypothetical.
 | symptom | cause and fix |
 |---|---|
 | **"the wrong Python is running this file"** | Something other than the project environment started it. `conda activate shastrasaara`, then re-run. The message prints which interpreter it actually got. |
-| **A run dies mid-way with a model error, after pre-flight passed** | `llama-server` was started from the wrong directory, so its preset's relative model paths resolve to nothing — and it validates none of them at startup. Start it with `python run_llama_server.py`. |
+| **A run dies mid-way with a model error, after pre-flight passed** | `llama-server` was started from the wrong directory, so its preset's relative model paths resolve to nothing, and it validates none of them at startup. Start it with `python run_llama_server.py`. |
 | **Everything is ~3× slower than the table above, with identical output** | A model from the previous run is still resident and the current one has spilled to system RAM. Start the server with `--models-max 1` (the launcher's default) and see [the VRAM rule](#the-vram-rule). |
 | **"Port 8850 is already in use"** | Prajnya Studio is probably open in another window. Otherwise `--port 8851`. |
 | **The interface loads but processing fails immediately** | `llama-server` is not running. Scanning a folder needs no server; reading pages does. |
 | **A document is re-processed although it ran before** | The ledger is keyed by file SHA-256, so an edited PDF is correctly a new document. To force it either way, use `--force`. |
 | **Zotero metadata is not being used** | `ZOTERO_API_KEY` / `ZOTERO_LIBRARY_ID` are unset. The log says so explicitly at startup rather than degrading quietly. |
-| **A book "finished" in seconds** | That is the default: front matter and the chapter map only. Add `--chapters` to read bodies — and see what that costs first. |
+| **A book "finished" in seconds** | That is the default: front matter and the chapter map only. Add `--chapters` to read bodies, and see what that costs first. |
 
 ---
 
@@ -733,7 +789,7 @@ python run_llama_server.py --check
 
 **Why this matters more than it looks.** Without the environment active, PATH
 may fall through to another Python that has all the same packages at *different
-major versions* (numpy 2.0 vs 1.26 — measured, on the development machine's
+major versions* (numpy 2.0 vs 1.26, measured, on the development machine's
 miniconda base). It does not fail with `ImportError`; it runs and quietly
 produces different numbers. On a project whose gates are IoU thresholds and
 coverage ratios, that is the worst possible failure mode.
@@ -741,7 +797,7 @@ coverage ratios, that is the worst possible failure mode.
 Both entrypoints therefore **check the interpreter before importing anything**
 and stop with an explanation rather than a traceback. If `conda activate
 shastrasaara` cannot find the environment by name, it is registered by path
-instead — `conda env list` prints where it is, and naming its interpreter
+instead, `conda env list` prints where it is, and naming its interpreter
 directly always works:
 
 ```bash
@@ -760,7 +816,7 @@ It pins the server's working directory to this repository and checks that every
 model file named in `config/vlm_profiles/model.ini` actually exists before
 starting. Both matter because llama.cpp resolves the preset's model paths
 against **the server process's own working directory**, and `--models-preset`
-validates nothing at startup — so a server started from the wrong folder
+validates nothing at startup, so a server started from the wrong folder
 launches happily, passes the pipeline's pre-flight, and then fails in the middle
 of a run at the first page that needs a model.
 
@@ -774,7 +830,7 @@ it in `.env`), or `PATH`.
 cannot hold the title model (~5.5GB) and the body model (~2.5GB) together, and
 the router sheds models by count rather than by memory. A model left resident by
 the previous document makes the next one spill to system RAM and decode ~3×
-slower, with byte-identical output — invisible in the results, visible only on
+slower, with byte-identical output, invisible in the results, visible only on
 the clock. The same benchmark measured 148s clean and 260s contaminated.
 
 Launch with `--models-max 1`, and record
@@ -813,7 +869,7 @@ project's quality than not shipping one.
 ## Competitive landscape
 
 Rather than score other projects on features they may not aim at, here is what
-Prajnya does that a document parser generally does not — each one measured on
+Prajnya does that a document parser generally does not, each one measured on
 the corpus above, not asserted:
 
 | | Prajnya V6 |
@@ -822,13 +878,13 @@ the corpus above, not asserted:
 | **Metadata verification** | reconciles a model reading, the text layer and an authority (Zotero by DOI), and records `validation_source` and `validation_confidence` |
 | **Figures as retrievable objects** | 107 crops, **89% carrying their printed label**, multi-panel figures grouped under one label |
 | **Tables twice over** | the crop *and* a reconstructed grid, so the numbers are queryable and the layout is still inspectable |
-| **Books and edited volumes** | front matter, a parsed contents page, and **per-chapter authorship** — a passage cites its chapter's authors, not the editors' |
+| **Books and edited volumes** | front matter, a parsed contents page, and **per-chapter authorship**, a passage cites its chapter's authors, not the editors' |
 | **Operational state** | an atomic SHA-256 ledger, resumable batches, and a review queue for anything incomplete |
 | **Privacy** | fully local; the cloud path exists but is opt-in and off |
 
 The trade Prajnya makes deliberately: it is **not the fastest per page**. Tools
 that read every page with one model can be quicker on a short, clean paper.
-Prajnya optimises for what a RAG pipeline actually inherits — verified metadata,
+Prajnya optimises for what a RAG pipeline actually inherits: verified metadata,
 addressable assets, and a cost that does not scale linearly with page count.
 
 ---
@@ -837,13 +893,13 @@ addressable assets, and a cost that does not scale linearly with page count.
 
 v5.x's roadmap named three things for the next phase. Two have landed:
 
-- ✅ **A faster layout engine** — delivered, though not as planned. The
+- ✅ **A faster layout engine**, delivered, though not as planned. The
   Dolphin-V2 experiment was measured and **rejected** (it bought no speed); the
   win came instead from an Apache-2.0 **CPU ONNX detector**, replacing a VLM
   that had been holding VRAM.
-- ✅ **An asset ledger for extracted images** — delivered as the figure and
+- ✅ **An asset ledger for extracted images**, delivered as the figure and
   table manifests, with printed labels, panel grouping and page anchoring.
-- 🔜 **Multimodal RAG — "search by chart".** Not built here, and deliberately
+- 🔜 **Multimodal RAG, "search by chart".** Not built here, and deliberately
   so: this repository's job is to produce retrievable, addressable assets. The
   vector-DB ingestion and query-time interpretation belong to the layer above,
   and the output format is shaped to make that layer easy to write.
@@ -887,7 +943,7 @@ of them is permissively licensed. Full attributions are in [`NOTICE`](NOTICE).
 
 **v5.x is still on `main` and still runs.** V6 is a rewrite rather than an
 upgrade: the output schema, the configuration layout and the GUI are all
-different, and there is no in-place migration. Run whichever you need — they
+different, and there is no in-place migration. Run whichever you need, they
 share no state except, if you point them at it, a Zotero library.
 
 If you are coming from v5.x, the differences that will bite first:
@@ -915,4 +971,4 @@ can be pulled into an AGPL work, but distributing that combination would
 relicense the whole product as AGPL. So **pypdfium2 is the default backend**;
 PyMuPDF remains an optional local-development backend, never appears in
 `requirements.txt`, and is never required for a run to succeed. All PDF access
-goes through `PdfBackend` — `fitz` is never imported directly.
+goes through `PdfBackend`, `fitz` is never imported directly.
