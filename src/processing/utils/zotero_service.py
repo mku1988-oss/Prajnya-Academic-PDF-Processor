@@ -190,9 +190,7 @@ class ZoteroService:
         else:
             self.logger.info("ZoteroService disabled or missing credentials.")
 
-    # -----------------------------------------------------------
     # Internal: Safe search wrapper
-    # -----------------------------------------------------------
 
     def _search_items(self, query: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         if not query or self.offline_mode or not self.zotero_api:
@@ -205,9 +203,7 @@ class ZoteroService:
             self.logger.warning(f"Zotero API search failed for query '{query[:50]}': {e}")
             return []
 
-    # -----------------------------------------------------------
     # Public API
-    # -----------------------------------------------------------
 
     def get_canonical_metadata(self, vlm_metadata: Any) -> Dict[str, Any]:
         """
@@ -215,7 +211,6 @@ class ZoteroService:
         Performs a multi-stage search: DOI-first, then a series of targeted
         text searches to maximize the chance of finding a match.
         """
-        # --- Input Normalization ---
         if isinstance(vlm_metadata, str):
             vlm_metadata = {"title": vlm_metadata}
         vlm_metadata = vlm_metadata or {}
@@ -223,12 +218,10 @@ class ZoteroService:
         title = vlm_metadata.get("title")
         authors = vlm_metadata.get("authors", [])
 
-        # --- Offline Mode ---
         if self.offline_mode:
             self.logger.info("Zotero in offline mode, returning VLM data.")
             return {"record": vlm_metadata, "confidence": 0.70, "source": "vlm_extraction", "provenance": {"source_key": "offline_vlm"}}
 
-        # --- Path 1: DOI-First Search (Highest Confidence) ---
         if doi:
             normalized_input_doi = normalize_doi_for_compare(doi)
             cache_key = f"doi_{normalized_input_doi}"
@@ -253,34 +246,36 @@ class ZoteroService:
                     "source": cached.get("source", "zotero_cache")
                 }
 
-            # Query Zotero by DOI
-            items = self._search_items(doi, limit=5)
-            for item in items:
-                data = item.get("data", {})
-                item_doi = data.get("DOI") or data.get("doi")
-                normalized_item = normalize_doi_for_compare(item_doi or "")
+            # Look the DOI up in our local index.
+            #
+            # We CANNOT ask Zotero to search by DOI. The Web API's `q` parameter only
+            # searches titles + creators (qmode=titleCreatorYear) or titles + creators +
+            # attachment full-text (qmode=everything). The DOI field is not searchable in
+            # either mode -- the API docs say "Searching of other fields will be possible
+            # in the future". Passing a DOI as `q` therefore always returned 0 results and
+            # this path silently fell through to the fuzzy title search.
+            # See _find_item_data_by_doi() for how the local index is kept in sync.
+            data = self._find_item_data_by_doi(normalized_input_doi)
+            if data:
+                self.logger.info(f"Zotero DOI index match for: {normalized_input_doi}")
+                record = _canonicalize(data)
+                provenance = {"source_key": cache_key}
 
-                if normalized_input_doi and normalized_input_doi in normalized_item:
-                    self.logger.info(f"Zotero API match found for DOI: {normalized_input_doi}")
-                    record = _canonicalize(data)
-                    provenance = {"source_key": cache_key}
+                # Save to cache
+                self.cache.set(cache_key, {
+                    "record": record,
+                    "confidence": 0.95,
+                    "provenance": provenance,
+                    "source": "zotero_api"
+                })
 
-                    # Save to cache
-                    self.cache.set(cache_key, {
-                        "record": record,
-                        "confidence": 0.95,
-                        "provenance": provenance,
-                        "source": "zotero_api"
-                    })
+                return {
+                    "record": record,
+                    "confidence": 0.95,
+                    "provenance": provenance,
+                    "source": "zotero_api"
+                }
 
-                    return {
-                        "record": record,
-                        "confidence": 0.95,
-                        "provenance": provenance,
-                        "source": "zotero_api"
-                    }
-
-        # --- Path 2: Multi-Stage Text Search (Fuzzy Fallback) ---
         if title:
             # Strategy 1: Search by Title AND First Author's Last Name (high precision)
             first_author_lastname = ""
@@ -331,6 +326,183 @@ class ZoteroService:
                     self.logger.info(f"Found high-confidence fuzzy match (Score: {best_score}) for title.")
                     return {"record": record, "confidence": 0.85, "source": "zotero_fuzzy_match", "provenance": provenance}
 
-        # --- Path 3: Final Fallback ---
         self.logger.warning(f"Zotero could not find a canonical record for '{title[:50]}...'. Falling back to VLM data.")
         return {"record": vlm_metadata, "confidence": 0.70, "source": "vlm_extraction", "provenance": {"source_key": "vlm_fallback"}}
+
+    # Internal: local DOI index
+    #
+    # WHY THIS EXISTS: the Zotero Web API cannot search by DOI. Its `q` parameter searches
+    # titles and creators (qmode=titleCreatorYear), optionally plus attachment full-text
+    # (qmode=everything) -- never the DOI field. So to find "the library item whose DOI is
+    # X" we must hold a DOI -> itemKey map ourselves.
+    #
+    # SCALING: we do NOT re-download the library on every run. Zotero versions the whole
+    # library with a single integer. We store that version alongside the index; on the next
+    # run we ask for `items(since=<stored_version>)`, which returns ONLY what changed.
+    # A library of any size therefore costs one full walk once, then a single ~0.3s call
+    # per run when nothing has changed.
+
+    def _doi_index_path(self) -> Path:
+        """Location of the on-disk DOI index (kept out of DiskCache, which expires by TTL)."""
+        return self.cache.cache_dir / "doi_index.json"
+
+    def _load_doi_index(self) -> Dict[str, Any]:
+        """Read the stored index, or an empty one if absent/corrupt."""
+        path = self._doi_index_path()
+        if not path.exists():
+            return {"library_version": None, "doi_to_key": {}}
+        try:
+            with path.open("r", encoding="utf8") as fh:
+                stored = json.load(fh)
+            if not isinstance(stored.get("doi_to_key"), dict):
+                raise ValueError("malformed doi_to_key")
+            return stored
+        except Exception as e:
+            self.logger.warning(f"DOI index unreadable ({e}); rebuilding from scratch.")
+            return {"library_version": None, "doi_to_key": {}}
+
+    def _save_doi_index(self, library_version: int, doi_to_key: Dict[str, str]) -> None:
+        """Persist the index so the next run only needs to fetch changes."""
+        try:
+            with self._doi_index_path().open("w", encoding="utf8") as fh:
+                json.dump(
+                    {"library_version": library_version, "doi_to_key": doi_to_key},
+                    fh, ensure_ascii=False, indent=2,
+                )
+        except Exception as e:
+            self.logger.warning(f"Could not save DOI index: {e}")
+
+    def _index_items(self, items: List[Dict[str, Any]], doi_to_key: Dict[str, str]) -> None:
+        """
+        Fold a batch of Zotero items into the DOI map (in place).
+
+        An item that lost its DOI (or became an attachment) must also lose its index entry,
+        so we first drop any existing entry pointing at this item key, then re-add if the
+        item currently has a DOI.
+
+        Duplicate entries for one paper are common in real libraries (this library has ~23).
+        When two items share a DOI we keep the one added FIRST -- the original. Ordering by
+        dateAdded (item key as tie-break) rather than by arrival order matters: a delta sync
+        visits items in a different order than the initial full walk, so "keep whichever we
+        saw first" would let the chosen item flip between runs.
+        """
+        for item in items:
+            data = item.get("data") or {}
+            item_key = data.get("key") or item.get("key")
+            if not item_key:
+                continue
+
+            # Drop stale entries for this item (DOI may have changed or been removed).
+            for existing_doi in [d for d, k in doi_to_key.items() if self._entry_key(k) == item_key]:
+                doi_to_key.pop(existing_doi, None)
+
+            normalized = normalize_doi_for_compare(data.get("DOI") or data.get("doi") or "")
+            if not normalized:
+                continue
+
+            candidate = {"key": item_key, "dateAdded": data.get("dateAdded") or ""}
+            incumbent = doi_to_key.get(normalized)
+
+            if incumbent is None:
+                doi_to_key[normalized] = candidate
+                continue
+
+            if self._entry_key(incumbent) == item_key:
+                doi_to_key[normalized] = candidate  # same item, refreshed
+                continue
+
+            # Deterministic winner: earliest dateAdded, then lowest item key.
+            incumbent_rank = (self._entry_date(incumbent), self._entry_key(incumbent))
+            candidate_rank = (candidate["dateAdded"], item_key)
+            winner = incumbent if incumbent_rank <= candidate_rank else candidate
+
+            self.logger.debug(
+                f"DOI {normalized} maps to duplicate items "
+                f"({self._entry_key(incumbent)}, {item_key}); keeping {self._entry_key(winner)} "
+                f"(earliest dateAdded)."
+            )
+            doi_to_key[normalized] = winner
+
+    @staticmethod
+    def _entry_key(entry: Any) -> str:
+        """Item key from an index entry, tolerating the older plain-string index format."""
+        if isinstance(entry, dict):
+            return entry.get("key", "")
+        return entry or ""
+
+    @staticmethod
+    def _entry_date(entry: Any) -> str:
+        """dateAdded from an index entry; empty for the older plain-string format."""
+        return entry.get("dateAdded", "") if isinstance(entry, dict) else ""
+
+    def _sync_doi_index(self) -> Dict[str, str]:
+        """
+        Bring the local DOI index up to date with the library, and return the DOI -> key map.
+
+        Costs one full library walk the first time, then only the changed items thereafter.
+        Returns an empty map (never raises) if Zotero is unreachable, so callers fall back
+        to the fuzzy title search.
+        """
+        if self.offline_mode or not self.zotero_api:
+            return {}
+
+        try:
+            current_version = int(self.zotero_api.last_modified_version())
+        except Exception as e:
+            self.logger.warning(f"Could not read Zotero library version: {e}")
+            return {}
+
+        stored = self._load_doi_index()
+        stored_version = stored.get("library_version")
+        doi_to_key = dict(stored.get("doi_to_key") or {})
+
+        try:
+            if stored_version is None:
+                self.logger.info("Building Zotero DOI index for the first time (one full pass)...")
+                all_items = self.zotero_api.everything(self.zotero_api.items())
+                self._index_items(all_items, doi_to_key)
+
+            elif int(stored_version) < current_version:
+                self.logger.info(
+                    f"Updating Zotero DOI index: v{stored_version} -> v{current_version}"
+                )
+                changed = self.zotero_api.everything(self.zotero_api.items(since=int(stored_version)))
+                self._index_items(changed, doi_to_key)
+
+                # Items deleted since our last sync must leave the index too.
+                deleted_keys = set(self.zotero_api.deleted(since=int(stored_version)).get("items", []))
+                for doi in [d for d, k in doi_to_key.items() if self._entry_key(k) in deleted_keys]:
+                    doi_to_key.pop(doi, None)
+
+            else:
+                # Library unchanged since last run -- nothing to fetch.
+                return doi_to_key
+
+        except Exception as e:
+            self.logger.warning(f"Zotero DOI index sync failed: {e}. Using last known index.")
+            return doi_to_key
+
+        self._save_doi_index(current_version, doi_to_key)
+        self.logger.info(f"Zotero DOI index holds {len(doi_to_key)} DOIs (library v{current_version}).")
+        return doi_to_key
+
+    def _find_item_data_by_doi(self, normalized_doi: str) -> Optional[Dict[str, Any]]:
+        """
+        Return the Zotero item `data` block whose DOI equals `normalized_doi`, or None.
+
+        Matching is EXACT on the normalised DOI. (The previous code used a substring test,
+        which would let "10.1/abc" match "10.1/abc123".)
+        """
+        if not normalized_doi:
+            return None
+
+        item_key = self._entry_key(self._sync_doi_index().get(normalized_doi))
+        if not item_key:
+            return None
+
+        try:
+            item = self.zotero_api.item(item_key)
+            return item.get("data") or None
+        except Exception as e:
+            self.logger.warning(f"Could not fetch Zotero item {item_key}: {e}")
+            return None

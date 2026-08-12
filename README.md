@@ -2,7 +2,7 @@
 
 > **"Don't compromise between Speed, Quality, and Privacy. Prajnya is the Intelligent Broker that negotiates all three on a per-page basis."**
 
-![Status](https://img.shields.io/badge/Status-Production%20Ready-green?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-5.1.0-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-MIT-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge) ![Tests](https://img.shields.io/badge/Tests-Passing-green?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Production%20Ready-green?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-5.0.0%20Gold-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-MIT-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge) ![Tests](https://img.shields.io/badge/Tests-Passing-green?style=for-the-badge)
 
 ---
 
@@ -122,9 +122,8 @@ We implement a **Triple-Referee System** for critical metadata (Title, Authors, 
 ### 2. Sovereign Intelligence (Bring Your Own Brain)
 We are **Model Agnostic**. You are not locked into a vendor.
 *   **Privacy First**: Run 100% offline with `olmocr-7b` or `llama-3-vision`.
-*   **Speed First**: Switch to `gemini-3-flash` (Thinking-enabled).
-*   **Cost First**: Use **OpenRouter** free tier models (`nemotron-12b-vl`, `llama-3.2-vision`).
-*   **Reasoning First**: Switch to `gpt-4o` or `claude-3-5-sonnet` via OpenRouter or direct API.
+*   **Speed First**: Switch to `gemini-3-flash` (Thinking-enabled). 
+*   **Reasoning First**: Switch to `gpt-4o` or `claude-3-5-sonnet`.
 
 **Configuration is just 1 line of YAML:**
 ```yaml
@@ -220,20 +219,16 @@ Unlike academic demos (Marker, Nougat), Prajnya is **production-grade** infrastr
 2.  **Configure Brain**
     Create `.env` file:
     ```env
-    # Option 1: OpenRouter (Recommended - 100+ models, FREE tier available)
-    OPENROUTER_API_KEY=sk-or-v1-...
-
-    # Option 2: Google Gemini (Fast, cost-effective)
+    # Option 1: Google Gemini (Recommended)
     GEMINI_API_KEY=AIzaSy...
-
-    # Option 3: OpenAI Direct (Premium quality)
+    
+    # Option 2: OpenAI-Compatible Cloud (OpenRouter / OpenAI)
+    OPENROUTER_API_KEY=sk-or-...
     OPENAI_API_KEY=sk-...
 
-    # Option 4: Local VLM (Privacy-first, zero cost)
+    # Option 3: Local VLM (Privacy-first)
     LOCAL_VLM_SERVER=http://localhost:8080/v1/chat/completions
     ```
-
-    **New in v5.1.0**: OpenRouter integration with FREE models like NVIDIA Nemotron 12B VL!
 
 3.  **Run Studio**
     ```bash
@@ -279,7 +274,7 @@ If you use Prajnya in your research, please cite:
   title={Prajnya: Reference Architecture for Academic RAG Pipelines},
   author={Manu Unni},
   year={2026},
-  version={5.1.0},
+  version={5.0.0},
   url={https://github.com/mku1988-oss/Prajnya-Academic-PDF-Processor}
 }
 ```
@@ -302,4 +297,4 @@ See the full [Acknowledgments](./Acknowledgements.md) file for comprehensive cre
 
 > *"Prajnya: Where adaptive intelligence meets verified knowledge."*
 
-*Last Updated: January 16, 2026*
+*Last Updated: December 18, 2025*

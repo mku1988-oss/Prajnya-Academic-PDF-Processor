@@ -1,0 +1,68 @@
+# DeepSeek-OCR-2 (3B, deepseek-ai) — LAYOUT DETECTOR ONLY
+# .\src\processing\strategies\config\vlm_profiles\deepseek-ocr-v2.yaml
+# Tier overhaul: this model is used ONLY to LOCATE tables (bounding boxes), never to read them.
+# Its `<|grounding|>` mode emits labelled layout boxes; its table CONTENT fabricates on dense
+# tables and must never be trusted. GLM-OCR reads the cropped regions this model locates.
+# Validated 2026-07-10 on llama.cpp build b9936 through llama-server.
+
+model_name: "deepseek-ocr-v2"   # Must match the [deepseek-ocr-v2] preset in model.ini
+model_type: "layout_detector"
+status: "production_ready"
+
+# ============================================================================
+# GROUNDING FORMAT  (consumed by src/processing/utils/table_region_detector.py)
+# ============================================================================
+# The table_region_detector module is VLM-AGNOSTIC: it holds no knowledge of DeepSeek's box
+# syntax, coordinate grid, or label names. All of that lives HERE and is handed to the module
+# as a GroundingSpec. Swapping in a different layout detector is a change to this file only.
+#
+# box_pattern — regex (MULTILINE) with named groups `label` and `coords`, matching one box.
+#   DeepSeek emits two surface forms depending on how it is served:
+#       llama-mtmd-cli:  <|ref|>table<|/ref|><|det|>[[85, 101, 915, 786]]<|/det|>
+#       llama-server:    table[[85, 101, 915, 786]]   (the special tokens are stripped)
+#   The pattern below accepts BOTH: an optional <|ref|> prefix, or a bare label at line start.
+grounding_format:
+  prompt: "<|grounding|>Convert the document to markdown."
+  box_pattern: '(?:^|<\|ref\|>)\s*(?P<label>[a-z_]+)(?:<\|/ref\|>\s*<\|det\|>)?\s*\[\[(?P<coords>[\d,\s]+)\]\]'
+  coordinate_scale: 1000        # DeepSeek normalizes every box to a 0-1000 grid, DPI-independent
+  table_label: "table"
+  caption_label: "table_caption"
+  footnote_label: "table_footnote"
+  # Figure extraction (crop + caption tag). DeepSeek emits these in the SAME grounding call as
+  # the table_* labels, so figures cost no extra model pass. A detector that lacks figure boxes
+  # simply omits these keys -> figure extraction disables itself (see GroundingSpec).
+  image_label: "image"
+  image_caption_label: "image_caption"
+
+# ============================================================================
+# BASE API PARAMETERS
+# ============================================================================
+# Detection is deterministic: temperature 0, fixed seed. These mirror the [deepseek-ocr-v2]
+# model.ini preset (which is what actually governs the server) and are repeated here because
+# api_parameters are sent per request.
+api_parameters:
+  temperature: 0.0
+  seed: 3407
+  max_tokens: 4096
+
+# ============================================================================
+# RESOURCE REQUIREMENTS
+# ============================================================================
+# Measured on an 8188 MiB card: deepseek-ocr-v2 alone = 4929 MiB resident.
+# GLM (2535) + deepseek-ocr-v2 (4929) = 7464 MiB co-resident, peak 7940 during inference.
+# So the table-repair escalation costs NO model swap.
+resource_requirements:
+  vram_per_instance_gb: 4.9
+  co_resident_with:
+    - glm-ocr
+
+# ============================================================================
+# CAPABILITIES / LIMITATIONS
+# ============================================================================
+capabilities:
+  - layout_detection        # table / table_caption / table_footnote / text / image boxes
+  - reading_order
+
+limitations:
+  - "Detector ONLY: table content fabricates on dense tables (garbled values, invented rowspans)."
+  - "Never use its transcription. Take the bounding boxes; GLM-OCR reads the crop."

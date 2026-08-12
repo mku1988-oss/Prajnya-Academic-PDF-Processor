@@ -46,9 +46,16 @@ from ..utils.page_classifier import PageClassifier, PageType
 from ..utils.surgical_vlm_helper import SurgicalVLMHelper
 from ..utils.reading_order import ReadingOrderReconstructor
 from ..utils.image_utils import pixmap_to_pil
+# GLM two-phase offline path (tier overhaul). These utilities are VLM-agnostic; all model-specific
+# detail (names, prompts, grounding format) is resolved from config at call time.
+from ..utils.content_drop_check import check_page_for_content_drop, is_scanned_page
+from ..utils.table_region_detector import GroundingSpec, parse_grounding_output
+from ..utils.table_repair import repair_page_tables
+from ..utils.figure_extractor import extract_and_save_figures, append_figure_anchors, safe_doc_id
+from ..utils.model_swap import RouterClient
 from ..ledger.semantic_ledger import SemanticLedger, LedgerRecord, generate_hash
 from ..ledger.csv_backend import CsvLedgerBackend
-from ..utils.zotero_service import ZoteroService
+from ..utils.zotero_service import ZoteroService, normalize_doi_for_compare
 from src.processing.utils.metadata_merger import merge_metadata
 from src.processing.utils.author_utils import merge_author_lists
 from PIL import Image
@@ -75,7 +82,11 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
         - Primary: DOI lookup
         - Fallback: Title + Authors
     """
-    
+
+    # White border (px per side) added by _render_page_pypdfium. Kept as one constant so the
+    # renderer and the pixel->PDF-point caption mapping can never drift apart.
+    RENDER_PADDING_PX = 25
+
     def __init__(self):
         """
         Initialize research article strategy with registry resolution.
@@ -210,7 +221,10 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
         self.concurrency_config = self.config['vlm_provider'].get('concurrency', {})
         if self.concurrency_config.get('enabled', False):
              self.logger.info(f"AsyncIO Concurrency Enabled (Limit: {self.concurrency_config.get('max_concurrent', 'Auto')})")
-        
+
+        # Set up the GLM two-phase offline body path (no-op unless config selects it).
+        self._init_glm_twophase()
+
         self.logger.info("Research article strategy initialized with config-driven settings")
     
     def process(self, profile: 'DocumentProfile', test_pages_override: Optional[List[int]] = None, concurrency_enabled: bool = True) -> 'DocumentProfile':
@@ -311,7 +325,14 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
                 else:
                     pages_to_process = list(range(1, profile.page_count))
     
-                if pages_to_process:
+                if pages_to_process and self.glm_twophase_enabled:
+                    # GLM two-phase offline path: Phase A reads every page with the extraction
+                    # model and repairs any dropped table (co-resident, no swap); Phase B swaps
+                    # once to the understanding model to describe figures.
+                    self.logger.info("Body pages: GLM two-phase offline path (extraction + repair + understanding)")
+                    body_pages = self._process_body_pages_glm(profile, pages_to_process)
+                    all_pages.extend(body_pages)
+                elif pages_to_process:
                     # Check all three conditions: parameter, hybrid enabled, AND config enabled
                     async_vlm_enabled = self.concurrency_config.get('enabled', False)
 
@@ -1384,9 +1405,376 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
         return results
 
     # ============================================================================
+    # GLM TWO-PHASE OFFLINE PATH (Tier overhaul — verify-then-repair)
+    # ============================================================================
+    # Phase A: the extraction model reads every body page; a PyMuPDF word-coverage gate catches
+    #          any silently-dropped table; the layout model locates it and the extraction model
+    #          re-reads the crop. Extraction + layout models are co-resident, so this costs NO
+    #          model swap. Phase B: one swap to the understanding model to describe figures.
+    #
+    # VLM-AGNOSTIC: every model name is resolved from profile_registry and every model-specific
+    # detail (grounding format, prompts, render DPI, coverage threshold) from the models' own
+    # config. No model identity is hardcoded in this code.
+
+    def _init_glm_twophase(self):
+        """
+        Configure the offline GLM two-phase body path, or leave it disabled.
+
+        Enabled only when BOTH hold: the local llama-server is in use, and profile_registry
+        defines an `extraction` role. That makes this path strictly opt-in via config — every
+        existing path (cloud, offline OlmOCR tiers) is untouched when the role is absent.
+        """
+        self.glm_twophase_enabled = False
+        self.extraction_provider = None
+        self.layout_provider = None
+        self.grounding_spec = None
+        self.grounding_prompt = None
+        self.router = None
+
+        local_cfg = self.config['vlm_provider'].get('local_server', {})
+        registry = self.config.get('profile_registry', {})
+        if not local_cfg.get('enabled', False) or 'extraction' not in registry:
+            self.logger.info(
+                "GLM two-phase offline path DISABLED "
+                "(needs local_server.enabled=true + profile_registry.extraction)"
+            )
+            return
+
+        # Resolve each role -> model name from the registry (config-driven, never hardcoded).
+        self.extraction_model = self._resolve_reference('@profile_registry.extraction', self.config)
+        self.understanding_model = self._resolve_reference('@profile_registry.understanding', self.config)
+        self.layout_model = self._resolve_reference('@profile_registry.layout_detector', self.config)
+
+        # Extraction reader: the raw-OCR task maps (via the model's fixed_prompts) to its
+        # "read the whole page" prompt.
+        raw_ocr_task = self._resolve_reference('@task_registry.raw_ocr', self.config)
+        self.extraction_provider, self.extraction_profile_data, _ = self._initialize_provider_from_config(
+            {'profile': self.extraction_model, 'task_type': raw_ocr_task},
+            api_endpoint=self.api_endpoint,
+        )
+        fixed_prompts = self.extraction_profile_data.get('fixed_prompts', {})
+        self.extraction_dpi = self.extraction_profile_data.get('app_config', {}).get('target_dpi', 300)
+        self.coverage_threshold = self.extraction_profile_data.get(
+            'content_drop_check', {}).get('min_word_coverage', 0.90)
+
+        # Prompt for re-reading a recovered table crop (table task -> the model's table prompt;
+        # fall back to its page-read prompt if the model has no dedicated table prompt).
+        table_task = self._resolve_reference('@task_registry.table_desc', self.config)
+        self.table_crop_prompt = fixed_prompts.get(table_task) or fixed_prompts.get(raw_ocr_task)
+
+        # Plain page-read prompt, used to read a figure caption off a SCANNED page (no text layer).
+        # Born-digital captions come free from the text layer and never touch this.
+        self.caption_read_prompt = fixed_prompts.get(raw_ocr_task)
+
+        # Layout detector provider + its grounding format (both from the layout model's config).
+        self.layout_provider, layout_profile_data, _ = self._initialize_provider_from_config(
+            {'profile': self.layout_model, 'task_type': raw_ocr_task},
+            api_endpoint=self.api_endpoint,
+        )
+        grounding_format = layout_profile_data.get('grounding_format')
+        if not grounding_format:
+            self.logger.error(
+                f"Layout model '{self.layout_model}' declares no grounding_format; "
+                "GLM two-phase path stays DISABLED"
+            )
+            return
+        self.grounding_spec = GroundingSpec.from_config(grounding_format)
+        self.grounding_prompt = grounding_format['prompt']
+
+        # Router remote control: keep exactly the right models resident per phase.
+        base_url = f"http://{local_cfg.get('host', 'localhost')}:{local_cfg.get('port', 8080)}"
+        self.router = RouterClient(base_url, logger=self.logger)
+
+        # Where cropped figures + the manifest are written for the multimodal RAG. Config-
+        # overridable (vlm_provider.figures.output_dir); defaults under run_outputs. Stored image
+        # paths are made relative to figures_path_root so the manifest carries portable paths.
+        figures_cfg = self.config['vlm_provider'].get('figures', {})
+        self.figures_base_dir = Path(figures_cfg.get('output_dir', 'run_outputs/figures'))
+        self.figures_path_root = Path(figures_cfg.get('path_root', 'run_outputs'))
+
+        self.glm_twophase_enabled = True
+        self.logger.info(
+            f"GLM two-phase offline path ENABLED: extraction={self.extraction_model}, "
+            f"layout={self.layout_model}, understanding={self.understanding_model}, "
+            f"coverage_threshold={self.coverage_threshold}, extraction_dpi={self.extraction_dpi}"
+        )
+
+    def _process_body_pages_glm(self, profile: 'DocumentProfile', page_indices: List[int]) -> List['ContentPage']:
+        """
+        Run the offline GLM body-page pipeline over the given pages — single phase, no swap.
+
+        The extraction + layout models stay co-resident for the whole body. Each page is read by
+        the extraction model, verified against the text layer, and any dropped table is repaired.
+        Figures are cropped and caption-tagged from the SAME layout-grounding response (no
+        understanding model, no swap back — OlmOCR is used only for the title page).
+
+        Args:
+            profile: the DocumentProfile (source PDF).
+            page_indices: 0-indexed body pages to process.
+
+        Returns:
+            ContentPage list in page order.
+        """
+        if self.router:
+            self.router.set_resident([self.extraction_model, self.layout_model])
+
+        # Sequential per-page processing. Concurrency was investigated (asyncio + threads, and a
+        # read/ground two-stage split) but gave no wall-time win on a single GPU — the extraction
+        # and layout models share one device, so overlapping their calls only trades gains for
+        # contention (measured: identical time to sequential, and worse when table-repair crops
+        # collided with groundings). Kept simple; see the optimization report for the full analysis.
+        results: Dict[int, 'ContentPage'] = {}
+        for page_idx in page_indices:
+            try:
+                page = profile.pdf_doc.load_page(page_idx)
+                results[page_idx] = self._read_body_page_glm(profile, page, page_idx)
+            except Exception as error:
+                self.logger.error(f"Body page {page_idx + 1} failed: {error}", exc_info=True)
+                results[page_idx] = ContentPage(
+                    page_number=page_idx + 1, content="", quality_score=0.0,
+                    metadata={'error': str(error), 'processing_method': 'glm_failed'},
+                )
+
+        # Document-level figure manifest for the multimodal RAG (aggregated across all pages).
+        self._write_figure_manifest(profile, results)
+
+        return [results[idx] for idx in sorted(results)]
+
+
+    def _read_body_page_glm(
+        self, profile: 'DocumentProfile', page: fitz.Page, page_idx: int
+    ) -> 'ContentPage':
+        """
+        Read one body page: classify -> pure-text fast path OR extraction read + verify/repair +
+        figure extraction.
+
+        Pure-text pages skip the VLM entirely (PyMuPDF native text). Every other page is read
+        full-page by the extraction model, checked against the text layer, and (if a table was
+        dropped) repaired; figures are cropped and caption-tagged from one shared grounding pass.
+        """
+        analysis: Dict = {}
+        page_type = None
+        if self.page_classifier is not None:
+            stats = self._extract_pymupdf_stats(page)
+            page_type, analysis = self.page_classifier.classify(page, page_idx, pymupdf_result=stats)
+
+        # T1: pure-text page -> PyMuPDF native text, no VLM needed.
+        if page_type is not None and page_type == PageType.TEXT_ONLY:
+            self.logger.info(f"Page {page_idx + 1}: pure text -> PyMuPDF (T1)")
+            return self._process_with_pymupdf(page, page_idx, analysis)
+
+        # T2: extraction model reads the whole page.
+        self.logger.info(f"Page {page_idx + 1}: extraction model full-page read")
+        page_image = self._render_extraction_page(profile.pdf_path, page_idx, page)
+        read = self.extraction_provider.process_page(page_image)
+        glm_text = read.get('content', '') if read.get('success') else ''
+        base_quality = read.get('quality_score', 0.0) or 0.0
+
+        # ONE grounding pass per page, shared by table repair AND figure extraction. A page needs
+        # it when the read dropped content (born-digital gate), when it is scanned (no text layer
+        # to verify against), or when the classifier flagged visuals to crop.
+        gate = check_page_for_content_drop(
+            page, glm_text, min_coverage=self.coverage_threshold, logger=self.logger
+        )
+        has_visuals = bool(analysis.get('visual_regions'))
+        grounding = self._ground_page_if_needed(page, page_image, gate, has_visuals)
+
+        final_text, repair_meta = self._repair_page(page, glm_text, page_image, gate, grounding)
+
+        # Figures: crop + caption-tag from the same grounding response (no description, no swap).
+        figures = self._extract_page_figures(profile, page, page_image, grounding, page_idx)
+        if figures:
+            final_text = append_figure_anchors(final_text, figures)
+
+        quality = max(base_quality, 0.85) if repair_meta.get('tables_recovered') else base_quality
+        metadata = {
+            'processing_method': repair_meta['processing_method'],
+            'page_type': page_type.value if page_type is not None else None,
+            'coverage': repair_meta.get('coverage'),
+            'tables_recovered': repair_meta.get('tables_recovered', 0),
+            'visual_element_count': len(analysis.get('visual_regions', [])),
+            'figures': [f.to_dict() for f in figures],
+            'figure_count': len(figures),
+        }
+        return ContentPage(
+            page_number=page_idx + 1, content=final_text, quality_score=quality, metadata=metadata
+        )
+
+    def _ground_page_if_needed(
+        self, page: fitz.Page, page_image: 'Image.Image', gate, has_visuals: bool
+    ) -> Optional[str]:
+        """
+        Run the layout-grounding call at most ONCE per page, only when something needs it.
+
+        Returns the raw grounding text, or None when the page needs neither table repair nor
+        figure extraction (so we never pay for a grounding call we will not use).
+        """
+        born_digital_drop = gate.checked and gate.content_dropped
+        scanned = (not gate.checked) and is_scanned_page(page)
+        want_figures = (
+            has_visuals and self.grounding_spec is not None and self.grounding_spec.supports_figures
+        )
+        if not (born_digital_drop or scanned or want_figures):
+            return None
+        return self._run_layout_grounding(page_image)
+
+    def _repair_page(
+        self, page: fitz.Page, glm_text: str, page_image: 'Image.Image', gate, grounding: Optional[str]
+    ) -> Tuple[str, Dict]:
+        """
+        Repair a dropped table using the (already computed) gate + grounding — no new model call.
+
+        Born-digital pages use the PyMuPDF word-coverage gate. Scanned pages have no trustworthy
+        text layer, so the drop signal is "the layout model sees a table the read did not produce".
+
+        Returns:
+            (possibly-repaired text, metadata dict with processing_method / coverage / tables_recovered)
+        """
+        coverage = round(gate.coverage, 3) if gate.checked else None
+        born_digital_drop = gate.checked and gate.content_dropped
+        scanned_has_table = (
+            (not gate.checked) and is_scanned_page(page)
+            and grounding is not None and self._grounding_has_table(grounding)
+        )
+        if not (born_digital_drop or scanned_has_table) or grounding is None:
+            return glm_text, {'processing_method': 'glm_fullpage', 'coverage': coverage, 'tables_recovered': 0}
+
+        result = repair_page_tables(
+            page_image=page_image,
+            full_page_text=glm_text,
+            grounding_output=grounding,
+            spec=self.grounding_spec,
+            read_table_crop=self._read_table_crop,
+            logger=self.logger,
+        )
+        return result.text, {
+            'processing_method': 'glm_repair' if result.repaired else 'glm_fullpage',
+            'coverage': coverage,
+            'tables_recovered': result.tables_recovered,
+        }
+
+    def _render_extraction_page(self, pdf_path: str, page_idx: int, page: fitz.Page) -> 'Image.Image':
+        """Render a page at the extraction model's target DPI (longest edge, in pixels)."""
+        longest_pts = max(page.rect.width, page.rect.height)
+        target_size = int(longest_pts / 72.0 * self.extraction_dpi)
+        return self._render_page_pypdfium(pdf_path, page_idx, target_size=target_size)
+
+    def _run_layout_grounding(self, page_image: 'Image.Image') -> str:
+        """Ask the layout detector for its grounding boxes (image-first; prompt from its config)."""
+        return self.layout_provider.read_crop(page_image, self.grounding_prompt, image_first=True)
+
+    def _grounding_has_table(self, grounding_output: str) -> bool:
+        """True when the layout model's grounding output contains at least one table box."""
+        if not grounding_output:
+            return False
+        detections = parse_grounding_output(grounding_output, self.grounding_spec)
+        return any(d.label == self.grounding_spec.table_label for d in detections)
+
+    def _read_table_crop(self, crop_image: 'Image.Image') -> str:
+        """Re-read one cropped table with the extraction model and its configured table prompt."""
+        return self.extraction_provider.read_crop(crop_image, self.table_crop_prompt)
+
+
+    def _extract_page_figures(
+        self, profile: 'DocumentProfile', page: fitz.Page, page_image: 'Image.Image',
+        grounding: Optional[str], page_idx: int
+    ) -> List['FigureAsset']:
+        """
+        Crop and save every figure on this page, tagging each with its caption text.
+
+        Uses the already-computed layout grounding (no new model call). Returns [] when the page
+        has no grounding, the detector lacks figure support, or the page carries no figure.
+        """
+        if grounding is None or self.grounding_spec is None or not self.grounding_spec.supports_figures:
+            return []
+        doc_id = safe_doc_id(Path(profile.pdf_path).stem)
+        out_dir = self.figures_base_dir / doc_id
+        read_caption = self._make_caption_reader(page, page_image)
+        return extract_and_save_figures(
+            page_image=page_image,
+            grounding_output=grounding,
+            spec=self.grounding_spec,
+            out_dir=out_dir,
+            page_number=page_idx + 1,
+            read_caption=read_caption,
+            path_root=self.figures_path_root,
+            logger=self.logger,
+        )
+
+    def _make_caption_reader(self, page: fitz.Page, page_image: 'Image.Image'):
+        """
+        Build the caption reader for one page: box (in page-image pixels) -> caption text.
+
+        Born-digital pages read the caption verbatim from the PyMuPDF text layer (authoritative,
+        free, no fabrication). A scanned page has no usable text layer, so it falls back to the
+        extraction model reading the caption crop.
+        """
+        def _read(box_px: Optional[Tuple[int, int, int, int]]) -> str:
+            if not box_px:
+                return ""
+            rect = self._image_box_to_pdf_rect(box_px, page, page_image)
+            text = page.get_text("text", clip=rect).strip()
+            if text:
+                return text
+            if is_scanned_page(page) and self.caption_read_prompt:
+                crop = page_image.crop(box_px)
+                return (self.extraction_provider.read_crop(crop, self.caption_read_prompt) or "").strip()
+            return ""
+        return _read
+
+    def _image_box_to_pdf_rect(
+        self, box_px: Tuple[int, int, int, int], page: fitz.Page, page_image: 'Image.Image'
+    ) -> 'fitz.Rect':
+        """
+        Map a box in rendered-page-image pixels back to PDF points, to clip the text layer.
+
+        The page image is rendered by `_render_page_pypdfium` at a uniform scale with a fixed
+        white border (RENDER_PADDING_PX px per side). We derive the scale from the actual content
+        width so DPI rounding cannot drift, subtract the padding, and add a small point-slop so a
+        caption line intersecting the box is captured.
+        """
+        content_width = max(1, page_image.width - 2 * self.RENDER_PADDING_PX)
+        scale = content_width / page.rect.width  # pixels per PDF point (uniform on both axes)
+        x0, y0, x1, y1 = box_px
+        pad = self.RENDER_PADDING_PX
+        slop = 4.0  # points
+        return fitz.Rect(
+            (x0 - pad) / scale - slop,
+            (y0 - pad) / scale - slop,
+            (x1 - pad) / scale + slop,
+            (y1 - pad) / scale + slop,
+        )
+
+    def _write_figure_manifest(self, profile: 'DocumentProfile', results: Dict[int, 'ContentPage']) -> None:
+        """
+        Write a document-level figure manifest (JSON) aggregating every page's figures.
+
+        The manifest is what the multimodal RAG consumes: one flat list of {figure_id, image_path,
+        caption, page, bbox}. Nothing is written when the document has no figures.
+        """
+        figures = []
+        for idx in sorted(results):
+            figures.extend(results[idx].metadata.get('figures', []) or [])
+        if not figures:
+            return
+        doc_id = safe_doc_id(Path(profile.pdf_path).stem)
+        manifest_dir = self.figures_base_dir / doc_id
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        manifest_path = manifest_dir / 'manifest.json'
+        try:
+            with open(manifest_path, 'w', encoding='utf-8') as handle:
+                json.dump(
+                    {'document': doc_id, 'figure_count': len(figures), 'figures': figures},
+                    handle, indent=2, ensure_ascii=False,
+                )
+            self.logger.info(f"Figure manifest: {len(figures)} figure(s) -> {manifest_path}")
+        except Exception as error:
+            self.logger.warning(f"Could not write figure manifest: {error}")
+
+    # ============================================================================
     # 3-TIER PROCESSING METHODS (Existing)
     # ============================================================================
-    
+
     def _process_with_vlm(self, profile: 'DocumentProfile', page: fitz.Page, page_idx: int) -> 'ContentPage':
         """Process page with full VLM (original method - Tier 3 fallback)."""
         image = self._render_page_pypdfium(profile.pdf_path, page_idx, target_size=self.body_resolution)
@@ -2086,6 +2474,10 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
 
         self.logger.info("Enriching metadata using cache + Zotero + referee text…")
 
+        # Prefer the DOI the orchestrator already read straight out of the PDF's text layer.
+        # This must happen BEFORE the Zotero lookup below, which matches on DOI first.
+        vlm_metadata = self._prefer_text_layer_doi(vlm_metadata, profile)
+
         document_id = generate_hash(str(pdf_path))
 
         # ==============================
@@ -2146,6 +2538,73 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
 
         return merged
 
+    def _prefer_text_layer_doi(self, vlm_metadata: dict, profile: "DocumentProfile" = None) -> dict:
+        """
+        Use the DOI read directly from the PDF's text layer in preference to the VLM's.
+
+        For biology researchers: a DOI is a paper's permanent identifier, e.g.
+        "10.1016/j.cellbi.2005.09.009". One wrong character and Zotero fetches the wrong
+        paper, or none at all. Born-digital PDFs (produced from a word processor rather than
+        scanned) store the DOI as exact, machine-readable text. DocumentOrchestrator already
+        extracts it from that text layer before any model runs, scoring it by HOW it was
+        found: 0.98 when printed next to the label "doi:", 0.95 as a doi.org URL, and only
+        0.85 for a bare "10.xxxx/..." floating in the text -- which might be a citation to a
+        DIFFERENT paper rather than this one's identifier.
+
+        We accept that DOI only when its confidence clears `metadata.doi_confidence_threshold`
+        (default 0.85). Below the bar we keep the VLM's reading, since a low-confidence regex
+        hit is no better than a vision model's guess. A vision model, for its part, must
+        recognise the DOI from pixels of tiny footer print and can transpose digits.
+
+        Args:
+            vlm_metadata: Metadata dict from the title-page VLM. Modified copy is returned.
+            profile: DocumentProfile carrying `.doi` / `.doi_confidence` from the
+                     orchestrator's first-pass regex scan. May be None (e.g. in unit tests).
+
+        Returns:
+            The metadata dict, with 'doi' backfilled or corrected from the text layer when it
+            is trustworthy. Sets 'doi_source' so the ledger records which source won.
+        """
+        text_layer_doi = getattr(profile, 'doi', None) if profile else None
+        vlm_doi = vlm_metadata.get('doi')
+
+        # No text-layer DOI (scanned page, or none printed): keep whatever the VLM found.
+        if not text_layer_doi:
+            if vlm_doi:
+                vlm_metadata['doi_source'] = 'vlm_extraction'
+            return vlm_metadata
+
+        confidence = getattr(profile, 'doi_confidence', 0.0) or 0.0
+
+        # Honour the configured threshold rather than blindly trusting any regex hit.
+        if confidence < self.doi_threshold:
+            self.logger.info(
+                f"Text-layer DOI '{text_layer_doi}' scored {confidence:.2f}, below the "
+                f"{self.doi_threshold:.2f} threshold (likely a bare DOI that may belong to a "
+                f"cited paper). Keeping the VLM's DOI."
+            )
+            if vlm_doi:
+                vlm_metadata['doi_source'] = 'vlm_extraction'
+            return vlm_metadata
+
+        # A disagreement means the VLM misread a DOI that was sitting in the text layer.
+        # Worth surfacing: it is the clearest signal that OCR is garbling small print.
+        if vlm_doi and normalize_doi_for_compare(vlm_doi) != normalize_doi_for_compare(text_layer_doi):
+            self.logger.warning(
+                f"DOI mismatch - VLM read '{vlm_doi}' but the PDF text layer says "
+                f"'{text_layer_doi}' (confidence={confidence:.2f}). Trusting the text layer."
+            )
+        elif not vlm_doi:
+            self.logger.info(
+                f"VLM found no DOI; recovered '{text_layer_doi}' from the PDF text layer "
+                f"(confidence={confidence:.2f})."
+            )
+
+        vlm_metadata['doi'] = text_layer_doi
+        vlm_metadata['doi_source'] = 'pymupdf_text_layer'
+        vlm_metadata['doi_confidence'] = confidence
+        return vlm_metadata
+
     def _render_page_pypdfium(self, pdf_path: str, page_num: int, target_size: int) -> Image.Image:
         """
         Renders a PDF page using pypdfium2 (EXACT match to OlmOCR Hybrid v2).
@@ -2179,8 +2638,9 @@ class ResearchArticleStrategy(DocumentProcessingStrategy):
         # Render at calculated scale
         image = page.render(scale=scale).to_pil()
         
-        # Add 25px padding (matching OlmOCR Hybrid v2)
-        padding = 25
+        # Add white padding (matching OlmOCR Hybrid v2). Uses the shared class constant so the
+        # caption pixel->PDF-point mapping stays in lockstep with this border.
+        padding = self.RENDER_PADDING_PX
         new_size = (image.width + 2 * padding, image.height + 2 * padding)
         padded_image = Image.new("RGB", new_size, (255, 255, 255))
         padded_image.paste(image, (padding, padding))

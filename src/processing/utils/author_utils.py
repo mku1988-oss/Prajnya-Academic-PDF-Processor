@@ -182,64 +182,56 @@ def merge_author_lists(
 
     Returns a clean, deduplicated author list and any filtered suspicious strings.
     """
+    # AUTHOR ORDER IS DATA, NOT PRESENTATION. In a biology paper the first author did the
+    # work and the last author ran the lab, so the sequence must survive this function
+    # untouched. Every collection below is therefore an ORDERED list de-duplicated by a
+    # lookaside set -- never a bare set. (Sets iterate in hash order, which Python
+    # randomises per process, so an earlier version of this function returned the authors
+    # in a different order on every run.)
     if not title_page_text:
-        return sorted(list(set((vlm_authors or []) + (zotero_authors or [])))), []
+        return _dedupe_preserving_order((vlm_authors or []) + (zotero_authors or [])), []
 
-    # --- Step 1: unified candidate pool ---
-    candidate_pool = set()
+    candidate_pool = _dedupe_preserving_order(
+        [a.strip().strip("[]").rstrip(",") for a in (vlm_authors or []) if a]
+        + [a.strip().strip("[]").rstrip(",") for a in (zotero_authors or []) if a]
+    )
 
-    # Normalize VLM authors
-    for a in (vlm_authors or []):
-        if not a:
-            continue
-        a = a.strip().strip("[]").rstrip(",")
-        candidate_pool.add(a)
-        
-    # Normalize Zotero authors
-    for a in (zotero_authors or []):
-        if not a:
-            continue
-        a = a.strip().strip("[]").rstrip(",")
-        candidate_pool.add(a)
-
-    # --- Step 2: identity scoring against reference authors ---
     if vlm_authors:
         reference_authors = [a for a in vlm_authors if a.strip()]
     else:
         reference_authors = [a for a in zotero_authors if a.strip()]
 
-    confirmed_candidates = set()
-
+    confirmed_candidates = []
     for cand in candidate_pool:
         for ref in reference_authors:
             is_match, score, breakdown = AuthorMatcher.match_authors(cand, ref)
             if is_match:
-                confirmed_candidates.add(cand)
+                confirmed_candidates.append(cand)
                 break
 
-    # --- fallback BEFORE redundancy filter and dedupe ---
     if not confirmed_candidates:
-        confirmed_candidates = {
+        confirmed_candidates = [
             cand for cand in candidate_pool
             if names_match(cand, title_page_text)[0]
-        }
+        ]
 
-    # --- Step 3: filter summary/superset strings ---
-    suspicious_authors = {
+    # e.g. drop "A. Smith, B. Jones" when "A. Smith" and "B. Jones" are both present.
+    suspicious_authors = [
         a for a in confirmed_candidates
-        if sum(1 for b in confirmed_candidates 
+        if sum(1 for b in confirmed_candidates
                if a != b and b.lower() in a.lower()) >= containment_threshold
-    }
+    ]
+    suspicious_lookup = set(suspicious_authors)
 
-    good_authors = confirmed_candidates - suspicious_authors
+    good_authors = [a for a in confirmed_candidates if a not in suspicious_lookup]
 
-    # --- Step 4: canonical dedupe ---
     author_map = {}
     for name in good_authors:
         canonical_key = canonicalize_author(name)
         if not canonical_key: continue
-            
-        # If we've seen this author before, keep the longer (more complete) name.
+
+        # If we've seen this author before, keep the longer (more complete) name,
+        # but hold that author's original position in the list.
         if canonical_key in author_map:
             if len(name) > len(author_map[canonical_key]):
                 author_map[canonical_key] = name
@@ -248,7 +240,25 @@ def merge_author_lists(
 
     final_clean_list = list(author_map.values())
 
-    return final_clean_list, list(suspicious_authors)
+    return final_clean_list, suspicious_authors
+
+
+def _dedupe_preserving_order(names: List[str]) -> List[str]:
+    """
+    Drop duplicates from `names` while keeping the first occurrence's position.
+
+    Used instead of set() wherever author order must be preserved.
+    """
+    seen = set()
+    ordered = []
+    for name in names:
+        if not name:
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
+        ordered.append(name)
+    return ordered
 
 class AuthorMatcher:
     """

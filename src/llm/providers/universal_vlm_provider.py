@@ -132,11 +132,18 @@ class ModelProfile(BaseModel):
     
     # Legacy Support (DEPRECATED - for backward compatibility)
     parameters: Optional[ModelParameters] = Field(None, description="DEPRECATED: Use api_parameters instead")
-    
+
+    # Fixed-prompt models (e.g. GLM-OCR). Recognition-only models ignore rich task prompts and
+    # honour only a small set of fixed strings, so the provider must substitute rather than
+    # pass ours through. Absent prompt_mode, behaviour is unchanged for every existing profile.
+    prompt_mode: Optional[str] = Field(None, description="'fixed' for recognition-only models")
+    fixed_prompts: Dict[str, str] = Field(default_factory=dict, description="task_type -> fixed prompt string")
+    ineligible_tasks: List[str] = Field(default_factory=list, description="Tasks this model cannot perform")
+
     # Additional metadata
     performance: Dict[str, Any] = Field(default_factory=dict, description="Performance metrics")
     capabilities: List[str] = Field(default_factory=list, description="Model capabilities")
-    
+
     def get_api_params(self) -> Dict[str, Any]:
         """Get API parameters with backward compatibility.
         
@@ -403,6 +410,63 @@ class UniversalVLMProvider:
         except Exception as e:
             self.logger.error(f"process_page failed: {e}", exc_info=True)
             return {'success': False, 'error': str(e)}
+
+    def read_crop(self, crop_image: Image.Image, prompt: str, max_tokens: Optional[int] = None,
+                  image_first: Optional[bool] = None) -> str:
+        """
+        OCR a single cropped region with an explicit prompt, returning its raw text.
+
+        This is the reader used by the table-repair path. Unlike `process_page`, it does not go
+        through task-definition prompt resolution or JSON post-processing: the caller passes the
+        exact prompt to send and gets the model's raw string back, ready to splice into the page
+        text. The prompt is chosen by the caller from the active model's config (never hardcoded
+        here), which keeps this method model-agnostic — it works for any recognition model.
+
+        The request uses the model's own configured api_parameters (temperature, seed, sampler
+        settings) unchanged; per-model quirks live in that config, not in this code.
+
+        Args:
+            crop_image: the cropped region as a PIL image.
+            prompt: the exact prompt string to send, resolved by the caller from model config.
+            max_tokens: optional override; falls back to the model's configured max_tokens.
+            image_first: force the image/text order in the message. None (default) uses the
+                model's usual order (image-first for recognition models, text-first otherwise);
+                a grounding/layout read passes True because such models condition on the image.
+
+        Returns:
+            The model's raw output text for the crop (stripped). Empty string on failure.
+        """
+        try:
+            base64_image = self._encode_image_to_base64(crop_image)
+            api_params = self.model_profile.get_api_params()
+            if max_tokens is not None:
+                api_params = {**api_params, "max_tokens": max_tokens}
+
+            payload = {
+                "model": self.model_profile.model_name,
+                "messages": [{
+                    "role": "user",
+                    "content": self._build_message_content(prompt, base64_image, image_first=image_first),
+                }],
+                **api_params,
+            }
+
+            response = self.session.post(
+                str(self.config.api_endpoint),
+                headers={"Content-Type": "application/json"},
+                json=payload,
+                timeout=self.config.timeout_seconds,
+            )
+            response.raise_for_status()
+            body = response.json()
+
+            if body["choices"][0].get("finish_reason") == "length":
+                self.logger.warning(f"read_crop hit max_tokens ({prompt!r}) - output may be truncated")
+            return body["choices"][0]["message"]["content"].strip()
+
+        except (requests.RequestException, KeyError, IndexError) as error:
+            self.logger.error(f"read_crop failed for prompt {prompt!r}: {error}", exc_info=True)
+            return ""
 
     def _calculate_page_quality_score(self, content: str, metadata: Dict[str, Any]) -> float:
         """
@@ -754,24 +818,14 @@ class UniversalVLMProvider:
 
         api_params = self.model_profile.get_api_params()
 
-        prompt_text = effective_task.prompt
-        # This check is for the document anchoring feature in the test file
-        if base_text and '{base_text}' in prompt_text:
-            prompt_text = prompt_text.format(base_text=base_text)
-            self.logger.info(f"Document anchoring enabled: {len(base_text)} chars base_text")
+        prompt_text = self._resolve_prompt_text(effective_task, base_text)
 
         payload = {
             "model": self.model_profile.model_name,
             "messages": [
                 {
                     "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt_text},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/{self.config.image_format};base64,{base64_image}"},
-                        },
-                    ],
+                    "content": self._build_message_content(prompt_text, base64_image),
                 }
             ],
             **api_params
@@ -854,6 +908,103 @@ class UniversalVLMProvider:
         except (KeyError, IndexError) as e:
             self.logger.error(f"Failed to parse API response: {response.text}. Error: {e}")
             raise ValueError("Invalid API response format from /v1/chat/completions endpoint") from e
+
+    def _resolve_prompt_text(self, task_definition: TaskDefinition, base_text: Optional[str]) -> str:
+        """
+        Decide what prompt text this model should actually receive for this task.
+
+        Instruction-following models (OlmOCR-2, Gemini, cloud VLMs) get the task's own prompt,
+        optionally anchored with the page's digital text. Recognition-only models (GLM-OCR) get
+        one of their fixed prompt strings instead -- they ignore instructions entirely, so
+        passing ours through would produce recognition output dressed up as an answer.
+
+        Args:
+            task_definition: the task being run (supplies the prompt and the task identifier)
+            base_text: PyMuPDF text layer for document anchoring, when the prompt asks for it
+
+        Returns:
+            The prompt string to send to the model.
+        """
+        if self._is_fixed_prompt_model():
+            return self._lookup_fixed_prompt(task_definition)
+
+        prompt_text = task_definition.prompt
+        if base_text and '{base_text}' in prompt_text:
+            prompt_text = prompt_text.format(base_text=base_text)
+            self.logger.info(f"Document anchoring enabled: {len(base_text)} chars base_text")
+        return prompt_text
+
+    def _is_fixed_prompt_model(self) -> bool:
+        """True when the active profile declares prompt_mode: fixed (e.g. glm-ocr.yaml)."""
+        return getattr(self.model_profile, "prompt_mode", None) == "fixed"
+
+    def _build_message_content(self, prompt_text: str, base64_image: str,
+                               image_first: Optional[bool] = None) -> List[Dict[str, Any]]:
+        """
+        Order the image and the text inside the user message.
+
+        For recognition-only models the order is not cosmetic: on the same input, image-first and
+        text-first can return different output entirely, and such models were validated image-first
+        (they appear to condition on the image, so it must arrive first). Instruction-following
+        models keep the original text-first order, which is what existing profiles were tuned
+        against. A caller may override this with `image_first` (e.g. a grounding read).
+
+        Args:
+            prompt_text: the text part of the message.
+            base64_image: the base64-encoded image.
+            image_first: force ordering; None means derive it from the model's prompt_mode.
+        """
+        image_part = {
+            "type": "image_url",
+            "image_url": {"url": f"data:image/{self.config.image_format};base64,{base64_image}"},
+        }
+        text_part = {"type": "text", "text": prompt_text}
+
+        if image_first is None:
+            image_first = self._is_fixed_prompt_model()
+        if image_first:
+            return [image_part, text_part]
+        return [text_part, image_part]
+
+    def _task_identifier(self, task_definition: TaskDefinition) -> str:
+        """
+        The key we look a fixed prompt up by.
+
+        Task YAMLs set `task_name`; some also set `task_type`. The provider is constructed with
+        a `task_type` string that matches the YAML filename, which is the identifier the
+        profile's `fixed_prompts` map is written against. Prefer that, then fall back.
+        """
+        return self.task_type or task_definition.task_type or task_definition.task_name
+
+    def _lookup_fixed_prompt(self, task_definition: TaskDefinition) -> str:
+        """
+        Map a task onto one of the model's fixed prompts, or refuse.
+
+        Refusing loudly matters more than it looks. GLM answers *every* prompt with recognition
+        output, so a task it cannot do (describe this figure, classify this page, emit JSON)
+        comes back as plausible-looking transcribed text rather than an error. Silently
+        accepting that would put un-flagged, wrong content into a literature review. Such tasks
+        belong to the understanding model in Phase B.
+        """
+        task_id = self._task_identifier(task_definition)
+
+        if task_id in self.model_profile.ineligible_tasks:
+            raise ValueError(
+                f"Task '{task_id}' cannot run on recognition-only model "
+                f"'{self.model_profile.model_name}'. It requires an instruction-following "
+                f"model (route it to the understanding model)."
+            )
+
+        fixed_prompt = self.model_profile.fixed_prompts.get(task_id)
+        if not fixed_prompt:
+            raise ValueError(
+                f"No fixed prompt defined for task '{task_id}' on model "
+                f"'{self.model_profile.model_name}'. Add it to `fixed_prompts` in the profile, "
+                f"or list it under `ineligible_tasks` if the model cannot perform it."
+            )
+
+        self.logger.debug(f"Fixed-prompt model: '{task_id}' -> {fixed_prompt!r}")
+        return fixed_prompt
 
     def _post_process_output(self, raw_output: str, task_definition: Optional[TaskDefinition] = None) -> Dict[str, Any]:
         """
