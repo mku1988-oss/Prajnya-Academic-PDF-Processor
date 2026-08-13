@@ -1,44 +1,76 @@
-# Prajnya: The Reference Architecture for Academic RAG
+# Prajnya
 
-> **"Don't compromise between Speed, Quality, and Privacy. Prajnya is the Intelligent Broker that negotiates all three on a per-page basis."**
+### Scientific PDF Processing Engine
 
-![Status](https://img.shields.io/badge/Status-Production%20Ready-green?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.0.0-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge) ![Tests](https://img.shields.io/badge/Tests-1316%20passing-green?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Production%20Ready-green?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.0.0-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge)
 
 ---
 
-## What is Prajnya?
+Prajnya is a scientific PDF processing engine for extracting and reconstructing
+information from research documents.
 
-Prajnya is a **Modular Document Intelligence Engine** built for high-precision
-**RAG (Retrieval-Augmented Generation)** pipelines. It turns academic PDFs into
-rigorous structured JSON (text, metadata, tables and figures) rather than the
-flat text a generic parser produces, so that what reaches your vector database
-is verified, structured and semantically rich.
+Scientific PDFs are not simply collections of text. Important information is
+distributed across document structure, metadata, figures, tables, captions,
+scanned pages, and complex layouts. Prajnya is designed to process these
+components while preserving their relationships and provenance.
 
-**V6 is a rewrite of the engine.** Same purpose, same output philosophy, an
-entirely new routing core: a cheap CPU pre-pass now decides the *minimum* set of
-model calls, and **61.9% of pages never reach the GPU at all**. On a 9-document,
-485-page corpus it produced **0 failures, 107 figures and 31 tables**, and the
-8-page benchmark fell from **413s to 194s**.
+The project evolved through a series of increasingly difficult problems:
 
-The same corpus has been run twice, once from the command line, once through
-the graphical interface, with **identical output, document for document, and
-zero metadata differences**.
+**Metadata extraction → OCR → Document classification → Pipeline optimization → Multimodal extraction**
 
-**Fully offline by default.** In the shipped configuration no page, no title
-and no citation leaves your machine. Prajnya can also be pointed at a cloud
-vision model instead, per role, which needs no local GPU at all: see
+The underlying motivation is straightforward:
+
+> **«In RAG, what goes in determines what comes out.»**
+
+A poor representation of the source document leads to poor retrieval and
+unreliable downstream reasoning. For scientific applications, the document
+processing layer therefore needs to be treated as a core part of the system,
+not as a preprocessing afterthought.
+
+Prajnya focuses on building that foundation.
+
+## Current capabilities
+
+- Scientific document and page classification
+- OCR and text extraction
+- Metadata extraction and validation
+- Document structure reconstruction
+- Figure and multi-panel figure extraction
+- Table detection and reconstruction
+- Efficient processing and GPU-aware inference
+- Structured, provenance-aware output
+
+**Fully offline by default, and that was one of the reasons for building it.**
+Research documents are frequently unpublished, embargoed, or covered by a
+licence that does not permit uploading them to a third party, so a processing
+layer that can only work by sending every page to someone else's API is not
+usable for a great deal of scientific work. Prajnya runs end to end on local
+models: in the shipped configuration no page, no title and no citation leaves
+your machine. It can also be pointed at a cloud vision model instead, per role,
+which needs no local GPU at all: see
 [Local or cloud](#local-or-cloud-both-are-first-class). That is a choice you
 make, never a default.
 
-> **A note on names.** **Prajnya** is the product. **Shastrasaara** is the
-> engine's internal codename: you will see it in the source tree, in the
-> `SARA_*` environment variables, and as the suggested conda environment name.
-> **Prajnya Studio** is the graphical interface. They are one project.
+Prajnya is being developed as a general document-intelligence layer for
+scientific knowledge systems. It is also the foundation of the larger
+**Shastrasaara** project, which aims to build a local, multimodal scientific
+RAG system.
+
+The immediate goal is simple:
+
+> **«Get the document right first.»**
+
+> **A note on names.** **Prajnya** is this engine, and **Prajnya Studio** is its
+> graphical interface. **Shastrasaara** is the larger scientific RAG system this
+> engine is being built to feed; it is also the engine's original codename, so
+> you will still see it in the source tree, in the `SARA_*` environment
+> variables, and as the suggested conda environment name.
 
 ---
 
 ## Contents
 
+- [Current capabilities](#current-capabilities)
 - [What's new in V6](#whats-new-in-v6)
 - [Requirements](#requirements) · [Installation](#installation) · [Quick start](#quick-start)
 - [Two front ends](#two-front-ends-one-pipeline) · [Prajnya Studio](#prajnya-studio-the-eight-screens)
@@ -47,7 +79,7 @@ make, never a default.
 - [What you get](#what-you-get) · [Figures](#the-figure-manifest) · [Tables](#tables-crop-and-structure)
 - [Performance](#performance) · [How it works](#how-it-works) · [Design principles](#design-principles)
 - [Configuration](#configuration) · [Troubleshooting](#troubleshooting) · [Running notes](#running-notes)
-- [Testing](#testing) · [Competitive landscape](#competitive-landscape) · [Roadmap](#roadmap)
+- [Competitive landscape](#competitive-landscape) · [Roadmap](#roadmap)
 - [Citation](#citation) · [Acknowledgments](#acknowledgments) · [Relationship to v5.x](#relationship-to-v5x) · [Licence](#licence)
 
 ---
@@ -698,7 +730,7 @@ attractive.
 
 **Every stage is gated.** A parity harness asserts metadata, table recovery,
 figure crops and word coverage against archived known-good output. No
-optimization ships without passing it. See [Testing](#testing).
+optimization ships without passing it.
 
 ---
 
@@ -841,28 +873,6 @@ you intend to quote.
 
 Grep the log for `openrouter` (must be 0 hits) and `localhost:8080` (must be
 > 0).
-
----
-
-## Testing
-
-**The test suite is not part of a release.** It lives in the development
-repository, where it is run before anything ships:
-
-```bash
-python -m pytest tests/ -q          # 1316 tests, no GPU needed
-
-# The parity gate against a fresh run
-python -m pytest tests/test_parity_nmr.py -v \
-    --run-output "run_outputs/documents/<benchmark>.v6.json"
-```
-
-It is kept out of the release deliberately rather than by oversight. A large
-part of it cannot run outside the development machine at all: the parity gate
-needs the benchmark PDF and a live llama-server, several tests read the sample
-corpus, and the deployment tests import `tools/`, which a release also does not
-contain. Shipping a suite that fails on a clean clone says less about the
-project's quality than not shipping one.
 
 ---
 
