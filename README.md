@@ -2,7 +2,7 @@
 
 ### Scientific PDF Processing Engine
 
-![Status](https://img.shields.io/badge/Status-Production%20Ready-green?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.0.0-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Production%20Ready-green?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.1.0-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge)
 
 ---
 
@@ -121,10 +121,10 @@ paper, rather than "somewhere in this PDF".
 
 | | measured on the 485-page corpus |
 |---|---|
-| figure crops extracted | **107** |
-| carrying their printed label, as the paper prints it | **95 (89%)** |
-| crops that are panels of one printed figure | **26**, resolved into **12** figures |
-| distinct printed figures after grouping | **81** |
+| figure crops extracted | **111** |
+| carrying their printed label, as the paper prints it | **108 (97%)** |
+| crops that are panels of one printed figure | **32**, resolved into **14** figures |
+| distinct printed figures after grouping | **93** |
 | table crops, each with a reconstructed grid | **31** |
 | crops referenced by a manifest but missing on disk | **0** |
 
@@ -175,6 +175,18 @@ see [What you get](#what-you-get) for the exact records this produces.
   pages no longer go to the GPU.
 - **`--force` now genuinely re-derives metadata** instead of re-reading every
   page and then returning the value the first run had cached.
+- **Every table now leaves with its grid.** Only tables that went through the
+  repair path used to be transcribed, so 14 of the corpus's 31 tables had no
+  grid and their numbers reached no search index at all.
+- **Dense tables are no longer cut off.** A 55-row table was stored ending at
+  row 41: the page image and the transcription share the reading model's
+  context, and the transcription ran out of room. Table reads now have the
+  space they need.
+- **Figures printed side by side are no longer merged into one**, and a
+  caption printed on the page after its figure is now found.
+- **26 captions got back their opening sentence.** The caption box often
+  started part way down, losing the line that says what the figure *is*,
+  which is the part a search matches on.
 
 ### Licensing
 
@@ -569,7 +581,11 @@ Each document JSON:
   "metadata_final": { "title", "authors", "doi", "journal", "year", "editors", … },
   "review_status":  "reviewed | provisional",
   "pages": [ { "page_number", "content", "quality_score",
-               "metadata": { "processing_method", "coverage", "figures", "tables",
+               "metadata": { "processing_method", "page_type", "coverage",
+                             "figures", "tables",
+                             "headings",              // typography of candidate heading lines
+                             "reference_density",     // how bibliographic the page reads, 0-1
+                             "has_reference_heading",
                              "chapter": { "number", "title", "authors" } } } ],
   "summary": { "errors", "page_count", "figure_count" },
   "profile": { … the un-flattened record, so nothing is lost … }
@@ -579,6 +595,17 @@ Each document JSON:
 `processing_method` tells you what each page cost: `pymupdf` (text layer, free),
 `glm_fullpage` (a VLM read), `glm_repair` (a table crop re-read),
 `two_shot_title_page`.
+
+Three page fields exist for the retrieval layer above:
+
+- **`headings`**: each line that looks like a heading, with its size and
+  weight relative to the page's body text and how much of it is in capitals.
+  A numbered heading ("3.2.1") states its own depth; an unnumbered one
+  ("Introduction") does not, and the typography is the only evidence of it.
+- **`reference_density`** and **`has_reference_heading`**: how much the page
+  reads like a bibliography. A reference list is full of exactly the words a
+  search looks for while stating nothing, so a retriever can weigh it down.
+- **`page_type`**: what the classifier decided the page is, on every page.
 
 ### The figure manifest
 
@@ -627,9 +654,12 @@ The crop preserves what the table *looks* like; the grid makes its numbers
 queryable. A retrieval layer can index the grid's text and still hand the
 original image to a multimodal model when the layout itself carries meaning.
 
-Where a page's text layer produced a table that came out mangled, that one crop
-is re-read by the VLM (`glm_repair`) rather than the whole page, 3.1% of pages
-on the corpus, against re-reading everything.
+Every table crop is read by the VLM to produce its grid, whatever produced the
+rest of its page. Where the model's full-page read silently dropped a table
+(detected by comparing it with the text layer, or on a scanned page by the
+detector seeing a table the read never produced), that crop's reading is also
+spliced back into the page content (`glm_repair`) rather than the whole page
+being re-read.
 
 ---
 
@@ -886,7 +916,7 @@ the corpus above, not asserted:
 |---|---|
 | **Per-page cost routing** | a CPU pre-pass decides the cheapest capable reader for each page; **61.9% of pages never reach the GPU** |
 | **Metadata verification** | reconciles a model reading, the text layer and an authority (Zotero by DOI), and records `validation_source` and `validation_confidence` |
-| **Figures as retrievable objects** | 107 crops, **89% carrying their printed label**, multi-panel figures grouped under one label |
+| **Figures as retrievable objects** | 111 crops, **97% carrying their printed label**, multi-panel figures grouped under one label |
 | **Tables twice over** | the crop *and* a reconstructed grid, so the numbers are queryable and the layout is still inspectable |
 | **Books and edited volumes** | front matter, a parsed contents page, and **per-chapter authorship**, a passage cites its chapter's authors, not the editors' |
 | **Operational state** | an atomic SHA-256 ledger, resumable batches, and a review queue for anything incomplete |
@@ -914,9 +944,9 @@ v5.x's roadmap named three things for the next phase. Two have landed:
   vector-DB ingestion and query-time interpretation belong to the layer above,
   and the output format is shaped to make that layer easy to write.
 
-Also open: caption capture is the weakest link in the figure path (89% of crops
-carry a printed label; the rest have no label text anywhere on the page), and
-the book pipeline is measured against one publisher's layout conventions.
+Also open: caption capture is still the weakest link in the figure path (97% of
+crops carry a printed label; the rest have no label text anywhere on the page),
+and the book pipeline is measured against one publisher's layout conventions.
 
 ---
 
@@ -929,7 +959,7 @@ If you use Prajnya in your research, please cite:
   title   = {Prajnya: Reference Architecture for Academic RAG Pipelines},
   author  = {Manu Unni},
   year    = {2026},
-  version = {6.0.0},
+  version = {6.1.0},
   url     = {https://github.com/mku1988-oss/Prajnya-Academic-PDF-Processor}
 }
 ```

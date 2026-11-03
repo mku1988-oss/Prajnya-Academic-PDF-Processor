@@ -109,8 +109,12 @@ class BodyPipeline:
         figure_escalation_detector: Optional[LayoutDetector] = None,
         figure_escalation_models: Optional[List[str]] = None,
         logger: Optional[logging.Logger] = None,
+        table_crop_max_tokens: Optional[int] = None,
     ) -> None:
         self.extraction_provider = extraction_provider
+        # Output cap for table-crop reads; None keeps the model's own limit.
+        # A dense table needs more than a page read does (see glm-ocr.yaml).
+        self.table_crop_max_tokens = table_crop_max_tokens
         self.extraction_model = extraction_model
         self.layout_detector = layout_detector
         self.resident_models = resident_models
@@ -171,6 +175,7 @@ class BodyPipeline:
         profile_data = built.profile_data
         fixed_prompts = profile_data.get("fixed_prompts", {})
         extraction_dpi = profile_data.get("app_config", {}).get("target_dpi", 300)
+        table_crop_max_tokens = profile_data.get("app_config", {}).get("table_crop_max_tokens")
         coverage_threshold = profile_data.get(
             "content_drop_check", {}).get("min_word_coverage", 0.90)
 
@@ -224,6 +229,7 @@ class BodyPipeline:
             figure_escalation_detector=escalation_detector,
             figure_escalation_models=escalation_models,
             logger=log,
+            table_crop_max_tokens=table_crop_max_tokens,
         )
         log.info(
             "GLM two-phase offline path ENABLED: extraction=%s, layout=%s, "
@@ -776,7 +782,8 @@ class BodyPipeline:
 
     def _read_table_crop(self, crop_image: Image.Image) -> str:
         """Re-read one cropped table with the extraction model."""
-        return self.extraction_provider.read_crop(crop_image, self.table_crop_prompt)
+        return self.extraction_provider.read_crop(
+            crop_image, self.table_crop_prompt, max_tokens=self.table_crop_max_tokens)
 
     def _read_caption_crop(self, crop_image: Image.Image) -> str:
         """Read a caption crop (scanned pages only) with the extraction model."""
