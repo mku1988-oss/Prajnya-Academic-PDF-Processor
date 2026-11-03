@@ -120,6 +120,37 @@ class Word:
 
 
 @dataclass(frozen=True)
+class StyledLine:
+    """A typeset line, with the typography needed to tell a heading from prose.
+
+    For biology researchers: a section heading is printed differently from
+    body text -- usually bolder, often larger, frequently in capitals. Those
+    three facts are what this carries, because the WORDS alone cannot say
+    whether "Introduction" is a top-level heading or a sub-heading.
+
+    Attributes:
+        text: The line as printed.
+        rect: Its bounding box.
+        cap_height: Median glyph height of the CAPITAL letters and digits on
+            the line. Capitals are used deliberately: they have no descenders,
+            so an ALL-CAPS heading stays comparable with mixed-case body text.
+            Measuring whole-word boxes instead makes caps headings measure
+            SMALLER than prose, which is backwards -- see the note in
+            `utils/heading_pass.py`.
+        weight: Median font weight (PDF units, ~400 regular, ~700 bold), or
+            0.0 when the file does not record it. Some PDFs genuinely do not,
+            so a consumer must treat 0.0 as "unknown", never as "light".
+        caps_fraction: Share of the line's letters that are uppercase.
+    """
+
+    text: str
+    rect: Rect
+    cap_height: float = 0.0
+    weight: float = 0.0
+    caps_fraction: float = 0.0
+
+
+@dataclass(frozen=True)
 class ImageBlock:
     """A raster image embedded in the page — a figure candidate."""
 
@@ -171,6 +202,19 @@ class PdfPage(Protocol):
 
         This is how figure captions are read for free on born-digital pages,
         instead of paying a VLM call to transcribe them.
+        """
+        ...
+
+    def styled_lines(self) -> List[StyledLine]:
+        """
+        Lines with their typography, for telling headings from prose.
+
+        Separate from `words()` because the two are built differently: word
+        boxes come from the library's own word or rect grouping, while these
+        need per-character font data that only a character walk exposes. A
+        page with no text layer returns an empty list rather than raising --
+        a scan has no typography to report, and that must never cost the page
+        its content.
         """
         ...
 
@@ -389,3 +433,110 @@ def coverage(extracted_text: str, reference_words: Sequence[Word]) -> float:
 
     found = set(tokens(extracted_text))
     return sum(1 for t in reference if t in found) / len(reference)
+
+
+# ---------------------------------------------------------------------------
+# Typography helpers -- SHARED so both backends compute the same quantity
+# ---------------------------------------------------------------------------
+
+#: Glyphs with a flat baseline and no descender. Cap-height is measured from
+#: these alone, which is what makes an ALL-CAPS heading comparable with
+#: mixed-case body text instead of measuring shorter than it.
+CAP_GLYPHS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+
+#: Characters closer than this share a baseline, in PDF points.
+BASELINE_TOLERANCE = 2.0
+
+#: A gap wider than this many times the cap-height starts a new line, so two
+#: columns of a journal page do not fuse across the gutter.
+LINE_GAP_FACTOR = 3.0
+
+
+def group_characters_into_lines(chars: List[dict]) -> List[List[dict]]:
+    """
+    Group a page's characters into typeset lines.
+
+    Args:
+        chars: dicts with `ch`, `x0`, `x1`, `y0`, `y1`, `weight`, in a
+            bottom-up coordinate system.
+
+    Returns:
+        Lines top-to-bottom, each line's characters left-to-right, split
+        wherever a horizontal gap is wide enough to be a column boundary.
+    """
+    if not chars:
+        return []
+
+    rows: List[List[dict]] = []
+    current: List[dict] = []
+    baseline: Optional[float] = None
+    for char in sorted(chars, key=lambda c: (-c["y0"], c["x0"])):
+        if baseline is None or abs(char["y0"] - baseline) <= BASELINE_TOLERANCE:
+            current.append(char)
+            baseline = char["y0"] if baseline is None else baseline
+        else:
+            rows.append(current)
+            current, baseline = [char], char["y0"]
+    if current:
+        rows.append(current)
+
+    lines: List[List[dict]] = []
+    for row in rows:
+        row = sorted(row, key=lambda c: c["x0"])
+        heights = [c["y1"] - c["y0"] for c in row if c["y1"] > c["y0"]]
+        typical = max(heights) if heights else 1.0
+        run = [row[0]]
+        for previous, char in zip(row, row[1:]):
+            if char["x0"] - previous["x1"] > typical * LINE_GAP_FACTOR:
+                lines.append(run)
+                run = [char]
+            else:
+                run.append(char)
+        lines.append(run)
+    return lines
+
+
+def styled_line_from_characters(
+    chars: List[dict], page_height: float
+) -> Optional["StyledLine"]:
+    """
+    Measure one line's typography.
+
+    Args:
+        chars: the line's characters, left-to-right, bottom-up coordinates.
+        page_height: for flipping into the interface's top-left convention.
+
+    Returns:
+        A StyledLine, or None if the run holds no printable text.
+    """
+    import statistics
+
+    if not chars:
+        return None
+    text = "".join(c["ch"] for c in chars).strip()
+    if not text:
+        return None
+
+    caps = [c["y1"] - c["y0"] for c in chars
+            if c["ch"] in CAP_GLYPHS and c["y1"] > c["y0"]]
+    cap_height = statistics.median(caps) if caps else 0.0
+
+    weights = [c["weight"] for c in chars if c.get("weight")]
+    weight = statistics.median(weights) if weights else 0.0
+
+    letters = [c["ch"] for c in chars if c["ch"].isalpha()]
+    caps_fraction = (
+        sum(1 for c in letters if c.isupper()) / len(letters) if letters else 0.0
+    )
+
+    box = Rect(
+        min(c["x0"] for c in chars), min(c["y0"] for c in chars),
+        max(c["x1"] for c in chars), max(c["y1"] for c in chars),
+    )
+    return StyledLine(
+        text=text,
+        rect=flip_y(box, page_height).normalized(),
+        cap_height=round(cap_height, 3),
+        weight=round(weight, 1),
+        caps_fraction=round(caps_fraction, 3),
+    )

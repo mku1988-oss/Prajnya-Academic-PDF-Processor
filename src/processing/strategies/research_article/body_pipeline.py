@@ -46,6 +46,13 @@ from ...models import ContentPage
 from ...events import emit
 from ...paths import REPO_ROOT, anchor_output_path
 from ...pdf.base import PdfPage
+from ...utils.caption_overleaf import (
+    NEIGHBOUR_OFFSETS,
+    recover_overleaf_captions,
+)
+from ...utils.figure_label_pass import build_text_lines, find_label_lines
+from ...utils.reference_pass import reference_signals
+from ...utils.heading_pass import heading_candidates_for_page
 from ...utils.content_drop_check import (
     CoverageResult,
     check_page_for_content_drop,
@@ -55,6 +62,7 @@ from ...utils.figure_extractor import append_figure_anchors
 from ...utils.model_swap import RouterClient
 from ...utils.page_classifier import PageClassifier, PageType, extract_text_stats
 from ...utils.table_repair import repair_page_tables
+from ...utils.text_normalization import normalize_harvested_text
 from .figure_escalation import (
     FIGURE_LABELS,
     collect_suspect_pages,
@@ -262,6 +270,7 @@ class BodyPipeline:
                 )
 
         self._second_opinion_on_figures(cache, results)
+        self._recover_overleaf_captions(cache, results)
 
         all_tables = [tab for idx in sorted(results)
                       for tab in (results[idx].metadata.get("tables") or [])]
@@ -299,7 +308,8 @@ class BodyPipeline:
 
         if page_type is not None and page_type == PageType.TEXT_ONLY and hidden is None:
             self.logger.info("Page %d: pure text -> text layer (T1)", page_idx + 1)
-            return self._process_with_text_layer(page, page_idx, analysis)
+            return self._process_with_text_layer(page, page_idx, analysis,
+                                                 page_type)
 
         if hidden is not None:
             self.logger.info(
@@ -337,19 +347,39 @@ class BodyPipeline:
         # Tables get the same treatment as figures — crop, caption, id — so a
         # table is a retrievable object rather than prose inside a page blob.
         # Any transcription the repair path already read is carried through
-        # free of charge; see tables.py.
+        # free of charge; every OTHER table is read from its crop, so no table
+        # leaves without a grid. See `_grid_for` in tables.py for why.
         tables = extract_page_tables(
             page, page_image, detections, cache.pdf_path, self.tables_base_dir,
             page_idx, recovered=repair_meta.get("recovered_tables"),
-            path_root=self.figures_path_root, logger=self.logger)
+            path_root=self.figures_path_root, logger=self.logger,
+            read_table_crop=self._read_table_crop)
         if tables:
             final_text = append_table_anchors(final_text, tables)
+
+        # Repair control-character damage LAST, on the text that is about to be
+        # stored. Deliberately not on `glm_text` above: that feeds
+        # `check_page_for_content_drop`, and changing it would change the
+        # coverage number and so the repair DECISION. Normalising only what is
+        # stored keeps this a text-quality fix rather than a routing change.
+        # The appended figure/table anchors are generated strings and contain
+        # no control characters, so passing them through is a no-op.
+        final_text = normalize_harvested_text(final_text)
 
         quality = max(base_quality, 0.85) if repair_meta.get("tables_recovered") \
             else base_quality
         metadata = {
             "processing_method": repair_meta["processing_method"],
             "page_type": page_type.value if page_type is not None else None,
+            # Typography for the heading-shaped lines, read from the PDF's own
+            # text layer. Recorded on BOTH routes because a model-read page's
+            # prose comes from the model but its fonts still come from the
+            # file, and the depth of an unnumbered heading is not recoverable
+            # from text alone -- see heading_pass.py.
+            "headings": heading_candidates_for_page(page, logger=self.logger),
+            # How bibliographic this page reads. A reference list is a
+            # term-density trap for retrieval -- see reference_pass.py.
+            **reference_signals(final_text),
             "coverage": repair_meta.get("coverage"),
             "tables_recovered": repair_meta.get("tables_recovered", 0),
             "visual_element_count": len(analysis.get("visual_regions", [])),
@@ -455,11 +485,34 @@ class BodyPipeline:
         return detector, [model_name]
 
     def _process_with_text_layer(self, page: PdfPage, page_idx: int,
-                                 analysis: Dict[str, Any]) -> ContentPage:
-        """Pure-text page: the text layer is authoritative and free (T1)."""
+                                 analysis: Dict[str, Any],
+                                 page_type: Optional[PageType] = None) -> ContentPage:
+        """
+        Pure-text page: the text layer is authoritative and free (T1).
+
+        Two things happen here that do not happen on the model path, because
+        this is where raw harvested text becomes stored content:
+
+        1. The text is normalised. Some PDFs encode the hyphen that splits a
+           word across a line break as a control character, so the word arrives
+           as "measure<02>ments" and can never be found by any search. See
+           `text_normalization` for the measurements behind the rule.
+        2. `page_type` is recorded. It was computed to make the routing
+           decision and then discarded on this path only, so 60% of pages could
+           not say how they were produced. Retrieval quality differs by route,
+           so anything reading this output needs to be able to tell.
+        """
         return ContentPage(
-            page_number=page_idx + 1, content=page.text(), quality_score=0.95,
-            metadata={"processing_method": "pymupdf", "analysis": analysis},
+            page_number=page_idx + 1,
+            content=normalize_harvested_text(page.text()),
+            quality_score=0.95,
+            metadata={
+                "processing_method": "pymupdf",
+                "page_type": page_type.value if page_type is not None else None,
+                "analysis": analysis,
+                "headings": heading_candidates_for_page(page, logger=self.logger),
+                **reference_signals(normalize_harvested_text(page.text())),
+            },
         )
 
     def _detections_the_filter_hid(
@@ -532,6 +585,69 @@ class BodyPipeline:
             return None
 
         return detections
+
+    def _recover_overleaf_captions(self, cache: DocumentCache,
+                                   results: Dict[int, ContentPage]) -> None:
+        """
+        Give a full-page figure the caption printed on the following page.
+
+        For biology researchers: a journal running a full-page figure often
+        prints its caption on the next page. The per-page labelling pass reads
+        only the page a figure sits on, so those figures arrive with no
+        caption at all — even though the caption is in the document, one page
+        away. See `utils/caption_overleaf.py` for the safety conditions.
+
+        This runs here and nowhere else because it is the first point at which
+        one page's figures and another page's text are both in hand.
+
+        Failure is never fatal: the figures keep whatever captions they
+        already had, which is exactly what they would have had without this
+        step.
+        """
+        try:
+            figures_by_page: Dict[int, List[dict]] = {}
+            label_lines_by_page: Dict[int, List] = {}
+
+            for page_idx, content_page in results.items():
+                figures = content_page.metadata.get("figures") or []
+                if figures:
+                    figures_by_page[page_idx + 1] = figures
+
+            if not figures_by_page:
+                return
+
+            # Only the pages that could actually supply a caption are read,
+            # rather than the whole document: the neighbours of a page whose
+            # figures might need one.
+            wanted = {
+                page + offset
+                for page in figures_by_page
+                for offset in NEIGHBOUR_OFFSETS
+            }
+            for page_number in sorted(wanted):
+                page_idx = page_number - 1
+                if page_idx < 0:
+                    continue
+                try:
+                    page = cache.page(page_idx)
+                except Exception:
+                    continue                    # past the end of the document
+                width, _ = page.size
+                words = [(w.text, w.rect.x0, w.rect.y0, w.rect.x1, w.rect.y1)
+                         for w in page.words()]
+                label_lines_by_page[page_number] = find_label_lines(
+                    build_text_lines(words, width))
+
+            recovered = recover_overleaf_captions(
+                figures_by_page, label_lines_by_page, logger=self.logger)
+            if recovered:
+                self.logger.info(
+                    "Overleaf caption pass: %d figure(s) recovered a caption "
+                    "from an adjacent page.", recovered)
+        except Exception as error:                          # pragma: no cover
+            self.logger.warning(
+                "Overleaf caption pass failed (%s); figures keep the captions "
+                "they already had.", error)
 
     def _second_opinion_on_figures(self, cache: DocumentCache,
                                    results: Dict[int, ContentPage]) -> None:

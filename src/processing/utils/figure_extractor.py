@@ -36,6 +36,7 @@ except ImportError:  # pragma: no cover
 from src.processing.layout.base import Detection
 from src.processing.layout.regions import FigureRegion, locate_figure_regions
 from src.processing.utils.figure_labels import parse_printed_label
+from src.processing.utils.text_normalization import normalize_harvested_text
 
 #: A caller-supplied caption reader: given a caption box in page-image pixels
 #: (or None), return the caption text. The caller maps pixels to the text layer,
@@ -196,6 +197,12 @@ def _save_one_figure(
     except Exception as error:
         # A missing caption degrades the RAG entry; it must not lose the image.
         log.warning("Caption read failed for %s: %s", figure_id, error)
+
+    # Repaired BEFORE the label is parsed, because a control character inside
+    # "Fig. 1" would break label extraction, and `label_key` is what groups the
+    # panels of a multi-panel figure. A caption is often the only text a figure
+    # object carries, so damage here costs more than it does in page prose.
+    caption = normalize_harvested_text(caption)
 
     printed_label, label_key = parse_printed_label(caption)
 

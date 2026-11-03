@@ -44,6 +44,7 @@ citation.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -69,6 +70,33 @@ MIN_HORIZONTAL_OVERLAP = 0.25
 #: that single sign error lost 35 of the 50 captions we already trusted.
 CAPTION_OVERLAP_TOLERANCE = 0.04
 
+#: A typographic ORNAMENT printed before a caption's label, which must be
+#: stripped before the label can be recognised. Nature-family journals set a
+#: "◀" before a caption that belongs to the figure on the FACING page --
+#: so the very mark meaning "the figure is overleaf" was what stopped the
+#: overleaf figure being found.
+#:
+#: The two backends disagree here and that is why this went unnoticed: PyMuPDF
+#: drops the ornament, pypdfium2 returns it as a word. Anything relying on one
+#: backend's text will not see the problem at all.
+#:
+#: MEASURED over the 9-document corpus (485 pages), because the obvious wider
+#: rule is actively harmful. Stripping any leading punctuation unblocks 21
+#: lines, of which only 2 are captions -- the other 19 are parenthesised
+#: CITATIONS ("(Figure 7), whereas ...", "(Fig. 3.3 ) (Kadler et al. 1996 )"),
+#: exactly what this module exists to keep out. So "(" and "[" are pointedly
+#: NOT in this set: they mark a citation, not an ornament. Restricted to
+#: geometric shapes, dingbats and bullets, it unblocks 2 lines and both are
+#: real captions.
+ORNAMENT_PREFIX = re.compile(
+    "^["
+    "\\s"
+    "■-◿"      # geometric shapes, including U+25C0 BLACK LEFT-POINTING TRIANGLE
+    "☀-➿"      # miscellaneous symbols and dingbats
+    "•‣"       # bullet, triangular bullet
+    "]+"
+)
+
 #: Words further apart than this (as a fraction of page width) are in
 #: DIFFERENT COLUMNS, not the same line. Without this, a two-column paper
 #: interleaves both columns into one line at each y, and a caption starting
@@ -87,12 +115,19 @@ class LabelLine:
         key: the normalized matching key, e.g. "figure 2.1".
         text: the full line, which is the start of the caption itself.
         rect: (x0, y0, x1, y1) of the line, in the same units as the figures.
+        starts_a_block: True when no body line runs directly into this one
+            from above at the same left margin. A caption begins a block of
+            text; a sentence that happens to open with "Figure 6 and Video S5
+            show..." is the continuation of a paragraph. Only used by the
+            last-resort pairing in `_adopt_orphan_captions`, which is the one
+            place that cannot rely on distance to tell them apart.
     """
 
     printed: str
     key: str
     text: str
     rect: Tuple[float, float, float, float]
+    starts_a_block: bool = True
 
 
 @dataclass(frozen=True)
@@ -103,8 +138,12 @@ class LabelAssignment:
     Attributes:
         printed: label as printed, or None when nothing could be established.
         key: normalized key, or None.
-        caption: the caption line's text — recovered even when the detector
-            gave us no caption box at all.
+        caption: the caption as read from the text layer — the whole block
+            when `text_lines` was supplied, otherwise its first line only.
+        opening: the caption's FIRST line alone, which is the part a
+            detector-supplied caption is missing when it begins part way
+            down. Kept separate because the two are used for different
+            repairs: see `figures._should_replace_caption`.
         shared_with: how many crops on the page carry this same label. Greater
             than 1 means these crops are PANELS OF ONE PRINTED FIGURE.
         distance: gap in page units between the crop and its caption line,
@@ -116,6 +155,7 @@ class LabelAssignment:
     caption: str
     shared_with: int
     distance: float
+    opening: str = ""
 
 
 def build_text_lines(words: Sequence[Tuple[str, float, float, float, float]],
@@ -191,19 +231,110 @@ def find_label_lines(lines: Sequence[Tuple[str, float, float, float, float]]
     part-way through is not returned, because `parse_printed_label` only reads
     the beginning of the text.
 
+    A leading typographic ORNAMENT is stripped first — see `ORNAMENT_PREFIX`.
+
     Args:
         lines: `(text, x0, y0, x1, y1)` per line, in page units.
 
     Returns:
-        One `LabelLine` per caption-looking line, page order preserved.
+        One `LabelLine` per caption-looking line, page order preserved. Its
+        text carries no leading ornament, so the caption stored downstream
+        begins at the label.
     """
     found: List[LabelLine] = []
     for text, x0, y0, x1, y1 in lines:
-        printed, key = parse_printed_label(text)
+        cleaned = ORNAMENT_PREFIX.sub("", text)
+        printed, key = parse_printed_label(cleaned)
         if printed and key:
-            found.append(LabelLine(printed=printed, key=key, text=text,
-                                   rect=(x0, y0, x1, y1)))
+            found.append(LabelLine(
+                printed=printed, key=key, text=cleaned,
+                rect=(x0, y0, x1, y1),
+                starts_a_block=_starts_a_block((x0, y0, x1, y1), lines),
+            ))
     return found
+
+
+#: How far below one caption line the next may begin, as a multiple of the
+#: line's own height, and still belong to the same caption. Captions are set
+#: solid like body text; the gap to the paragraph AFTER a caption is larger.
+CAPTION_LINE_GAP = 1.8
+
+#: How far a continuation line's left edge may sit from the caption's own left
+#: margin, in page units. Journals indent nothing inside a caption, but the
+#: line reconstruction wobbles by a point or two, and some captions carry a
+#: hanging first line.
+CAPTION_MARGIN_TOLERANCE = 12.0
+
+#: A caption longer than this many lines is not a caption -- the walk has run
+#: into body text. Measured: the longest real caption in the 9-document corpus
+#: is 21 lines (the tendon volume's Fig. 3.5), so this leaves generous room
+#: while still bounding a runaway.
+MAX_CAPTION_LINES = 40
+
+
+def harvest_caption_block(
+    label_line: LabelLine,
+    lines: Sequence[Tuple[str, float, float, float, float]],
+) -> str:
+    """
+    Read a whole caption out of the text layer, not just its first line.
+
+    For biology researchers: the layout detector draws a box around what it
+    thinks the caption is, and that box very often starts PART WAY DOWN the
+    caption. The stored caption then begins mid-sentence -- "respective
+    overlaps and gaps in the fibril. (b) ..." -- and the opening sentence that
+    says what the figure actually shows, "Fig. 2.2 Fibril-forming collagens
+    and their assembly", is missing. That opening is exactly the part a search
+    needs, so 26 of this corpus's 107 captions are unsearchable for their own
+    subject.
+
+    The page's text layer has the caption whole. This walks down from the
+    label line, taking each following line while it still reads as the same
+    block, and stops at the first sign that the caption has ended:
+
+    * a vertical gap larger than `CAPTION_LINE_GAP` -- a new paragraph;
+    * a left margin outside `CAPTION_MARGIN_TOLERANCE` -- a different column
+      or a different element;
+    * a line that begins a caption of its OWN -- the next figure;
+    * `MAX_CAPTION_LINES`, so a page whose layout defeats all three cannot
+      swallow the rest of the article.
+
+    Args:
+        label_line: the caption's opening line, from `find_label_lines`.
+        lines: every text line on the page, as `build_text_lines` returns them.
+
+    Returns:
+        The caption as one space-joined string, beginning at its label. Never
+        empty: at worst it is the label line alone, which is what the caller
+        had before.
+    """
+    left = label_line.rect[0]
+    collected = [label_line.text]
+    previous = label_line.rect
+
+    for text, x0, y0, x1, y1 in _lines_below(label_line, lines):
+        if y0 - previous[3] > (y1 - y0) * CAPTION_LINE_GAP:
+            break                                   # a new paragraph begins
+        if abs(x0 - left) > CAPTION_MARGIN_TOLERANCE:
+            break                                   # another column or element
+        printed, _ = parse_printed_label(ORNAMENT_PREFIX.sub("", text))
+        if printed:
+            break                                   # the next figure's caption
+        collected.append(text)
+        previous = (x0, y0, x1, y1)
+        if len(collected) >= MAX_CAPTION_LINES:
+            break
+
+    return " ".join(part.strip() for part in collected if part.strip())
+
+
+def _lines_below(label_line: LabelLine,
+                 lines: Sequence[Tuple[str, float, float, float, float]]
+                 ) -> List[Tuple[str, float, float, float, float]]:
+    """The page's lines that sit below the label line, nearest first."""
+    below = [line for line in lines if line[2] > label_line.rect[1]]
+    return sorted(below, key=lambda line: (line[2], line[1]))
+
 
 
 def assign_labels_on_page(
@@ -211,6 +342,7 @@ def assign_labels_on_page(
     label_lines: Sequence[LabelLine],
     page_height: float,
     logger: Optional[logging.Logger] = None,
+    text_lines: Optional[Sequence[Tuple[str, float, float, float, float]]] = None,
 ) -> List[LabelAssignment]:
     """
     Attach each figure crop on a page to the caption it belongs to.
@@ -227,6 +359,10 @@ def assign_labels_on_page(
         label_lines: caption-looking lines from `find_label_lines`.
         page_height: the page's height, for the adjacency limit.
         logger: optional logger.
+        text_lines: every line on the page, from `build_text_lines`. When
+            given, each assignment carries the WHOLE caption rather than only
+            its first line — see `harvest_caption_block`. Omitting it keeps
+            the first-line-only behaviour, which is all the geometry needs.
 
     Returns:
         One `LabelAssignment` per crop, in the order the crops were given.
@@ -242,6 +378,7 @@ def assign_labels_on_page(
         picks.append(_nearest_caption(box, label_lines, limit, inside))
 
     picks = _propagate_to_panels(figure_boxes, picks, label_lines)
+    picks = _adopt_orphan_captions(figure_boxes, picks, label_lines)
     shared = _count_by_key(picks)
 
     assignments: List[LabelAssignment] = []
@@ -250,9 +387,11 @@ def assign_labels_on_page(
             assignments.append(LabelAssignment(None, None, "", 0, float("inf")))
             continue
         line, gap = pick
+        caption = (harvest_caption_block(line, text_lines)
+                   if text_lines is not None else line.text)
         assignments.append(LabelAssignment(
-            printed=line.printed, key=line.key, caption=line.text,
-            shared_with=shared[line.key], distance=gap,
+            printed=line.printed, key=line.key, caption=caption,
+            shared_with=shared[line.key], distance=gap, opening=line.text,
         ))
 
     for key, count in shared.items():
@@ -395,6 +534,145 @@ def _propagate_to_panels(
             break
 
     return resolved
+
+
+def _adopt_orphan_captions(
+    figure_boxes: Sequence[Tuple[float, float, float, float]],
+    picks: Sequence[Optional[Tuple[LabelLine, float]]],
+    label_lines: Sequence[LabelLine],
+) -> List[Optional[Tuple[LabelLine, float]]]:
+    """
+    Pair a caption nobody claimed with the lone crop sitting above it.
+
+    For biology researchers: the two tests above are geometric — a caption has
+    to be CLOSE to its figure and SIDE BY SIDE with it. Both fail on real
+    pages, for reasons that have nothing to do with the caption being wrong:
+
+    * **A panel the detector could not see.** The `Collagen structure` review's
+      page 5 prints Figure 4 as panels A, B and C, where panel C is a block of
+      amino-acid *text*. The layout detector correctly reads C as text rather
+      than as a picture, so no crop is made for it — and the 344pt of panel C
+      now sitting between panels A/B and the caption puts the caption far
+      outside the adjacency limit.
+    * **A caption whose first line is a short bold title.** The same review's
+      page 7 sets "Figure 5 Water-mediated hydrogen bonding in collagen" as a
+      narrow heading over a full-width, five-panel figure. Only one panel was
+      cropped, and it happens to sit to the RIGHT of that short heading, so
+      the two share no horizontal span at all.
+
+    This last pass therefore stops measuring distance and uses ORDER instead,
+    which is the model stated at the top of this module: captions divide a
+    page into bands, and the crops in a band belong to the caption that closes
+    it. It is deliberately the last resort, and it is safe because of two
+    restrictions that make it unable to disturb any pairing already made:
+
+    1. **Only captions nobody claimed** are offered. A caption that a crop
+       already paired with geometrically is never taken away from it.
+    2. **Only crops that found nothing** can adopt. A crop with a label keeps
+       it.
+
+    So this can add pairings; by construction it cannot change or remove one.
+
+    THE AMBIGUITY GUARD. A band holding more than one unlabelled crop is left
+    alone. Those crops are either panels of one figure or several figures the
+    detector merged, and nothing here can tell which — so the module's
+    standing rule applies: an unplaceable figure stays unlabelled rather than
+    being guessed at.
+
+    Args:
+        figure_boxes: crop boxes, page units, in the caller's order.
+        picks: what each crop has after the geometric passes; None = nothing.
+        label_lines: every caption line found on the page.
+
+    Returns:
+        A new picks list, with orphan captions adopted where unambiguous.
+    """
+    resolved = list(picks)
+    if not label_lines:
+        return resolved
+
+    claimed = {pick[0].key for pick in resolved if pick is not None}
+    ordered_lines = sorted(label_lines, key=lambda line: line.rect[1])
+
+    # Step 1: the band above each caption starts at the caption before it.
+    band_top = 0.0
+    for line in ordered_lines:
+        band_bottom = line.rect[1]
+        if line.key not in claimed and line.starts_a_block:
+            _adopt_within_band(figure_boxes, resolved, line,
+                               band_top, band_bottom)
+        band_top = line.rect[3]
+    return resolved
+
+
+def _adopt_within_band(
+    figure_boxes: Sequence[Tuple[float, float, float, float]],
+    resolved: List[Optional[Tuple[LabelLine, float]]],
+    line: LabelLine,
+    band_top: float,
+    band_bottom: float,
+) -> None:
+    """
+    Give `line` to the single unlabelled crop lying in its band, if there is one.
+
+    A crop counts as being in the band when its vertical MIDPOINT is, which
+    tolerates a crop snapped outwards into the caption above or below it.
+    Mutates `resolved` in place; does nothing when the band holds zero crops
+    or more than one.
+    """
+    candidates = []
+    for index, box in enumerate(figure_boxes):
+        if resolved[index] is not None:
+            continue
+        midpoint = (box[1] + box[3]) / 2.0
+        if band_top <= midpoint <= band_bottom:
+            candidates.append(index)
+
+    if len(candidates) != 1:
+        return
+    index = candidates[0]
+    # The distance recorded is the real gap to the caption, so a document-level
+    # pass comparing claims still sees an honest — and deliberately weak —
+    # number for a pairing that geometry alone would not have made.
+    gap = max(line.rect[1] - figure_boxes[index][3], 0.0)
+    resolved[index] = (line, gap)
+
+
+#: How close a line directly above must be, as a multiple of its own height,
+#: to count as running INTO the line below it. Body text is set solid: one
+#: line follows the next at roughly its own height. A caption is separated
+#: from whatever precedes it by the figure or by a paragraph break.
+BLOCK_CONTINUATION_LINES = 1.6
+
+#: How far two lines' left edges may differ, in page units, and still count as
+#: the same margin. A few points of kerning, not an indent.
+SAME_MARGIN_TOLERANCE = 3.0
+
+
+def _starts_a_block(rect: Tuple[float, float, float, float],
+                    lines: Sequence[Tuple[str, float, float, float, float]]
+                    ) -> bool:
+    """
+    True when no paragraph runs directly into this line from above.
+
+    For biology researchers: this separates a real caption from a sentence
+    that merely opens with a figure's name. The `JRuberti` article's page 9
+    carries the line "Figure 6 and Video S5 show a clear example of flow
+    aggregation" -- which begins with a figure label, sits at the start of its
+    line, and is nonetheless body prose, not a caption. What gives it away is
+    that the previous line of the same paragraph ends immediately above it at
+    the same left margin. A caption has whitespace or a figure above it.
+    """
+    x0, y0, _, y1 = rect
+    height = max(y1 - y0, 1.0)
+    for _, other_x0, other_y0, _, other_y1 in lines:
+        if other_y1 > y0 or other_y0 >= y0:
+            continue                          # not above this line
+        if y0 - other_y1 > height * BLOCK_CONTINUATION_LINES:
+            continue                          # too far above to be the same block
+        if abs(other_x0 - x0) <= SAME_MARGIN_TOLERANCE:
+            return False
+    return True
 
 
 def _a_caption_lies_between(upper: Sequence[float], lower: Sequence[float],

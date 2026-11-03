@@ -58,6 +58,7 @@ LABEL_TABLE_CAPTION = "table_caption"
 LABEL_TABLE_FOOTNOTE = "table_footnote"
 LABEL_IMAGE = "image"
 LABEL_IMAGE_CAPTION = "image_caption"
+
 LABEL_TEXT = "text"
 LABEL_TITLE = "title"
 
@@ -65,6 +66,22 @@ CANONICAL_LABELS = frozenset({
     LABEL_TABLE, LABEL_TABLE_CAPTION, LABEL_TABLE_FOOTNOTE,
     LABEL_IMAGE, LABEL_IMAGE_CAPTION, LABEL_TEXT, LABEL_TITLE,
 })
+
+#: A caption is assigned to a panel group only when that group is an
+#: UNAMBIGUOUS match: it must contain at least this fraction of the caption's
+#: width, and at least `CAPTION_OWNER_MARGIN` times as much as any rival.
+#:
+#: An absolute threshold cannot do this job, and that was measured rather
+#: than assumed. On Silberbush-2019 p5 a column caption sits at 0.53 against
+#: a rival's 0.00; on Collagen structure p18 a single full-width caption
+#: under one two-column figure sits at 0.39 against 0.38. No cutoff
+#: separates 0.53 from 0.39 -- but "one clear winner" separates them
+#: cleanly, which is exactly the question being asked.
+#: How much of a panel's width must sit inside a caption's width before the
+#: panel is judged to belong to that caption. On a two-column page a panel
+#: and its own column's caption overlap almost completely, while a panel in
+#: the other column overlaps it not at all, so the test is not delicate.
+PANEL_CAPTION_OVERLAP = 0.5
 
 
 @dataclass(frozen=True)
@@ -154,6 +171,7 @@ def group_figure_panels(
     *,
     label: str = LABEL_IMAGE,
     max_gap_fraction: float = 0.05,
+    caption_label=None,
 ) -> List[Detection]:
     """
     Merge the separate panels of a multi-panel figure into one box.
@@ -190,7 +208,7 @@ def group_figure_panels(
 
     max_gap = page_size[1] * max_gap_fraction
     captions = [d for d in detections if d.label.endswith("_caption")]
-    groups = _merge_panel_groups(panels, captions, max_gap)
+    groups = _merge_panel_groups(panels, captions, max_gap, caption_label)
 
     merged = [_union_detection(group) for group in groups]
     result: List[Detection] = []
@@ -205,37 +223,148 @@ def group_figure_panels(
 
 
 def _merge_panel_groups(panels: List[Detection], captions: List[Detection],
-                        max_gap: float) -> List[List[Detection]]:
+                        max_gap: float, caption_label=None
+                        ) -> List[List[Detection]]:
     """
     Cluster panels into figures by repeatedly joining mergeable pairs.
 
     A simple fixed-point loop rather than union-find: pages carry a handful of
     panels, so clarity is worth more here than asymptotics.
     """
-    groups = [[p] for p in panels]
+    # Which printed figure each panel belongs to, decided ONCE from the
+    # panels and the captions rather than from the partly-built groups.
+    # Order-independence is the whole point: an earlier version asked
+    # "do these two GROUPS own different captions?", and because merging is
+    # greedy, a panel of the right-hand figure could join the left-hand group
+    # before it owned any caption -- putting the boundary one panel too far
+    # right. Measured on Silberbush-2019 p5 at the pipeline's real render
+    # size, which split at x=1943 where the columns part at x~1350.
+    belongs_to = _partition_panels_by_caption(panels, captions, caption_label)
+
+    groups = [[index] for index in range(len(panels))]
     changed = True
     while changed:
         changed = False
         for i in range(len(groups)):
             for j in range(i + 1, len(groups)):
-                if _groups_belong_together(groups[i], groups[j], captions, max_gap):
+                if _groups_belong_together(
+                        [panels[k] for k in groups[i]],
+                        [panels[k] for k in groups[j]],
+                        captions, max_gap,
+                        groups[i], groups[j], belongs_to):
                     groups[i] = groups[i] + groups[j]
                     del groups[j]
                     changed = True
                     break
             if changed:
                 break
-    return groups
+    return [[panels[k] for k in group] for group in groups]
+
+
+def _partition_panels_by_caption(panels: Sequence[Detection],
+                                 captions: Sequence[Detection],
+                                 caption_label=None) -> dict:
+    """Map each panel's index to the index of the caption it belongs to.
+
+    A panel belongs to the labelled caption that sits below it and overlaps
+    it most horizontally -- which on a two-column page is the caption in its
+    own column. Panels belonging to different captions are different figures
+    and must never merge, whatever order the merge loop visits them in.
+
+    Only captions that START with a printed figure label count, when the
+    caption text is readable. A block without one is the CONTINUATION of a
+    caption set across two columns, not a caption of its own; treating it as
+    one splits a single figure. With fewer than two labelled captions there
+    is nothing to separate, so the partition is empty and merging proceeds on
+    geometry alone exactly as before.
+    """
+    labelled = [
+        (index, caption) for index, caption in enumerate(captions)
+        if caption.label == LABEL_IMAGE_CAPTION
+        and (caption_label is None or caption_label(caption.box_px))
+    ]
+    if len(labelled) < 2:
+        return {}
+
+    belongs_to = {}
+    for panel_index, panel in enumerate(panels):
+        best_caption, best_overlap = None, 0.0
+        for caption_index, caption in labelled:
+            if caption.box_px[1] < panel.box_px[3]:
+                continue  # this caption sits above the panel, so is not its
+            overlap = _fraction_inside(
+                panel.box_px[0], panel.box_px[2],
+                caption.box_px[0], caption.box_px[2])
+            if overlap > best_overlap:
+                best_caption, best_overlap = caption_index, overlap
+        if best_caption is not None and best_overlap >= PANEL_CAPTION_OVERLAP:
+            belongs_to[panel_index] = best_caption
+    return belongs_to
 
 
 def _groups_belong_together(a: List[Detection], b: List[Detection],
-                            captions: List[Detection], max_gap: float) -> bool:
+                            captions: List[Detection], max_gap: float,
+                            indices_a: Sequence[int], indices_b: Sequence[int],
+                            belongs_to: dict) -> bool:
     """True when any panel of `a` is close to any panel of `b`, uninterrupted."""
+    # Two DIFFERENT figures printed side by side in separate columns are close
+    # enough to merge on distance alone, and `_caption_between` cannot part
+    # them: it looks only at a VERTICAL gap, and side-by-side panels overlap
+    # in y, so no caption ever sits in a gap between them. A two-column
+    # paper's gutter is routinely narrower than `max_gap`, so without this
+    # check Figure 3 and Figure 4 of a two-column page become one figure and
+    # one of them stops existing. Measured on Silberbush-2019 p5.
+    if _belong_to_different_figures(indices_a, indices_b, belongs_to):
+        return False
+
+    # Panels KNOWN to belong to the same printed figure merge on distance
+    # alone. The caption-in-the-gap veto exists to separate two stacked
+    # figures, and it misfires here: a layout model boxes the panel letters
+    # "A", "B", "C" printed inside a figure as captions, and one sitting
+    # between two panel rows would split a figure the partition has already
+    # identified as one. Measured on Collagen structure p19, where three
+    # ~50px "caption" boxes are panel letters of Figure 13.
+    if _belong_to_same_figure(indices_a, indices_b, belongs_to):
+        return any(_rect_gap(p.rect(), q.rect()) <= max_gap
+                   for p in a for q in b)
+
     return any(
         _rect_gap(p.rect(), q.rect()) <= max_gap
         and not _caption_between(p, q, captions)
         for p in a for q in b
     )
+
+
+def _belong_to_same_figure(indices_a: Sequence[int], indices_b: Sequence[int],
+                           belongs_to: dict) -> bool:
+    """Whether both groups' panels are known to be of ONE printed figure."""
+    captions_a = {belongs_to[i] for i in indices_a if i in belongs_to}
+    captions_b = {belongs_to[i] for i in indices_b if i in belongs_to}
+    return bool(captions_a) and captions_a == captions_b
+
+
+def _belong_to_different_figures(indices_a: Sequence[int],
+                                 indices_b: Sequence[int],
+                                 belongs_to: dict) -> bool:
+    """Whether these two groups hold panels of two DIFFERENT printed figures."""
+    captions_a = {belongs_to[i] for i in indices_a if i in belongs_to}
+    captions_b = {belongs_to[i] for i in indices_b if i in belongs_to}
+    return bool(captions_a and captions_b and captions_a != captions_b)
+
+
+def _fraction_inside(a0: float, a1: float, b0: float, b1: float) -> float:
+    """How much of span `a` lies within span `b`, as a fraction of `a`."""
+    width = a1 - a0
+    if width <= 0:
+        return 0.0
+    return max(0.0, min(a1, b1) - max(a0, b0)) / width
+
+
+def _group_box(group: List[Detection]) -> Tuple[int, int, int, int]:
+    """The bounding box of every panel in the group."""
+    boxes = [d.box_px for d in group]
+    return (min(b[0] for b in boxes), min(b[1] for b in boxes),
+            max(b[2] for b in boxes), max(b[3] for b in boxes))
 
 
 def _rect_gap(a: Rect, b: Rect) -> float:

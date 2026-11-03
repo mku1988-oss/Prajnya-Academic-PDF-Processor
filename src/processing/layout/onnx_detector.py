@@ -85,6 +85,12 @@ _INPUT_SIZE = 800
 #: Default confidence cutoff, from the model's own inference config.
 DEFAULT_SCORE_THRESHOLD = 0.5
 
+#: How far above a caption box to look for the line naming the figure, as a
+#: fraction of page height. The detector's box often starts below that line.
+#: 2% is roughly one to two text lines at any render size -- far enough to
+#: catch the head, short enough not to reach the caption above it.
+CAPTION_HEAD_LIFT = 0.02
+
 
 class OnnxLayoutDetector:
     """
@@ -135,7 +141,14 @@ class OnnxLayoutDetector:
         detections = self._raw_to_detections(raw, page_image.size)
         detections = _assign_satellite_labels(detections)
         if self._group_panels:
-            detections = group_figure_panels(detections, page_image.size)
+            # The text layer, when there is one, lets grouping tell two
+            # figures side by side from one figure whose caption is set
+            # across two columns -- a distinction geometry cannot make,
+            # because both look like two column-shaped caption blocks.
+            detections = group_figure_panels(
+                detections, page_image.size,
+                caption_label=_make_caption_label_reader(page, page_image),
+            )
         return detections
 
     # --- model I/O (helpers after the main methods, per CLAUDE.md) ---------
@@ -209,6 +222,58 @@ class OnnxLayoutDetector:
             )))
         keep.sort(key=lambda item: item[0])
         return [d for _, d in keep]
+
+
+def _make_caption_label_reader(page, page_image):
+    """A callable giving the printed figure label inside a caption box, or None.
+
+    Returns None (the callable, not a label) when there is no text layer to
+    read, so grouping falls back to its geometry-only rule rather than
+    silently treating every caption as unlabelled.
+    """
+    if page is None:
+        return None
+
+    from src.processing.pdf import Rect, words_in_rect
+    from src.processing.utils.figure_labels import parse_printed_label
+
+    try:
+        words = page.words()
+        page_width, page_height = page.size
+    except Exception:  # pragma: no cover - a backend without a text layer
+        return None
+    if not words:
+        return None
+
+    scale_x = page_width / page_image.size[0]
+    scale_y = page_height / page_image.size[1]
+
+    # The detector's caption box routinely starts BELOW the line naming the
+    # figure, so reading it verbatim gives "( A ) Distribution of ..." and no
+    # label at all. Looking a little above recovers the head. Measured on
+    # Collagen structure p19, where the box reads headless and the same box
+    # lifted by 2% of the page height reads "Figure 12 Interruptions in the
+    # collagen triple helix". A fraction rather than a pixel count, so it
+    # holds at any render size.
+    lift = max(1, round(page_image.size[1] * CAPTION_HEAD_LIFT))
+
+    def read(box_px):
+        rect = Rect(box_px[0] * scale_x, box_px[1] * scale_y,
+                    box_px[2] * scale_x, box_px[3] * scale_y)
+        _, key = parse_printed_label(
+            " ".join(w.text for w in words_in_rect(words, rect)))
+        if key is not None:
+            return key
+
+        # Nothing at the front of the box itself. Try again a little higher,
+        # in case the head line sits just above it.
+        lifted = Rect(box_px[0] * scale_x, max(0, box_px[1] - lift) * scale_y,
+                      box_px[2] * scale_x, box_px[3] * scale_y)
+        _, key = parse_printed_label(
+            " ".join(w.text for w in words_in_rect(words, lifted)))
+        return key
+
+    return read
 
 
 # ---------------------------------------------------------------------------

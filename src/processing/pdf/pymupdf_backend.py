@@ -13,6 +13,7 @@ PyMuPDF already uses a top-left origin, so no coordinate flipping is needed here
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Iterator, List, Optional
 
@@ -22,6 +23,9 @@ from .base import (
     DrawingBlock,
     ImageBlock,
     Rect,
+    group_characters_into_lines,
+    styled_line_from_characters,
+    StyledLine,
     Word,
     render_scale,
     words_in_rect,
@@ -35,6 +39,10 @@ except ImportError as exc:  # pragma: no cover
         "requirements.txt — install it explicitly, or use the pypdfium2 backend."
     ) from exc
 
+
+# Bit 4 of a PyMuPDF span's `flags` marks a bold face. Named because a
+# bare `1 << 4` in the middle of a character walk is unreadable.
+_BOLD_FLAG = 1 << 4
 
 class PyMuPdfPage:
     """One page, backed by a `fitz.Page`."""
@@ -69,6 +77,59 @@ class PyMuPdfPage:
                 for item in self._page.get_text("words")
             ]
         return self._words
+
+
+    def styled_lines(self) -> List[StyledLine]:
+        """
+        Typeset lines with cap-height, weight and case, from `rawdict` spans.
+
+        **`cap_height` is deliberately left at 0.0 ("unknown") on this
+        backend, and that is a library limitation rather than an omission.**
+        Cap-height means the ink height of a capital glyph, which is what
+        makes an ALL-CAPS heading comparable with mixed-case prose. PyMuPDF
+        reports every character's box as the whole LINE box -- `rawdict` and
+        `get_texttrace()` both give 'C' and 'o' the identical height -- so
+        the measurement simply is not available here. pypdfium2's
+        `FPDFText_GetCharBox` does give ink boxes, and pypdfium2 is the
+        shipping backend.
+
+        Emitting `span["size"]` in its place was rejected: it is the true
+        point size, which is a DIFFERENT quantity, and a consumer comparing
+        it against pypdfium2's cap heights would be comparing two things that
+        happen to share a field name. `weight` and `caps_fraction` are
+        computed identically on both backends and do agree.
+        """
+        try:
+            raw = self._page.get_text("rawdict")
+        except Exception:                                   # pragma: no cover
+            return []
+
+        height = self.size[1]
+        lines: List[StyledLine] = []
+        for block in raw.get("blocks", []):
+            for line in block.get("lines", []):
+                chars = []
+                for span in line.get("spans", []):
+                    weight = 700.0 if span.get("flags", 0) & _BOLD_FLAG else 400.0
+                    for char in span.get("chars", []):
+                        character = char.get("c") or ""
+                        if not character or not character.isprintable():
+                            continue
+                        x0, y0, x1, y1 = char.get("bbox", (0, 0, 0, 0))
+                        chars.append({
+                            "ch": character,
+                            "x0": x0, "x1": x1,
+                            # rawdict is already top-left origin, and the
+                            # helper expects a bottom-up box, so flip here.
+                            "y0": height - y1, "y1": height - y0,
+                            "weight": weight,
+                        })
+                built = styled_line_from_characters(chars, height)
+                if built is not None:
+                    # See the docstring: this backend cannot measure ink
+                    # height, so it must not claim to.
+                    lines.append(replace(built, cap_height=0.0))
+        return lines
 
     def text_in(self, rect: Rect) -> str:
         return " ".join(w.text for w in words_in_rect(self.words(), rect))

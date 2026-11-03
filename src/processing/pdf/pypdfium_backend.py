@@ -19,6 +19,8 @@ in `tests/test_pdf_backend.py` checks it explicitly.
 from __future__ import annotations
 
 from pathlib import Path
+import ctypes
+import statistics
 from typing import Iterator, List, Optional
 
 import pypdfium2 as pdfium
@@ -29,6 +31,9 @@ from .base import (
     DrawingBlock,
     ImageBlock,
     Rect,
+    group_characters_into_lines,
+    styled_line_from_characters,
+    StyledLine,
     Word,
     flip_y,
     render_scale,
@@ -111,6 +116,60 @@ class PyPdfiumPage:
 
         self._words = words
         return words
+
+
+    def styled_lines(self) -> List[StyledLine]:
+        """
+        Typeset lines with cap-height, weight and case, from a character walk.
+
+        PDFium exposes font data per CHARACTER, not per word, so this walks
+        the text page once and groups characters into lines by baseline.
+
+        **`FPDFText_GetFontSize` is not usable here and that is not a bug in
+        this code.** PDFium reports the size in text space, which is 1.0 for
+        every character in every file we process because the real size lives
+        in the text matrix. The rendered glyph box is the honest measurement,
+        so cap-height is taken from `FPDFText_GetCharBox`.
+        """
+        try:
+            text_page = self._text_page()
+            count = pdfium_raw.FPDFText_CountChars(text_page)
+        except Exception:                                   # pragma: no cover
+            return []
+        if not count:
+            return []
+
+        height = self.size[1]
+        chars = []
+        for index in range(count):
+            try:
+                code = pdfium_raw.FPDFText_GetUnicode(text_page, index)
+                left, right, bottom, top = (ctypes.c_double() for _ in range(4))
+                pdfium_raw.FPDFText_GetCharBox(
+                    text_page, index, ctypes.byref(left), ctypes.byref(right),
+                    ctypes.byref(bottom), ctypes.byref(top))
+                weight = pdfium_raw.FPDFText_GetFontWeight(text_page, index)
+            except Exception:                               # pragma: no cover
+                continue
+            character = chr(code) if code else ""
+            # Spaces are kept: they are the word boundaries of the line's
+            # text. They are excluded from the MEASUREMENTS further down,
+            # where a zero-height box would drag a median.
+            if not character or not character.isprintable():
+                continue
+            chars.append({
+                "ch": character,
+                "x0": left.value, "x1": right.value,
+                "y0": bottom.value, "y1": top.value,
+                "weight": float(weight) if weight and weight > 0 else 0.0,
+            })
+
+        lines = []
+        for group in group_characters_into_lines(chars):
+            line = styled_line_from_characters(group, height)
+            if line is not None:
+                lines.append(line)
+        return lines
 
     def text_in(self, rect: Rect) -> str:
         return " ".join(w.text for w in words_in_rect(self.words(), rect))

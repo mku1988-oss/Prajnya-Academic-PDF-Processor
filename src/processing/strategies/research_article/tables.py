@@ -19,16 +19,18 @@ actually sit on a page:
      PNG contains the caption, and we ALSO read the caption text separately
      (from the text layer) for the manifest — the same string, two uses.
 
-  2. **The grid may already be transcribed.** When the repair path ran, it
-     already re-read the crop and has the table as text. That transcription is
-     carried through here at zero extra cost. When repair did NOT run (the
-     full-page read got the table right), there is no per-table transcription
-     and `grid` is None — the table's text is in the page content. Paying a
-     second model call just to fill that field would be the expensive way to
-     get something we already have.
+  2. **Every table leaves with a grid.** When the repair path ran, it already
+     re-read the crop, and that transcription is carried through at zero extra
+     cost. When repair did NOT run, the crop is read here, with the same
+     reader. An earlier version skipped that read, reasoning that the table's
+     text was already in the page content. Measured downstream on 2026-09-11,
+     that reasoning failed: the retrieval layer drops table markup from page
+     text BECAUSE the table object is meant to carry it, so 14 of 31 corpus
+     tables reached no index at all. See `_grid_for`.
 
-VLM-AGNOSTIC: no model name and no prompt appears here. Any transcription
-arrives already-made, via `recovered`.
+VLM-AGNOSTIC: no model name and no prompt appears here. A transcription
+arrives already made, via `recovered`, or through the `read_table_crop`
+callable the caller binds to its extraction model.
 """
 
 from __future__ import annotations
@@ -46,7 +48,8 @@ from ...layout.base import LABEL_TABLE_CAPTION, Detection
 from ...layout.regions import locate_table_regions
 from ...pdf.base import PdfPage
 from ...utils.figure_extractor import safe_doc_id
-from ...utils.table_repair import RecoveredTable
+from ...utils.text_normalization import normalize_harvested_text
+from ...utils.table_repair import CropReader, RecoveredTable
 from .figures import image_box_to_pdf_rect
 
 #: Overlap needed before a caption detection counts as belonging to a table
@@ -114,6 +117,7 @@ def extract_page_tables(
     recovered: Optional[Sequence[RecoveredTable]] = None,
     path_root: Optional[Path] = None,
     logger: Optional[logging.Logger] = None,
+    read_table_crop: Optional[CropReader] = None,
 ) -> List[TableAsset]:
     """
     Crop and save every table on this page, tagging each with its caption.
@@ -134,6 +138,10 @@ def extract_page_tables(
             transcriptions can be attached for free.
         path_root: manifest paths are made relative to this when given.
         logger: optional logger.
+        read_table_crop: reads one cropped table (the extraction model with
+            its table prompt). A table the repair path did NOT transcribe is
+            read with it, so every table leaves with a grid. None keeps the
+            old behaviour: such a table's grid stays None.
 
     Returns:
         One `TableAsset` per saved table, in page order; [] when none.
@@ -157,7 +165,8 @@ def extract_page_tables(
                 page=page, page_image=page_image, box=region.box,
                 detections=detections, out_dir=out_dir,
                 page_number=page_idx + 1, index=index,
-                grid=grid_lookup.get(tuple(region.box)),
+                grid=_grid_for(region.box, grid_lookup, page_image,
+                               read_table_crop, page_idx + 1, log),
                 path_root=path_root, logger=log,
             ))
         except Exception as error:
@@ -266,7 +275,9 @@ def _caption_for(
         if _containment(detection.box_px, box) < CAPTION_CONTAINMENT:
             continue
         rect = image_box_to_pdf_rect(tuple(detection.box_px), page, page_image)
-        text = page.text_in(rect).strip()
+        # Same repair as a figure caption: this is stored text, and it is often
+        # the only prose a table object carries into the index.
+        text = normalize_harvested_text(page.text_in(rect)).strip()
         if text:
             return text
     return ""
@@ -289,6 +300,47 @@ def _grids_by_box(
 ) -> Dict[Tuple[int, int, int, int], str]:
     """Index already-read transcriptions by the box they came from."""
     return {tuple(table.box): table.grid for table in (recovered or [])}
+
+
+def _grid_for(
+    box: Sequence[int],
+    grid_lookup: Dict[Tuple[int, int, int, int], str],
+    page_image: "Image.Image",
+    read_table_crop: Optional[CropReader],
+    page_number: int,
+    logger: logging.Logger,
+) -> Optional[str]:
+    """A table's transcription: the repair path's if it ran, else a crop read.
+
+    Why every table is read, measured downstream on 2026-09-11 (Shastrasaara,
+    docs/upstream_tables_headings_gate.md): only the repair path ever
+    transcribed a table, so 14 of the corpus's 31 tables left with no grid.
+    The retrieval layer drops table markup from page text because the table
+    object is supposed to carry it -- so those 14 tables' contents reached no
+    index at all, including a Table 9.1 row two evaluation questions need.
+    Reading the crop costs ~3.5 s per table with GLM-OCR's `Table
+    Recognition:`, which returns HTML.
+
+    A failed or empty read leaves the grid None: losing a transcription must
+    never lose the table itself.
+    """
+    existing = grid_lookup.get(tuple(box))
+    if existing is not None or read_table_crop is None:
+        return existing
+
+    try:
+        transcription = read_table_crop(page_image.crop(tuple(box)))
+    except Exception as error:  # a failed read must not lose the table
+        logger.warning("Table crop read failed on page %d at %s: %s",
+                       page_number, tuple(box), error)
+        return None
+
+    text = (transcription or "").strip()
+    if not text:
+        logger.warning("Table crop on page %d at %s read back empty",
+                       page_number, tuple(box))
+        return None
+    return text
 
 
 def _portable_path(image_path: Path, path_root: Optional[Path]) -> str:

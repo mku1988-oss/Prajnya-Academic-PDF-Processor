@@ -31,12 +31,14 @@ from ...events import emit
 from ...layout.base import Detection
 from ...pdf.base import PdfPage, Rect
 from ...utils.content_drop_check import is_scanned_page
+from ...utils.text_normalization import normalize_harvested_text
 from ...utils.figure_extractor import FigureAsset, extract_and_save_figures, safe_doc_id
 from ...utils.figure_label_pass import (
     assign_labels_on_page,
     build_text_lines,
     find_label_lines,
 )
+from ...utils.figure_labels import parse_printed_label
 from .rendering import RENDER_PADDING_PX
 
 #: Extra clip slop in PDF points, so a caption line that merely touches the
@@ -137,9 +139,11 @@ def attach_printed_labels(
         scale = width / page_image.width if page_image.width else 1.0
         words = [(w.text, w.rect.x0, w.rect.y0, w.rect.x1, w.rect.y1)
                  for w in page.words()]
-        label_lines = find_label_lines(build_text_lines(words, width))
+        text_lines = build_text_lines(words, width)
+        label_lines = find_label_lines(text_lines)
         boxes = [tuple(value * scale for value in asset.bbox) for asset in assets]
-        assignments = assign_labels_on_page(boxes, label_lines, height, logger=log)
+        assignments = assign_labels_on_page(boxes, label_lines, height, logger=log,
+                                            text_lines=text_lines)
     except Exception as error:                              # pragma: no cover
         # A page with no text layer is a scan; it simply has no labels to
         # read. That must never cost us the figures themselves.
@@ -150,18 +154,135 @@ def attach_printed_labels(
 
     for asset, assignment in zip(assets, assignments):
         asset.panel_group_size = max(1, assignment.shared_with)
-        if asset.printed_label or not assignment.printed:
+        if not assignment.printed:
             continue
-        asset.printed_label = assignment.printed
-        asset.label_key = assignment.key
-        if not asset.caption:
-            # The detector gave this crop no caption at all. The caption's
-            # first line is a poor substitute for the whole caption, but it
-            # is what the page actually says, and it beats an empty string.
-            asset.caption = assignment.caption
+        if not asset.printed_label:
+            asset.printed_label = assignment.printed
+            asset.label_key = assignment.key
+        repaired = _repair_caption(asset, assignment)
+        if repaired is not None:
+            # This is the SECOND place a caption is stored: the first is
+            # `figure_extractor._build_asset`. Both read the text layer, so
+            # both need the control-character repair — normalising only the
+            # other one left two damaged captions in a full corpus run, which
+            # is how half a fix ships (compare the ledger literal that was
+            # once defined in two places).
+            asset.caption = normalize_harvested_text(repaired)
         log.debug("p%d %s -> %s", asset.page, asset.figure_id, asset.printed_label)
 
     return assets
+
+
+def _repair_caption(asset, assignment) -> Optional[str]:
+    """
+    The caption this crop should carry, or None to keep what it has.
+
+    For biology researchers: the layout detector draws a box around what it
+    believes is the caption, and that box is right most of the time. Three
+    times it is not, and each failure is worse than an empty caption, because
+    nothing downstream can tell a broken caption from a good one:
+
+    1. **Nothing at all** — the box was never found.
+    2. **A panel letter** — the box caught the "d" printed inside a panel.
+    3. **A caption missing its own opening** — MEASURED: 26 of this corpus's
+       107 captions begin part way down, so the sentence naming the figure
+       ("Fig. 2.2 Fibril-forming collagens and their assembly") is absent and
+       the caption cannot be found by its own subject.
+
+    THE TWO REPAIRS ARE NOT THE SAME, and using one instrument for both was
+    measured and rejected. Where a caption already exists (case 3) the stored
+    text is CLEAN and merely headless, so only the missing opening is put
+    back. Replacing it wholesale with the text-layer block loses badly: on the
+    `Collagen structure` review's page 19 that trades 1343 characters for 44,
+    and on the tendon volume's two-column captions the block comes back with
+    the columns interleaved. Where there is no caption to protect (cases 1 and
+    2) the whole block is taken, because a jumbled caption still beats "d".
+
+    Returns:
+        The caption to store, or None when the stored one is already right.
+    """
+    if not assignment.caption:
+        return None
+    if asset.printed_label and asset.label_key != assignment.key:
+        return None                        # two passes, two different figures
+
+    # Cases 1 and 2: nothing worth keeping, so take the whole caption.
+    if not asset.caption or _is_panel_sublabel(asset.caption):
+        return assignment.caption
+
+    # Case 3: put back only the opening, and only when that is what is wrong —
+    # a caption already beginning at its own label is never touched.
+    stored_label, _ = parse_printed_label(asset.caption.strip())
+    opening_label, _ = parse_printed_label(assignment.opening.strip())
+    if stored_label is not None or opening_label is None:
+        return None
+    head = _without_overlap(assignment.opening.strip(), asset.caption.strip())
+    if not head:
+        return None
+    return f"{head} {asset.caption.strip()}"
+
+
+#: The shortest run of characters that counts as a real overlap between the
+#: recovered opening and the stored caption, rather than a coincidence. Two
+#: captions sharing eight consecutive characters at exactly this seam are the
+#: same text; sharing two ("a ") are not.
+MIN_OVERLAP_CHARS = 8
+
+
+def _without_overlap(opening: str, stored: str) -> str:
+    """
+    The opening with any text the stored caption already repeats cut off.
+
+    For biology researchers: on a page whose caption is set in TWO COLUMNS,
+    the line reconstruction reads straight across the gutter, so the caption's
+    first line arrives with the second column's words mixed into it -- "Fig.
+    2.2 Fibril-forming collagens and their assembly. respective overlaps and
+    gaps in the fbril." Those trailing words are exactly where the stored
+    caption begins, so pasting the two together says everything twice.
+
+    This finds the longest tail of the opening that the stored caption already
+    starts with, and removes it, keeping only the genuinely missing head.
+    """
+    limit = min(len(opening), len(stored))
+    for length in range(limit, MIN_OVERLAP_CHARS - 1, -1):
+        if stored.startswith(opening[-length:]):
+            return opening[:-length].strip()
+    return opening
+
+
+
+#: A caption box holding only a PANEL SUB-LABEL -- "d", "( A )", "f" -- rather
+#: than a caption. Measured over the 9-document corpus: the detector returns
+#: one of these for the three crops of the ice-plant figure on
+#: `Hydration-induced` page 7, which is how a figure ends up correctly labelled
+#: "Fig. 4" and captioned "d". Length is the discriminator, and it is set well
+#: below the shortest real caption in the corpus ("Helical twisting", 16
+#: characters) so no genuine caption can be mistaken for one.
+MAX_PANEL_SUBLABEL_CHARS = 15
+
+
+def _is_panel_sublabel(caption: str) -> bool:
+    """
+    True when a stored caption is really a panel letter, not a caption.
+
+    For biology researchers: the layout detector often hands back the little
+    "(a)" or "d" printed inside a panel instead of the figure's caption. That
+    string is worse than nothing -- it looks like a caption to everything
+    downstream -- so it is replaced by the caption the text layer actually
+    holds.
+
+    A caption that begins with its own figure label ("Fig. 4 | Hygroscopic
+    ...") is never a sub-label however short it is, so that case is excluded
+    explicitly rather than left to the length test.
+    """
+    stripped = caption.strip()
+    if not stripped or len(stripped) > MAX_PANEL_SUBLABEL_CHARS:
+        return False
+    # `parse_printed_label` always returns a PAIR, and signals "no label" with
+    # (None, None) rather than with None itself — so the printed half is what
+    # has to be tested. Testing the pair is silently always-false.
+    printed, _ = parse_printed_label(stripped)
+    return printed is None
 
 
 def make_caption_reader(
