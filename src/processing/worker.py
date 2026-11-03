@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import sys
 import threading
@@ -97,7 +98,7 @@ def run_in_subprocess(entry: PreflightEntry, request: RunRequest,
     outcome_holder: Dict[str, Any] = {}
     process = subprocess.Popen(command, cwd=str(REPO_ROOT), stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True, encoding="utf-8",
-                               errors="replace", bufsize=1)
+                               errors="replace", bufsize=1, env=child_environment(request))
     if on_process is not None:
         on_process(process)
 
@@ -142,6 +143,22 @@ def terminate(process: subprocess.Popen) -> None:
     except subprocess.TimeoutExpired:                        # pragma: no cover
         process.kill()
         process.wait(timeout=10)
+
+
+def child_environment(request: RunRequest) -> Optional[Dict[str, str]]:
+    """
+    The child's environment: this one, plus the run's ledger file if it set one.
+
+    The pipeline inside the child finds its ledger through `SARA_LEDGER_PATH`
+    (strategy.py). A ledger chosen in the GUI's Settings travels on the request,
+    so it has to be handed over here or the child reads the default ledger.
+
+    Returns:
+        None (inherit unchanged) when the request names no ledger.
+    """
+    if not request.ledger_path:
+        return None
+    return {**os.environ, "SARA_LEDGER_PATH": str(Path(request.ledger_path).resolve())}
 
 
 def write_job_file(entry: PreflightEntry, request: RunRequest,

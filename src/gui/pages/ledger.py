@@ -200,7 +200,8 @@ def _author_summary(authors: List[str]) -> str:
 # --- data loading, run off the event loop via run.io_bound -------------------
 
 def _load_ledger_sync():
-    ledger = open_ledger(logger, create=True)
+    ledger = open_ledger(logger, create=True,
+                         ledger_path=persistent_settings.SettingsManager.ledger_path())
     records = ledger.get_all_records() if ledger is not None else []
     records.sort(key=lambda r: r.last_updated or "", reverse=True)
     return ledger, records

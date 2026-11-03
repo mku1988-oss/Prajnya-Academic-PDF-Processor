@@ -93,6 +93,13 @@ app_config:
   preferred_image_format: "png"
   target_image_size: 1288   # Full native page; flash-attn + q8_0 KV keeps this on 8 GB
   target_anchor_text_len: 0 # GLM ignores anchor text -- it is recognition-only
+  # Output cap for TABLE CROP reads only (page reads keep api_parameters.max_tokens).
+  # A dense table outgrows 4096: the corpus's largest (Saturated Solutions p3, 55
+  # rows) needs 5,574 output tokens on top of a 4,081-token image, so at 4096 it
+  # was stored cut off at row 41 (cell F1 0.786 -> 0.979 once complete, measured
+  # 2026-11-04). Needs the [glm-ocr] preset's ctx-size 16384: image + output share
+  # the context, and at 8192 the read stopped at the same row whatever the cap.
+  table_crop_max_tokens: 8192
 
 # ============================================================================
 # CONTENT-DROP SANITY CHECK

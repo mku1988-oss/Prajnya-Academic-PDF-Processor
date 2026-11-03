@@ -43,7 +43,7 @@ from src.processing.ledger.semantic_ledger import LedgerRecord
 from src.processing.paths import DEFAULT_OUTPUT_ROOT
 from src.processing.runner import open_ledger
 
-from .. import theme
+from .. import persistent_settings, theme
 
 logger = logging.getLogger("prajnya_studio.review")
 
@@ -97,7 +97,8 @@ def mount() -> None:
 # --- data loading, run off the event loop via run.io_bound -------------------
 
 def _load_pending_sync():
-    ledger = open_ledger(logger, create=True)
+    ledger = open_ledger(logger, create=True,
+                         ledger_path=persistent_settings.SettingsManager.ledger_path())
     records = review.records_needing_review(ledger) if ledger is not None else []
     records.sort(key=lambda r: r.last_updated or "")
     return ledger, records

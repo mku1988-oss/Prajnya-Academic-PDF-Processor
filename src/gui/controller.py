@@ -223,7 +223,11 @@ class BatchController:
                 return
 
             self.state = BatchState.RUNNING
-            ledger = open_ledger(self.log)
+            # The Settings "Ledger File", when set. It used to be carried on the
+            # request and read by nothing, so a run silently used the default
+            # ledger: found 2026-11-04 when a run meant for a scratch ledger was
+            # skipped as "already processed" by the real one.
+            ledger = open_ledger(self.log, ledger_path=self.request.ledger_path)
             results = process_batch(self.entries, self.request, ledger,
                                     execute=self._execute, logger=self.log)
             self.results = results

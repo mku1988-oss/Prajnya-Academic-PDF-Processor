@@ -50,6 +50,7 @@ from ...pdf.base import PdfPage
 from ...utils.figure_extractor import safe_doc_id
 from ...utils.text_normalization import normalize_harvested_text
 from ...utils.table_repair import CropReader, RecoveredTable
+from ...utils.table_sections import read_table_with_sections
 from .figures import image_box_to_pdf_rect
 
 #: Overlap needed before a caption detection counts as belonging to a table
@@ -325,22 +326,32 @@ def _grid_for(
     never lose the table itself.
     """
     existing = grid_lookup.get(tuple(box))
-    if existing is not None or read_table_crop is None:
+    if read_table_crop is None:
         return existing
 
-    try:
-        transcription = read_table_crop(page_image.crop(tuple(box)))
-    except Exception as error:  # a failed read must not lose the table
-        logger.warning("Table crop read failed on page %d at %s: %s",
-                       page_number, tuple(box), error)
-        return None
+    crop = page_image.crop(tuple(box))
+    text = existing
+    if text is None:
+        try:
+            text = (read_table_crop(crop) or "").strip()
+        except Exception as error:  # a failed read must not lose the table
+            logger.warning("Table crop read failed on page %d at %s: %s",
+                           page_number, tuple(box), error)
+            return None
+        if not text:
+            logger.warning("Table crop on page %d at %s read back empty",
+                           page_number, tuple(box))
+            return None
 
-    text = (transcription or "").strip()
-    if not text:
-        logger.warning("Table crop on page %d at %s read back empty",
-                       page_number, tuple(box))
-        return None
-    return text
+    # One detected box can hold two printed sub-tables, and the reader stops
+    # after the first (t12 lost 64 of 82 values). Runs on the repair path's
+    # grid too: that is where t12's came from.
+    try:
+        return read_table_with_sections(crop, text, read_table_crop, logger=logger)
+    except Exception as error:  # the extra sections are a bonus, never a risk
+        logger.warning("Table section check failed on page %d at %s: %s",
+                       page_number, tuple(box), error)
+        return text
 
 
 def _portable_path(image_path: Path, path_root: Optional[Path]) -> str:

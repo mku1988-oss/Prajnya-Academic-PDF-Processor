@@ -34,7 +34,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 
 class SettingsManager:
@@ -89,6 +89,16 @@ class SettingsManager:
             return valid_settings
         except (json.JSONDecodeError, OSError):
             return SettingsManager.DEFAULT_SETTINGS.copy()
+
+    @staticmethod
+    def ledger_path() -> Optional[Path]:
+        """The Settings "Ledger File", or None to use the default resolution.
+
+        Every GUI page that opens the ledger asks this, so the batch, the
+        Ledger page and the Review Queue all read the same file.
+        """
+        value = (SettingsManager.load().get("ledger_path") or "").strip()
+        return Path(value) if value else None
 
     @staticmethod
     def save(settings: Dict[str, Any]) -> None:
