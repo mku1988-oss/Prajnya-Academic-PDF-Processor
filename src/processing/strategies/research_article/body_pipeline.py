@@ -34,6 +34,7 @@ it (see plan.md).
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -265,6 +266,7 @@ class BodyPipeline:
             emit(self.logger, "page", stage="body",
                  message=f"Page {page_idx + 1} ({position}/{page_total})",
                  page=page_idx + 1, position=position, page_total=page_total)
+            page_started = time.perf_counter()
             try:
                 results[page_idx] = self.read_body_page(cache, page_idx)
             except Exception as error:
@@ -274,6 +276,7 @@ class BodyPipeline:
                     page_number=page_idx + 1, content="", quality_score=0.0,
                     metadata={"error": str(error), "processing_method": "glm_failed"},
                 )
+            _record_page_time(results[page_idx], time.perf_counter() - page_started)
 
         self._second_opinion_on_figures(cache, results)
         self._recover_overleaf_captions(cache, results)
@@ -790,3 +793,19 @@ class BodyPipeline:
         if not self.caption_read_prompt:
             return ""
         return self.extraction_provider.read_crop(crop_image, self.caption_read_prompt)
+
+
+def _record_page_time(page: ContentPage, seconds: float) -> None:
+    """
+    Store how long one body page took to read, in seconds, as `page_time`.
+
+    This is what lets the README report cost per KIND of page (text-layer
+    page, full-page model read, table page) instead of per document, where a
+    short paper's fixed start-up cost made it look slow. It covers everything
+    done for that page inside the body loop: classification, the model read,
+    repair, and figure and table crops. Work done once per document (loading
+    models, the title page, the end-of-document figure passes) is NOT in it:
+    the title page records its own `total_time`, and the rest is the document
+    total minus the per-page times.
+    """
+    page.metadata["page_time"] = round(seconds, 2)

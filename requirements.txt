@@ -1,4 +1,4 @@
-# Prajnya v6.2.0 — dependencies
+# Prajnya v6.2.1 — dependencies
 #
 # LICENCE RULE: every line must be OSI-permissive
 # (Apache-2.0 / MIT / BSD). Annotate each entry with its licence.

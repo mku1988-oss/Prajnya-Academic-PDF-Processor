@@ -2,7 +2,7 @@
 
 ### Scientific PDF Processing Engine
 
-![Status](https://img.shields.io/badge/Status-Production%20Ready-green?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.2.0-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Production%20Ready-green?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.2.1-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge)
 
 ---
 
@@ -447,24 +447,23 @@ a table, the table's reading is also restored into the page text.
 ## Performance
 
 The sample corpus, 9 documents and 485 pages, on one 8 GB GPU (measured with
-v6.0.0):
+v6.2.0). What a page costs depends on what is on it:
 
-| document | pages | time | s/page |
+| kind of page | pages | median s/page | total |
 |---|---:|---:|---:|
-| journal article, born-digital | 8 | 194.7s | 24.3 |
-| journal article, figure-heavy | 25 | 456.5s | 18.3 |
-| review article | 11 | 186.3s | 16.9 |
-| chapter from an edited volume | 36 | 491.1s | 13.6 |
-| journal article, multi-panel figures | 20 | 321.9s | 16.1 |
-| journal article, long reference list | 26 | 306.4s | 11.8 |
-| **older scanned article, no text layer** | 7 | 279.5s | **39.9** |
-| short article | 7 | 139.5s | 19.9 |
-| **edited volume, read in full** | **345** | **1410.3s** | **4.1** |
-| **total** | **485** | **63.7 min** | **7.8** |
+| title page | 8 | 53.1 | 408s |
+| text layer, no GPU | 290 | **0.1** | 41s |
+| model read (figures, no table) | 146 | 12.8 | 1928s |
+| page with a table | 25 | 25.6 | 699s |
+| scanned page, no text layer | 6 | 30.3 | 232s |
+
+Each document also pays a fixed cost of roughly 35–110s: loading the models,
+looking up its metadata, and checking its figures once every page is read.
+With the title page, that is why a short paper costs more per page than a long
+one.
 
 **61.9% of pages never reached the GPU**: they were read from the text layer.
-The slowest document is the scan, which has no text layer to read, so every
-page needs the model.
+The whole corpus took **63.7 min**.
 
 ---
 
@@ -543,7 +542,7 @@ If you use Prajnya in your research, please cite:
   title   = {Prajnya: A Scientific PDF Processing Engine},
   author  = {Manu Unni},
   year    = {2026},
-  version = {6.2.0},
+  version = {6.2.1},
   url     = {https://github.com/mku1988-oss/Prajnya-Academic-PDF-Processor}
 }
 ```

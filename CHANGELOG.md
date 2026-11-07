@@ -6,6 +6,23 @@ it in `document_info.pipeline_version`.
 
 ---
 
+## 6.2.1
+
+### Output
+
+- **Every body page records how long it took to read**, as `page_time` (seconds)
+  in its metadata. The title page already recorded its `total_time`.
+
+### Documentation
+
+- **The README's performance table now reports cost per kind of page** (title
+  page, text layer, model read, table page, scanned page) instead of seconds per
+  page for each document. Per document it misled: an 8-page paper looked slower
+  per page than a 25-page one, because every document pays a fixed start-up
+  cost that weighs more on a short one.
+
+---
+
 ## 6.2.0
 
 ### Tables
