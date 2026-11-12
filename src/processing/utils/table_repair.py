@@ -41,6 +41,8 @@ except ImportError:  # pragma: no cover
 
 from src.processing.layout.base import Detection
 from src.processing.layout.regions import TableRegion, locate_table_regions
+from src.processing.pdf.base import PdfPage
+from src.processing.utils.table_orientation import table_read_image
 
 #: A caller-supplied reader: given a cropped table image, return its
 #: transcription (e.g. HTML). Bound by the caller to the extraction provider,
@@ -99,6 +101,7 @@ def repair_page_tables(
     detections: Sequence[Detection],
     read_table_crop: CropReader,
     logger: Optional[logging.Logger] = None,
+    page: Optional[PdfPage] = None,
 ) -> RepairResult:
     """
     Locate the dropped table(s), re-read them from clean crops, splice them in.
@@ -112,6 +115,10 @@ def repair_page_tables(
             belongs to the detector.
         read_table_crop: callable that re-reads one cropped table image.
         logger: optional logger.
+        page: the PDF page, whose text layer tells a sideways table. Each
+            table is read from its tight, upright crop
+            (`utils/table_orientation.py`); without a page it is read tight
+            but as printed.
 
     Returns:
         A `RepairResult`. On a page with no locatable table it returns the text
@@ -125,7 +132,7 @@ def repair_page_tables(
         log.info("Repair: layout detector located no table to recover")
         return RepairResult(text=full_page_text, tables_recovered=0)
 
-    recovered = _read_table_regions(page_image, regions, read_table_crop, log)
+    recovered = _read_table_regions(page_image, regions, read_table_crop, log, page)
     if not recovered:
         log.warning("Repair: located %d table region(s) but re-read returned nothing",
                     len(regions))
@@ -150,16 +157,21 @@ def _read_table_regions(
     regions: Sequence[TableRegion],
     read_table_crop: CropReader,
     log: logging.Logger,
+    page: Optional[PdfPage] = None,
 ) -> List[RecoveredTable]:
     """
     Crop each located table region and re-read it, keeping non-empty results.
+
+    The model reads the tight, upright body (`region.reading_box`), while the
+    `RecoveredTable` keeps the SAVED box (`region.box`): that is the key
+    `tables.py` uses to find this transcription again.
 
     Returns one `RecoveredTable` per table successfully re-read, in page order,
     each carrying the box it came from so the caller can tag it.
     """
     recovered: List[RecoveredTable] = []
     for index, region in enumerate(regions, start=1):
-        crop = page_image.crop(region.box)
+        crop = table_read_image(page_image, region.reading_box, page)
         log.debug("Repair: reading table crop %d/%d at %s", index, len(regions), region.box)
         transcription = read_table_crop(crop)
         if transcription and transcription.strip():

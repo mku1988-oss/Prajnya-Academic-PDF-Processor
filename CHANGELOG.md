@@ -6,6 +6,27 @@ it in `document_info.pipeline_version`.
 
 ---
 
+## 6.3.0
+
+### Tables
+
+- **Tables are read from the table itself, the right way up.** The reading
+  model is now given only the table body, without its caption and footnote,
+  and a table printed sideways on the page is turned upright before it is
+  read. Sideways tables are recognised from the PDF's own text, so nothing
+  has to be marked by hand. The saved table image and its caption are
+  unchanged. On the sample corpus this corrected 4 of the 7 tables that had
+  been read seriously wrong (previously 1), and on 20 tables picked at random
+  from a reference library it made none worse; on both, the text read from
+  tables matches the printed table more closely, and table reading is about
+  20% faster.
+- **Known trade-off:** the transcription can be slightly less literal. On one
+  long table, printed "...." no-data markers come out as empty cells, and two
+  single-character misreads were seen ("1½" read as "1%", "Drosophila" as
+  "Brosophila") that the previous crop read correctly.
+
+---
+
 ## 6.2.1
 
 ### Output

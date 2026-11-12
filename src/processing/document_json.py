@@ -29,7 +29,7 @@ LOG = logging.getLogger(__name__)
 
 #: Stamped into every document's `document_info`, so an output file says which
 #: pipeline produced it.
-PIPELINE_VERSION = "v6.2.1"
+PIPELINE_VERSION = "v6.3.0"
 
 
 def write_result(profile: DocumentProfile, out_path: Path, elapsed: float,

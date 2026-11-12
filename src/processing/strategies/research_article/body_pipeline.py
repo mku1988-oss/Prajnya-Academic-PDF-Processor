@@ -773,7 +773,7 @@ class BodyPipeline:
         result = repair_page_tables(
             page_image=page_image, full_page_text=glm_text,
             detections=detections, read_table_crop=self._read_table_crop,
-            logger=self.logger)
+            logger=self.logger, page=page)
         return result.text, {
             "processing_method": "glm_repair" if result.repaired else "glm_fullpage",
             "coverage": coverage,

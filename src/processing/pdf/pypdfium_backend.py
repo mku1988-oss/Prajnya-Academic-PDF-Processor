@@ -37,6 +37,7 @@ from .base import (
     Word,
     flip_y,
     render_scale,
+    vertical_direction_from_steps,
     words_in_rect,
 )
 
@@ -173,6 +174,48 @@ class PyPdfiumPage:
 
     def text_in(self, rect: Rect) -> str:
         return " ".join(w.text for w in words_in_rect(self.words(), rect))
+
+    def vertical_text_direction(self, rect: Rect) -> str:
+        """
+        "up", "down" or "" for the vertical text inside `rect`.
+
+        Walks PDFium's characters in their stored (reading) order and records
+        the step from each letter to the next, for every pair of NEIGHBOURING
+        letters whose centres both lie inside `rect`. The vote itself is
+        `vertical_direction_from_steps`, shared with the other backend.
+        """
+        try:
+            text_page = self._text_page()
+            count = pdfium_raw.FPDFText_CountChars(text_page)
+        except Exception:                                   # pragma: no cover
+            return ""
+        height = self.size[1]
+        steps, previous = [], None
+        for index in range(count):
+            centre = self._letter_centre(text_page, index, height)
+            if centre is None or not (rect.x0 <= centre[0] <= rect.x1
+                                      and rect.y0 <= centre[1] <= rect.y1):
+                previous = None          # a gap breaks the chain of neighbours
+                continue
+            if previous is not None:
+                steps.append((centre[0] - previous[0], centre[1] - previous[1]))
+            previous = centre
+        return vertical_direction_from_steps(steps)
+
+    def _letter_centre(self, text_page, index: int, height: float):
+        """Top-left-origin centre of character `index`, or None if not a letter/digit."""
+        try:
+            code = pdfium_raw.FPDFText_GetUnicode(text_page, index)
+            if not code or not chr(code).isalnum():
+                return None
+            left, right, bottom, top = (ctypes.c_double() for _ in range(4))
+            pdfium_raw.FPDFText_GetCharBox(
+                text_page, index, ctypes.byref(left), ctypes.byref(right),
+                ctypes.byref(bottom), ctypes.byref(top))
+        except Exception:                                   # pragma: no cover
+            return None
+        return ((left.value + right.value) / 2,
+                height - (bottom.value + top.value) / 2)
 
     def _object_rects(self, object_type: int) -> List[Rect]:
         """Bounding boxes of every page object of the given PDFium type."""

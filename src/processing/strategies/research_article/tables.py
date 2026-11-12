@@ -18,6 +18,10 @@ actually sit on a page:
      without its header row or units footnote is worse than useless. So the
      PNG contains the caption, and we ALSO read the caption text separately
      (from the text layer) for the manifest — the same string, two uses.
+     The MODEL, though, reads only the table body, turned upright when it is
+     printed sideways (`region.reading_box`, `utils/table_orientation.py`):
+     that input is measured to read better, and GLM's table reader never
+     wrote caption or footnote text into a grid anyway.
 
   2. **Every table leaves with a grid.** When the repair path ran, it already
      re-read the crop, and that transcription is carried through at zero extra
@@ -45,10 +49,11 @@ from PIL import Image
 
 from ...events import emit
 from ...layout.base import LABEL_TABLE_CAPTION, Detection
-from ...layout.regions import locate_table_regions
+from ...layout.regions import TableRegion, locate_table_regions
 from ...pdf.base import PdfPage
 from ...utils.figure_extractor import safe_doc_id
 from ...utils.text_normalization import normalize_harvested_text
+from ...utils.table_orientation import table_read_image
 from ...utils.table_repair import CropReader, RecoveredTable
 from ...utils.table_sections import read_table_with_sections
 from .figures import image_box_to_pdf_rect
@@ -166,8 +171,8 @@ def extract_page_tables(
                 page=page, page_image=page_image, box=region.box,
                 detections=detections, out_dir=out_dir,
                 page_number=page_idx + 1, index=index,
-                grid=_grid_for(region.box, grid_lookup, page_image,
-                               read_table_crop, page_idx + 1, log),
+                grid=_grid_for(region, grid_lookup, page_image,
+                               read_table_crop, page_idx + 1, log, page),
                 path_root=path_root, logger=log,
             ))
         except Exception as error:
@@ -304,12 +309,13 @@ def _grids_by_box(
 
 
 def _grid_for(
-    box: Sequence[int],
+    region: TableRegion,
     grid_lookup: Dict[Tuple[int, int, int, int], str],
     page_image: "Image.Image",
     read_table_crop: Optional[CropReader],
     page_number: int,
     logger: logging.Logger,
+    page: Optional[PdfPage] = None,
 ) -> Optional[str]:
     """A table's transcription: the repair path's if it ran, else a crop read.
 
@@ -324,12 +330,18 @@ def _grid_for(
 
     A failed or empty read leaves the grid None: losing a transcription must
     never lose the table itself.
+
+    The model reads the table's tight, upright body, not the saved crop
+    (`utils/table_orientation.py`: 4 of the 7 seriously wrong corpus tables
+    read right that way). The section check below works on the same image,
+    so its horizontal bands run across the table's real rows.
     """
+    box = region.box
     existing = grid_lookup.get(tuple(box))
     if read_table_crop is None:
         return existing
 
-    crop = page_image.crop(tuple(box))
+    crop = table_read_image(page_image, region.reading_box, page)
     text = existing
     if text is None:
         try:

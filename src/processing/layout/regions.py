@@ -70,16 +70,26 @@ class TableRegion:
     One table on the page, as a pixel box ready to crop.
 
     Attributes:
-        box: (x0, y0, x1, y1) in pixels of the rendered page image.
+        box: (x0, y0, x1, y1) in pixels of the rendered page image. The SAVED
+            crop: table plus caption, footnote and rescued ink.
         has_caption: whether a caption was folded into the box.
         has_footnote: whether a footnote was folded into the box.
         grew_for_orphan_ink: pixels the box grew downward to rescue unclaimed ink.
+        read_box: the table body alone, snapped to whitespace: what the model
+            READS (see `utils/table_orientation.py` for why). None means "same
+            as `box`", for regions built by hand.
     """
 
     box: Tuple[int, int, int, int]
     has_caption: bool = False
     has_footnote: bool = False
     grew_for_orphan_ink: int = 0
+    read_box: Optional[Tuple[int, int, int, int]] = None
+
+    @property
+    def reading_box(self) -> Tuple[int, int, int, int]:
+        """The box the model reads: `read_box`, or `box` when none was set."""
+        return self.read_box if self.read_box is not None else self.box
 
 
 @dataclass
@@ -152,12 +162,17 @@ def locate_table_regions(
         snapped = snap_box_to_whitespace(with_satellites, ink)
         with_orphans, grew = attach_orphan_ink(snapped, orphan_blobs, page_height)
         final_box = snap_box_to_whitespace(with_orphans, ink)
+        # The table body alone, for the model to read: same whitespace snap,
+        # no satellites. This is exactly the eval's "tight" crop
+        # (eval/minicpm_ocr_jev/make_tight_crops.py).
+        body_box = snap_box_to_whitespace(table_box, ink)
 
         regions.append(TableRegion(
             box=tuple(final_box),
             has_caption=has_caption,
             has_footnote=has_footnote or grew > 0,
             grew_for_orphan_ink=grew,
+            read_box=tuple(int(v) for v in body_box),
         ))
         log.debug("table region %s caption=%s footnote=%s orphan_growth=%dpx",
                   final_box, has_caption, has_footnote, grew)

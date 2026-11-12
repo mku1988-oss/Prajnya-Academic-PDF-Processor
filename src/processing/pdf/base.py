@@ -218,6 +218,23 @@ class PdfPage(Protocol):
         """
         ...
 
+    def vertical_text_direction(self, rect: Rect) -> str:
+        """
+        Which way the vertical text inside `rect` reads: "up", "down" or "".
+
+        For biology researchers: a wide table is often printed sideways on a
+        portrait page. Its words then run up the page (the usual convention:
+        tilt your head left to read) or, more rarely, down it. The crop must
+        be turned the matching way before a model reads it, and a word's box
+        alone cannot tell the two apart -- a tall thin box looks the same
+        either way. The order the CHARACTERS come in can.
+
+        "up" means the text reads from the bottom of the page towards the
+        top; "down" the reverse; "" means no vertical text was found (a
+        normal table, or a scan with no text layer).
+        """
+        ...
+
     def images(self) -> List[ImageBlock]:
         """Embedded raster images."""
         ...
@@ -333,6 +350,38 @@ def looks_horizontal(word: Word) -> bool:
     if len(word.text.strip()) < 2:
         return True
     return word.rect.width >= word.rect.height
+
+
+def vertical_direction_from_steps(steps: Sequence[tuple[float, float]]) -> str:
+    """
+    Decide "up", "down" or "" from the steps between consecutive characters.
+
+    Shared by both backends so they cannot disagree on the rule. Each step is
+    (dx, dy) from one character's centre to the next one in reading order,
+    in this interface's top-left coordinates (y grows DOWN the page). A step
+    that is mostly vertical is a vote: dy < 0 means the next letter sits
+    higher on the page, so the text reads upward.
+
+    Args:
+        steps: (dx, dy) between consecutive letters, in PDF points.
+
+    Returns:
+        "up" or "down" by majority of the vertical steps, or "" when there
+        are no vertical steps or the vote is tied.
+    """
+    up = down = 0
+    for dx, dy in steps:
+        if abs(dy) <= abs(dx) or abs(dy) < 0.5:
+            continue  # a horizontal step, or two glyphs on top of each other
+        if dy < 0:
+            up += 1
+        else:
+            down += 1
+    if up > down:
+        return "up"
+    if down > up:
+        return "down"
+    return ""
 
 
 def group_words_into_lines(

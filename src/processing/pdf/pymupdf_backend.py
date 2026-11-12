@@ -28,6 +28,7 @@ from .base import (
     StyledLine,
     Word,
     render_scale,
+    vertical_direction_from_steps,
     words_in_rect,
 )
 
@@ -133,6 +134,37 @@ class PyMuPdfPage:
 
     def text_in(self, rect: Rect) -> str:
         return " ".join(w.text for w in words_in_rect(self.words(), rect))
+
+    def vertical_text_direction(self, rect: Rect) -> str:
+        """
+        "up", "down" or "" for the vertical text inside `rect`.
+
+        `rawdict` already lists each line's characters in reading order, with
+        top-left-origin boxes, so the steps between neighbouring letters can
+        be taken directly. The vote is `vertical_direction_from_steps`, the
+        same rule the PDFium backend uses.
+        """
+        try:
+            raw = self._page.get_text("rawdict")
+        except Exception:                                   # pragma: no cover
+            return ""
+        steps = []
+        for block in raw.get("blocks", []):
+            for line in block.get("lines", []):
+                previous = None
+                for span in line.get("spans", []):
+                    for char in span.get("chars", []):
+                        x0, y0, x1, y1 = char.get("bbox", (0, 0, 0, 0))
+                        centre = ((x0 + x1) / 2, (y0 + y1) / 2)
+                        inside = (rect.x0 <= centre[0] <= rect.x1
+                                  and rect.y0 <= centre[1] <= rect.y1)
+                        if not (char.get("c") or "").isalnum() or not inside:
+                            previous = None
+                            continue
+                        if previous is not None:
+                            steps.append((centre[0] - previous[0], centre[1] - previous[1]))
+                        previous = centre
+        return vertical_direction_from_steps(steps)
 
     def images(self) -> List[ImageBlock]:
         """
