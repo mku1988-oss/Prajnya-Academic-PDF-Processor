@@ -29,7 +29,7 @@ LOG = logging.getLogger(__name__)
 
 #: Stamped into every document's `document_info`, so an output file says which
 #: pipeline produced it.
-PIPELINE_VERSION = "v6.4.0"
+PIPELINE_VERSION = "v6.5.0"
 
 #: The version of the output FORMAT, which moves independently of the release.
 #: Stamped into `document_info.contract_version`, and pinned against

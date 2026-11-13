@@ -1,4 +1,4 @@
-# Prajnya v6.4.0 — dependencies
+# Prajnya v6.5.0 — dependencies
 #
 # LICENCE RULE: every line must be OSI-permissive
 # (Apache-2.0 / MIT / BSD). Annotate each entry with its licence.
@@ -13,13 +13,15 @@ colorlog>=6.7.0            # MIT
 tqdm>=4.66.0               # MPL-2.0 + MIT (permissive, file-level copyleft only)
 
 # --- PDF & imaging ----------------------------------------------------------
-pypdfium2>=4.24.0,<5       # Apache-2.0 OR BSD-3-Clause (PDFium: BSD-3-Clause)
-# ^ PINNED below 5 (2026-11-13). 5.0 renamed PdfObject.get_pos(), which crashed
-#   the page classifier on every page of a fresh v6.3.0 install (now tolerated
-#   in pypdfium_backend._object_bounds). Worse, 5.x's PDFium extracts text
-#   differently: on the Springer book's contents page it drops dot leaders AND
-#   the space before the page number ("Life . . . 45" becomes "Life45"), and
-#   16 book tests fail. Moving to 5.x needs its own corpus comparison.
+pypdfium2==5.15.2          # Apache-2.0 OR BSD-3-Clause (PDFium: BSD-3-Clause)
+# ^ PINNED EXACTLY (v6.5.0). Each pypdfium2 release bundles a different PDFium
+#   build, and PDFium builds extract text and boxes differently: 5.x drops the
+#   characters of contents-page dot leaders, fixes the Springer ligature loss,
+#   and draws tighter character boxes. 6.5.0's corpus was measured on 5.15.2
+#   (eval/pypdfium5/FINDINGS.md, eval/caption_endings/GATE.md). The code still
+#   runs on 4.x (the suite passes on 4.30.0), but any version change needs its
+#   own corpus comparison first. 6.4.0's open range is why a fresh 6.3.0
+#   install crashed on every page.
 Pillow>=10.0.0             # MIT-CMU
 numpy>=1.24.0              # BSD-3-Clause
 opencv-python>=4.8.0       # Apache-2.0

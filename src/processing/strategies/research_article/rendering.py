@@ -34,7 +34,8 @@ from typing import Dict, Optional, Tuple
 
 from PIL import Image
 
-from ...pdf.base import PdfBackend, PdfDocument, PdfPage
+from ...pdf.base import PdfBackend, PdfDocument, PdfPage, TextStyle
+from ...utils.text_style import document_body_style
 
 #: White border, in pixels, added to every rendered page (matches V5 /
 #: OlmOCR Hybrid v2, which the archived known-good output was produced with).
@@ -106,6 +107,8 @@ class DocumentCache:
         self.logger = logger or logging.getLogger("DocumentCache")
         self._doc: Optional[PdfDocument] = backend.open(self.pdf_path)
         self._images: Dict[Tuple[int, int], Image.Image] = {}
+        self._body_style: Optional[TextStyle] = None
+        self._body_style_read = False
 
     @property
     def page_count(self) -> int:
@@ -128,6 +131,20 @@ class DocumentCache:
         page = self.page(index)
         longest_pts = max(page.size)
         return self.page_image(index, int(longest_pts / 72.0 * extraction_dpi))
+
+    def body_style(self) -> Optional[TextStyle]:
+        """
+        The document's running-text typeface, measured once and memoized.
+
+        Used to end figure captions where the body text resumes (see
+        `utils/text_style.py`). None for a document with no text layer.
+        """
+        if not self._body_style_read:
+            doc = self._require_open()
+            pages = [doc.page(index) for index in range(doc.page_count)]
+            self._body_style = document_body_style(pages)
+            self._body_style_read = True
+        return self._body_style
 
     def close(self) -> None:
         """Close the document handle. Cached images remain usable."""

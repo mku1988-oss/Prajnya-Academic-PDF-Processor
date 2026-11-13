@@ -21,7 +21,9 @@ from PIL import Image
 
 from .base import (
     DrawingBlock,
+    GlyphStyle,
     ImageBlock,
+    LEADER_MIN_ASPECT,
     Rect,
     group_characters_into_lines,
     styled_line_from_characters,
@@ -179,6 +181,52 @@ class PyMuPdfPage:
             if bbox:
                 blocks.append(ImageBlock(rect=Rect(*bbox).normalized()))
         return blocks
+
+    def glyph_styles(self) -> List[GlyphStyle]:
+        """
+        Every printed character's centre and font name, from `rawdict`.
+
+        x_height is None: PyMuPDF's character boxes are LOOSE (ascent to
+        descent), so they cannot measure an x-height. The typography rules
+        then work from font names alone, which is all a local-development
+        backend needs.
+        """
+        glyphs: List[GlyphStyle] = []
+        for block in self._page.get_text("rawdict").get("blocks", []):
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    font = (span.get("font") or "").split("+")[-1]
+                    for char in span.get("chars", []):
+                        if (char.get("c") or " ").isspace():
+                            continue
+                        x0, y0, x1, y1 = char["bbox"]
+                        glyphs.append(GlyphStyle(x=(x0 + x1) / 2, y=(y0 + y1) / 2,
+                                                 font=font))
+        return glyphs
+
+    def leaders(self) -> List[Rect]:
+        """
+        Boxes of the horizontal text runs that carry no letter or digit.
+
+        PyMuPDF reads dot leaders as words (".", ". . ."), so a leader is the
+        union of the letterless words on one typeset line, kept when it is at
+        least `LEADER_MIN_ASPECT` times wider than tall. See the pypdfium2
+        backend for why this is a separate call from `words()`.
+        """
+        runs: dict = {}
+        for item in self._page.get_text("words"):
+            text, block, line = item[4], item[5], item[6]
+            if any(ch.isalnum() for ch in text):
+                continue
+            box = Rect(item[0], item[1], item[2], item[3])
+            key = (block, line)
+            if key in runs:
+                old = runs[key]
+                box = Rect(min(old.x0, box.x0), min(old.y0, box.y0),
+                           max(old.x1, box.x1), max(old.y1, box.y1))
+            runs[key] = box
+        return [rect for rect in runs.values()
+                if rect.height > 0 and rect.width >= LEADER_MIN_ASPECT * rect.height]
 
     def drawings(self) -> List[DrawingBlock]:
         blocks: List[DrawingBlock] = []

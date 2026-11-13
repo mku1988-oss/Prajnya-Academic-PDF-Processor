@@ -87,6 +87,13 @@ MIN_USABLE_CAPTION = 15
 _CAPTION_SEPARATOR = re.compile(r"^\s*[.|:–—-]")
 _CAPITALISED_WORD = re.compile(r"^\s+[A-Z(\[]")
 
+#: A PANEL sub-caption: a lowercase panel letter, bare or bracketed, then
+#: optionally "|", ")" or ".", then a capitalised word. "a The shape recovery
+#: of the shaft of a bird feather" (Hydration p10, panel a of Fig. 7, whose
+#: caption is printed overleaf). Lowercase only, so a real caption that
+#: happens to begin "A schematic of ..." never matches.
+_PANEL_CAPTION = re.compile(r"^\s*\(?[a-z]\)?\s*[|.)]?\s+[A-Z]")
+
 
 def recover_overleaf_captions(
     figures_by_page: Dict[int, List[dict]],
@@ -136,7 +143,11 @@ def recover_overleaf_captions(
 
         offset, line = candidate
         for figure in orphans:
-            figure["caption"] = line.text
+            # A panel keeps the text printed under it: the overleaf line is
+            # only the caption's FIRST line, and the panel's own sentence is
+            # what is specific to that crop.
+            if not is_panel_caption((figure.get("caption") or "").strip()):
+                figure["caption"] = line.text
             figure["printed_label"] = line.printed
             figure["label_key"] = line.key
             figure["panel_group_size"] = max(len(orphans), 1)
@@ -157,16 +168,34 @@ def recover_overleaf_captions(
 
 
 def _needs_a_caption(figure: dict) -> bool:
-    """Whether a figure record arrived with neither a caption nor a label.
+    """Whether a figure record arrived with no label and no real caption.
 
-    Both conditions are required. A crop that already carries a label was
-    placed by the geometric pass on its own page, which is stronger evidence
-    than anything available across a page boundary.
+    A crop that already carries a label was placed by the geometric pass on
+    its own page, which is stronger evidence than anything available across
+    a page boundary, so it is never touched. Otherwise the crop needs a
+    caption when it has none worth the name: shorter than
+    `MIN_USABLE_CAPTION`, or only its panel's sub-caption (`is_panel_caption`).
     """
-    caption = (figure.get("caption") or "").strip()
-    if len(caption) >= MIN_USABLE_CAPTION:
+    if figure.get("printed_label"):
         return False
-    return not figure.get("printed_label")
+    caption = (figure.get("caption") or "").strip()
+    return len(caption) < MIN_USABLE_CAPTION or is_panel_caption(caption)
+
+
+def is_panel_caption(caption: str) -> bool:
+    """
+    True for a PANEL's sub-caption carrying no figure label.
+
+    The layout detector sometimes boxes the text printed under one panel
+    ("a The shape recovery of the shaft of a bird feather") as that crop's
+    caption. It is long enough to pass for a caption, so until 2026-11-13
+    such a crop was never treated as uncaptioned, and when its figure's
+    caption was printed on the facing page its sibling panels adopted the
+    label and it did not (Hydration p10: Fig. 7's panels b and c labelled,
+    panel a not; the last unlabelled crop of the corpus).
+    """
+    printed, _ = parse_printed_label(caption)
+    return printed is None and bool(_PANEL_CAPTION.match(caption))
 
 
 def _claimed_keys(figures_by_page: Dict[int, List[dict]]) -> set:

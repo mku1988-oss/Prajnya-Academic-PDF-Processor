@@ -111,9 +111,47 @@ class Rect:
         return self.x0 <= cx <= self.x1 and self.y0 <= cy <= self.y1
 
 
+#: A dot leader is a RUN of dots: at least this many times wider than tall,
+#: so one stray full stop is never a leader. The shortest leader on the
+#: Springer book's contents page is far wider than this; its box is ~1 pt tall
+#: under PDFium (dots sit on the baseline). Shared by both backends.
+LEADER_MIN_ASPECT = 3.0
+
+
+@dataclass(frozen=True)
+class GlyphStyle:
+    """
+    One printed character's position and typeface, for reading typography.
+
+    Attributes:
+        x, y: the character's centre (top-left coordinates).
+        font: the font's name as the PDF records it ("Times-Roman",
+            "AdvPSA5B8"). Subset prefixes ("ABCDEF+") are removed.
+        x_height: the glyph's height when it is an x-height letter
+            (a, c, e, m, n, o, r, s, u, v, w, x, z), else None.
+    """
+
+    x: float
+    y: float
+    font: str
+    x_height: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class TextStyle:
+    """A run of text's typeface: its font name and x-height (0.0 = unknown)."""
+
+    font: str
+    x_height: float = 0.0
+
+
 @dataclass(frozen=True)
 class Word:
     """A single word with its bounding box, in the interface's coordinates.
+
+    `baseline` is the y of the line the word's letters sit on (top-left
+    coordinates), or None when the backend cannot say. Words on one printed
+    line share it exactly, whatever their fonts; box tops do not.
 
     `rotated` is True for a word typeset at a quarter turn (the "Downloaded
     from ..." stamp down a journal's margin, a sideways table), False for an
@@ -124,6 +162,7 @@ class Word:
     text: str
     rect: Rect
     rotated: Optional[bool] = None
+    baseline: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -248,6 +287,33 @@ class PdfPage(Protocol):
 
     def drawings(self) -> List[DrawingBlock]:
         """Vector drawing regions."""
+        ...
+
+    def glyph_styles(self) -> List[GlyphStyle]:
+        """
+        Every printed character's centre, font name and x-height.
+
+        For telling a figure caption from body text: journals set captions in
+        another font or at another size (see `utils/text_style.py`). Spaces
+        are left out. A backend that cannot read fonts returns [], which
+        switches the typography rules off rather than guessing.
+        """
+        ...
+
+    def leaders(self) -> List[Rect]:
+        """
+        Boxes of horizontal text runs that carry no letter or digit.
+
+        **Candidates, not verdicts.** They include the dot leaders of a
+        contents page ("Life . . . . 45"), and also runs of spaces, dashes and
+        symbol glyphs, which are common on ordinary pages (measured: on most
+        pages of the corpus). `utils/contents_leaders.py` decides which are
+        leaders, by requiring one to fill the gap before a page number.
+
+        Read from the page's text OBJECTS, not its extracted text, because
+        PDFium as bundled with pypdfium2 5.x extracts nothing from a leader.
+        At least `LEADER_MIN_ASPECT` times wider than tall.
+        """
         ...
 
     def render(self, *, dpi: Optional[int] = None, max_edge: Optional[int] = None) -> "Image.Image":

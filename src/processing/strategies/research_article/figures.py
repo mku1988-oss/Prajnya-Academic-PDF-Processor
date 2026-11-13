@@ -29,13 +29,15 @@ from PIL import Image
 
 from ...events import emit
 from ...layout.base import Detection
-from ...pdf.base import PdfPage, Rect, looks_horizontal
+from ...pdf.base import PdfPage, Rect, TextStyle
 from ...utils.content_drop_check import is_scanned_page
 from ...utils.text_normalization import normalize_harvested_text
 from ...utils.figure_extractor import FigureAsset, extract_and_save_figures, safe_doc_id
+from ...utils.text_style import PageTypography
 from ...utils.figure_label_pass import (
     assign_labels_on_page,
     build_text_lines,
+    label_words,
     find_label_lines,
 )
 from ...utils.figure_labels import parse_printed_label
@@ -60,6 +62,7 @@ def extract_page_figures(
     read_crop: Optional[CropReader] = None,
     path_root: Optional[Path] = None,
     logger: Optional[logging.Logger] = None,
+    body_style: Optional[TextStyle] = None,
 ) -> List[FigureAsset]:
     """
     Crop and save every figure on this page, tagging each with its caption.
@@ -78,6 +81,9 @@ def extract_page_figures(
         read_crop: optional model reader for captions on scanned pages.
         path_root: manifest paths are made relative to this when given.
         logger: optional logger.
+        body_style: the document's running-text style
+            (`DocumentCache.body_style`), so a caption read from the text
+            layer ends where the body text resumes. None: geometry only.
 
     Returns:
         One `FigureAsset` per saved figure; [] when the page has none.
@@ -97,7 +103,8 @@ def extract_page_figures(
         path_root=path_root,
         logger=log,
     )
-    return attach_printed_labels(page, page_image, assets, logger=log)
+    return attach_printed_labels(page, page_image, assets, logger=log,
+                                 body_style=body_style)
 
 
 def attach_printed_labels(
@@ -105,6 +112,7 @@ def attach_printed_labels(
     page_image: Image.Image,
     assets: List[FigureAsset],
     logger: Optional[logging.Logger] = None,
+    body_style: Optional[TextStyle] = None,
 ) -> List[FigureAsset]:
     """
     Label each crop from the page's own text, and rejoin panels of one figure.
@@ -137,16 +145,15 @@ def attach_printed_labels(
     try:
         width, height = page.size
         scale = width / page_image.width if page_image.width else 1.0
-        # Rotated words (the "Downloaded from ..." stamp down the margin) are
-        # not caption text, and one sitting beside a caption ended it after
-        # its first line (eval/word_boxes/GATE.md, Addendum 5).
-        words = [(w.text, w.rect.x0, w.rect.y0, w.rect.x1, w.rect.y1)
-                 for w in page.words() if looks_horizontal(w)]
-        text_lines = build_text_lines(words, width)
+        # Upright words only, with baselines: see `label_words`.
+        text_lines = build_text_lines(label_words(page), width)
         label_lines = find_label_lines(text_lines)
         boxes = [tuple(value * scale for value in asset.bbox) for asset in assets]
+        typography = (PageTypography(page.glyph_styles(), body_style)
+                      if body_style is not None else None)
         assignments = assign_labels_on_page(boxes, label_lines, height, logger=log,
-                                            text_lines=text_lines)
+                                            text_lines=text_lines,
+                                            typography=typography)
     except Exception as error:                              # pragma: no cover
         # A page with no text layer is a scan; it simply has no labels to
         # read. That must never cost us the figures themselves.

@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional
 
 from .metadata_extractor import MetadataExtractor
+from ..utils.contents_leaders import contents_page_text
 
 # How many pages of front matter to read when nothing says otherwise. Ten
 # covers the deepest copyright page seen in the sample corpus (p5 of a
@@ -145,13 +146,32 @@ def _read_front_matter_text(doc, max_pages: int,
             texts[1] = page_1_text
             continue
         try:
-            texts[index + 1] = doc.page(index).text() or ""
+            page = doc.page(index)
+            texts[index + 1] = _contents_or_own_text(page)
         except Exception:
             # A single unreadable page must not abort the scan; the remaining
             # pages may still carry the identifiers.
             texts[index + 1] = ""
 
     return texts
+
+
+def _contents_or_own_text(page) -> str:
+    """
+    A contents page's geometrically rebuilt text; any other page's own text.
+
+    The rebuild writes out the dot leaders that pypdfium2 5.x no longer
+    extracts (see `utils/contents_leaders.py`), so the classifier and the
+    contents parser read the same text under PDFium old and new. It returns
+    None on every page without at least three leader lines, so those keep
+    their text byte for byte. Measured on all 485 corpus pages under 4.30
+    and 5.15.2: it fires on the Springer book's two contents pages and
+    nowhere else. Cost: median ~10 ms per page, ~0.1-0.2 s per document.
+    """
+    rebuilt = contents_page_text(page)
+    if rebuilt is not None:
+        return rebuilt
+    return page.text() or ""
 
 
 def _take_doi(found: FrontMatterIdentifiers, extractor: MetadataExtractor,

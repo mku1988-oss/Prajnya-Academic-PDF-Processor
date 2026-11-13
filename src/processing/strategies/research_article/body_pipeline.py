@@ -46,12 +46,12 @@ from ...layout.vlm_detector import GroundingSpec, VlmGroundingDetector
 from ...models import ContentPage
 from ...events import emit
 from ...paths import REPO_ROOT, anchor_output_path
-from ...pdf.base import PdfPage, looks_horizontal
+from ...pdf.base import PdfPage
 from ...utils.caption_overleaf import (
     NEIGHBOUR_OFFSETS,
     recover_overleaf_captions,
 )
-from ...utils.figure_label_pass import build_text_lines, find_label_lines
+from ...utils.figure_label_pass import build_text_lines, find_label_lines, label_words
 from ...utils.reference_pass import reference_signals
 from ...utils.heading_pass import heading_candidates_for_page
 from ...utils.content_drop_check import (
@@ -349,7 +349,8 @@ class BodyPipeline:
         figures = extract_page_figures(
             page, page_image, detections, cache.pdf_path, self.figures_base_dir,
             page_idx, read_crop=self._read_caption_crop,
-            path_root=self.figures_path_root, logger=self.logger)
+            path_root=self.figures_path_root, logger=self.logger,
+            body_style=cache.body_style())
         if figures:
             final_text = append_figure_anchors(final_text, figures)
 
@@ -642,10 +643,8 @@ class BodyPipeline:
                 except Exception:
                     continue                    # past the end of the document
                 width, _ = page.size
-                words = [(w.text, w.rect.x0, w.rect.y0, w.rect.x1, w.rect.y1)
-                         for w in page.words() if looks_horizontal(w)]
                 label_lines_by_page[page_number] = find_label_lines(
-                    build_text_lines(words, width))
+                    build_text_lines(label_words(page), width))
 
             recovered = recover_overleaf_captions(
                 figures_by_page, label_lines_by_page, logger=self.logger)
@@ -716,7 +715,8 @@ class BodyPipeline:
         figures = extract_page_figures(
             page, page_image, detections, cache.pdf_path, self.figures_base_dir,
             page_idx, read_crop=self._read_caption_crop,
-            path_root=self.figures_path_root, logger=self.logger)
+            path_root=self.figures_path_root, logger=self.logger,
+            body_style=cache.body_style())
 
         content_page = results[page_idx]
         content_page.metadata["figure_second_opinion"] = "found" if figures else "none"

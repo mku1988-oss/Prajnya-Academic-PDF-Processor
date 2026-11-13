@@ -6,6 +6,46 @@ it in `document_info.pipeline_version`.
 
 ---
 
+## 6.5.0
+
+### Setup
+
+- **pypdfium2 is now 5.15.2, pinned exactly** (was `>=4.24,<5`). Reinstall
+  from `requirements.txt`. Each pypdfium2 release bundles a different PDFium,
+  and they extract text differently, so the version is fixed to the one the
+  corpus was measured on.
+
+### Improved
+
+- **Figure captions end where the caption ends.** A caption read from the
+  PDF's text now stops at the first line set in the article's body type
+  (journals print captions in another font, or smaller). Captions that ran
+  on into the article's prose now stop at their last sentence, and captions
+  cut short by a stray symbol are complete. Measured on the corpus: every
+  caption that changed is better (`eval/caption_endings/GATE.md`).
+- **Text lines are grouped by their baseline**, not the top of each word's
+  box, so a degree sign, a symbol or a bold label no longer splits a printed
+  line in two.
+- **Ligatures in the Springer book are read correctly** ("fibril", not
+  "fbril"), from the newer PDFium.
+
+### Fixed
+
+- **A book's contents page is read under the new PDFium**, which no longer
+  extracts the dots between a chapter title and its page number. The dots
+  are now found as a page object (15 of 15 chapters found).
+- **A figure label beside a narrow-gutter side caption is found**
+  (Springer, "Fig. 2.3").
+- **A figure panel whose detected caption was only its panel's sentence now
+  gets its figure's label** when the caption is printed on the facing page.
+  No figure in the corpus is left unlabelled.
+
+### Known
+
+- In the Springer book, a side caption printed beside the body column can
+  still run into it (p70, p333). The book path is not yet a focus.
+- The newer PDFium drops some spaces inside equations (`3 4hb` -> `34hb`).
+
 ## 6.4.0
 
 ### Setup

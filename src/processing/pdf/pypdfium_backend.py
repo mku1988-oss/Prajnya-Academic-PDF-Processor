@@ -30,7 +30,9 @@ from PIL import Image
 
 from .base import (
     DrawingBlock,
+    GlyphStyle,
     ImageBlock,
+    LEADER_MIN_ASPECT,
     Rect,
     group_characters_into_lines,
     styled_line_from_characters,
@@ -45,6 +47,7 @@ from .base import (
 #: PDFium page-object type constants, named for readability at the call site.
 _OBJ_IMAGE = pdfium_raw.FPDF_PAGEOBJ_IMAGE
 _OBJ_PATH = pdfium_raw.FPDF_PAGEOBJ_PATH
+_OBJ_TEXT = pdfium_raw.FPDF_PAGEOBJ_TEXT
 
 
 class PyPdfiumPage:
@@ -55,6 +58,7 @@ class PyPdfiumPage:
         self._index = index
         self._textpage: Optional["pdfium.PdfTextPage"] = None
         self._words: Optional[List[Word]] = None
+        self._glyphs: Optional[List[GlyphStyle]] = None
 
     @property
     def number(self) -> int:
@@ -108,26 +112,30 @@ class PyPdfiumPage:
         letters: List[str] = []
         boxes: List[tuple] = []
         turns: List[bool] = []
+        origins: List[float] = []
         for index in range(count):
             character = _character_at(text_page, index)
             if character is None:
                 continue
             if character.isspace():
-                _close_word(words, letters, boxes, turns, self.size[1])
+                _close_word(words, letters, boxes, turns, origins, self.size[1])
                 continue
             box = _character_box(text_page, index)
             # PDFium joins a word hyphenated at a line end ("pro\x02posed")
             # with no whitespace, so a line break must also end the word, or
             # its box would span two lines.
             if box is not None and boxes and not _on_one_line(boxes[-1], box):
-                _close_word(words, letters, boxes, turns, self.size[1])
+                _close_word(words, letters, boxes, turns, origins, self.size[1])
             letters.append(character)
             if box is not None:
                 boxes.append(box)
             turned = _character_is_turned(text_page, index)
             if turned is not None:
                 turns.append(turned)
-        _close_word(words, letters, boxes, turns, self.size[1])
+            origin = _character_baseline(text_page, index)
+            if origin is not None:
+                origins.append(origin)
+        _close_word(words, letters, boxes, turns, origins, self.size[1])
 
         self._words = words
         return words
@@ -248,6 +256,68 @@ class PyPdfiumPage:
     def drawings(self) -> List[DrawingBlock]:
         return [DrawingBlock(rect=r) for r in self._object_rects(_OBJ_PATH)]
 
+    def glyph_styles(self) -> List[GlyphStyle]:
+        """
+        Every printed character's centre, font name and x-height, cached.
+
+        The centre and height come from PDFium's TIGHT glyph box (the ink),
+        so an x-height letter measures the font's x-height. The font name is
+        `FPDFText_GetFontInfo`'s, with any subset prefix ("ABCDEF+") removed.
+        """
+        if self._glyphs is not None:
+            return self._glyphs
+        glyphs: List[GlyphStyle] = []
+        try:
+            text_page = self._text_page()
+            count = pdfium_raw.FPDFText_CountChars(text_page)
+        except Exception:                                   # pragma: no cover
+            count = 0
+        height = self.size[1]
+        name = ctypes.create_string_buffer(256)
+        flags = ctypes.c_int()
+        for index in range(count):
+            glyph = _glyph_style(text_page, index, height, name, flags)
+            if glyph is not None:
+                glyphs.append(glyph)
+        self._glyphs = glyphs
+        return glyphs
+
+    def leaders(self) -> List[Rect]:
+        """
+        Boxes of the horizontal text runs that carry no letter or digit.
+
+        For biology researchers: on a book's contents page the dots between a
+        chapter title and its page number ("Life . . . . . 45") are printed as
+        their own run of text. This finds those runs by their PAGE OBJECT, not
+        by the extracted text, and that difference is the whole point:
+
+        **pypdfium2 5.x's PDFium no longer extracts any characters from a dot
+        leader** (4.30 reads it as ". . . ."), so the dots vanish from
+        `text()` and `words()` alike. The text object itself is still on the
+        page, with a box spanning exactly the gap. Measured on the Springer
+        book's contents page (2026-11-13): the same 9 objects at the same
+        positions under both versions; 4.30 reads dots, 5.15.2 reads nothing.
+
+        Kept: text objects whose extracted text has no letter or digit, at
+        least `LEADER_MIN_ASPECT` times wider than tall (a run, not one stray
+        full stop). These are CANDIDATES: runs of spaces or symbol glyphs pass
+        too, and `utils/contents_leaders.py` keeps only those filling the gap
+        before a page number. Cost: median ~8 ms per page (one object walk).
+        """
+        height = self.size[1]
+        text_page = self._text_page()
+        rects: List[Rect] = []
+        for obj in self._page.get_objects():
+            if obj.type != _OBJ_TEXT:
+                continue
+            if any(ch.isalnum() for ch in _text_object_text(obj, text_page)):
+                continue
+            left, bottom, right, top = _object_bounds(obj)
+            rect = flip_y(Rect(left, bottom, right, top), height).normalized()
+            if rect.height > 0 and rect.width >= LEADER_MIN_ASPECT * rect.height:
+                rects.append(rect)
+        return rects
+
     def render(self, *, dpi: Optional[int] = None, max_edge: Optional[int] = None) -> Image.Image:
         scale = render_scale(self.size, dpi=dpi, max_edge=max_edge)
         bitmap = self._page.render(scale=scale)
@@ -304,6 +374,51 @@ def _on_one_line(previous: tuple, current: tuple) -> bool:
             or shared(previous[0], previous[2], current[0], current[2]))
 
 
+#: Letters whose glyph height is the font's x-height (see utils/text_style.py).
+_X_HEIGHT_LETTERS = frozenset("acemnorsuvwxz")
+
+
+def _glyph_style(text_page, index: int, page_height: float,
+                 name, flags) -> Optional[GlyphStyle]:
+    """One character as a GlyphStyle, or None for whitespace and unreadables."""
+    character = _character_at(text_page, index)
+    if character is None or character.isspace():
+        return None
+    try:
+        left, right, bottom, top = (ctypes.c_double() for _ in range(4))
+        pdfium_raw.FPDFText_GetCharBox(text_page, index, ctypes.byref(left),
+                                       ctypes.byref(right), ctypes.byref(bottom),
+                                       ctypes.byref(top))
+        length = pdfium_raw.FPDFText_GetFontInfo(text_page, index, name, 256,
+                                                 ctypes.byref(flags))
+    except Exception:                                       # pragma: no cover
+        return None
+    font = name.raw[:max(length - 1, 0)].decode("latin-1").split("+")[-1]
+    x_height = (top.value - bottom.value) if character in _X_HEIGHT_LETTERS else None
+    return GlyphStyle(x=(left.value + right.value) / 2,
+                      y=page_height - (bottom.value + top.value) / 2,
+                      font=font, x_height=x_height)
+
+
+def _character_baseline(text_page, index: int) -> Optional[float]:
+    """
+    The y of a character's ORIGIN (the point on its baseline), in PDF space.
+
+    Unlike a box top, a baseline does not depend on the font's ascent: a
+    degree sign, a symbol-font minus or a bold label sit on the same baseline
+    as their line, while their boxes start up to ~2 pt higher. Identical
+    under pypdfium2 4.30 and 5.x (measured, book p21).
+    """
+    try:
+        x, y = ctypes.c_double(), ctypes.c_double()
+        if not pdfium_raw.FPDFText_GetCharOrigin(text_page, index,
+                                                 ctypes.byref(x), ctypes.byref(y)):
+            return None
+    except Exception:                                       # pragma: no cover
+        return None
+    return y.value
+
+
 def _character_is_turned(text_page, index: int) -> Optional[bool]:
     """Whether a character is set more than 45 degrees from upright, or None if PDFium cannot say.
 
@@ -321,14 +436,22 @@ def _character_is_turned(text_page, index: int) -> Optional[bool]:
 
 
 def _close_word(words: List[Word], letters: List[str], boxes: List[tuple],
-                turns: List[bool], page_height: float) -> None:
+                turns: List[bool], origins: List[float], page_height: float) -> None:
     """Turn the letters gathered so far into a Word (box = union of its letters), then reset.
 
     A word none of whose letters has a box keeps its text, placed as a
     zero-size box where the previous word ended, so text is never lost. The
     word is `rotated` when most of its letters are turned; None when PDFium
-    gave no angle for any of them.
+    gave no angle for any of them. Its `baseline` is its FIRST letter's
+    origin (top-left coordinates), so a raised or lowered character later in
+    the word does not move it: "R2" and "Rbp" sit where their R sits. Both
+    alternatives were measured and failed: the median put "R2" halfway to its
+    subscript, and the most common origin put "Rbp" ON its subscript; either
+    way the word left its line ("... in the R2 position" split in two, NMR
+    Fig. 5). A word that STARTS raised (a bare superscript citation) is a true
+    fragment, folded back by `figure_label_pass`. None when PDFium gave none.
     """
+    baseline = (page_height - origins[0]) if origins else None
     rotated = (sum(turns) > len(turns) / 2) if turns else None
     if letters:
         if boxes:
@@ -340,10 +463,32 @@ def _close_word(words: List[Word], letters: List[str], boxes: List[tuple],
             rect = Rect(last.x1, last.y0, last.x1, last.y1)
         else:
             rect = Rect(0.0, 0.0, 0.0, 0.0)
-        words.append(Word(text="".join(letters), rect=rect, rotated=rotated))
+        words.append(Word(text="".join(letters), rect=rect, rotated=rotated,
+                          baseline=baseline))
     letters.clear()
     turns.clear()
     boxes.clear()
+    origins.clear()
+
+
+def _text_object_text(obj, text_page) -> str:
+    """
+    The text PDFium extracts from one text object ("" when it extracts none).
+
+    Called twice on purpose: once with no buffer to learn the length (in
+    UTF-16 units, including the terminating zero), then to fill the buffer.
+    """
+    try:
+        length = pdfium_raw.FPDFTextObj_GetText(obj.raw, text_page.raw, None, 0)
+        if length <= 1:
+            return ""
+        buffer = ctypes.create_string_buffer(length * 2)
+        pdfium_raw.FPDFTextObj_GetText(
+            obj.raw, text_page.raw,
+            ctypes.cast(buffer, ctypes.POINTER(pdfium_raw.FPDF_WCHAR)), length)
+    except Exception:                                       # pragma: no cover
+        return ""
+    return buffer.raw.decode("utf-16-le", errors="replace").rstrip("\x00")
 
 
 def _object_bounds(obj) -> tuple:

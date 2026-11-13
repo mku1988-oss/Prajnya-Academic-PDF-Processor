@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import logging
 import re
+import statistics
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -112,6 +113,28 @@ ORNAMENT_PREFIX = re.compile(
 #: structure p16 "Figure 10", Silberbush p3 "Figure 2": eval/word_boxes/GATE.md).
 COLUMN_GAP_HEIGHTS = 1.5
 
+#: Words whose BASELINES are within this distance of the row's first word
+#: share a row, when the backend reports baselines (see `_row_level`). On one
+#: printed line they agree exactly; two column grids differ by >= 2 pt
+#: (book p21: 2.05), and a bold label set a third of a point off still joins.
+BASELINE_TOLERANCE_PT = 1.0
+
+#: A run whose baseline is less than this fraction of the line's text height
+#: from a line's baseline, inside its span, is a superscript or subscript of
+#: that line (`_is_fragment_of`). The next line is a full pitch (> 1.0) away.
+FRAGMENT_BASELINE_SHIFT = 0.5
+
+#: Words whose box tops are within this distance of the row's first word
+#: share a row (before columns are split), when baselines are unknown.
+ROW_TOLERANCE_PT = 3.0
+
+#: A narrow gutter: a gap wider than this many text heights (an ordinary word
+#: space is ~0.3) between words whose tops differ by more than
+#: `GRID_SHIFT_PT` is a column boundary. Springer's side captions: 11.4 pt
+#: gutter at ~10 pt text, baselines 2.05 pt off the body's.
+GRID_GAP_HEIGHTS = 0.6
+GRID_SHIFT_PT = 1.5
+
 
 @dataclass(frozen=True)
 class LabelLine:
@@ -166,6 +189,20 @@ class LabelAssignment:
     opening: str = ""
 
 
+def label_words(page) -> List[tuple]:
+    """
+    The page's upright words as `build_text_lines` takes them.
+
+    `(text, x0, y0, x1, y1, baseline)`. Rotated words (the "Downloaded from"
+    stamp down the margin) are not caption text, and one sitting beside a
+    caption ended it after its first line (eval/word_boxes/GATE.md,
+    Addendum 5), so they are left out here, once, for every caller.
+    """
+    from src.processing.pdf.base import looks_horizontal
+    return [(w.text, w.rect.x0, w.rect.y0, w.rect.x1, w.rect.y1, w.baseline)
+            for w in page.words() if looks_horizontal(w)]
+
+
 def build_text_lines(words: Sequence[Tuple[str, float, float, float, float]],
                      page_width: float,
                      ) -> List[Tuple[str, float, float, float, float]]:
@@ -181,8 +218,22 @@ def build_text_lines(words: Sequence[Tuple[str, float, float, float, float]],
     and then split wherever a horizontal gap is wide enough to be a column
     boundary.
 
+    Two splits, because columns are told apart in two ways:
+
+    1. a gap wider than `COLUMN_GAP_HEIGHTS` text heights (a normal gutter);
+    2. a gap wider than an ordinary word space (`GRID_GAP_HEIGHTS`) whose two
+       sides sit on DIFFERENT LINE GRIDS (box tops more than `GRID_SHIFT_PT`
+       apart). This is a narrow gutter: Springer prints figure captions in a
+       side column 11.4 pt from the body text, and the caption's baselines
+       run 2 pt off the body's (book p21, "Fig. 2.3").
+
+    A printed line whose words straddle the row tolerance (its first words in
+    one row, the rest in the next) is then rejoined: see
+    `_rejoin_straddling_lines`.
+
     Args:
-        words: `(text, x0, y0, x1, y1)` per word, in page units.
+        words: `(text, x0, y0, x1, y1)` per word, in page units, optionally
+            with a sixth element, the word's baseline (`label_words`).
         page_width: the page's width. Kept for its callers; since v6.4.0 the
             column gap is measured in text heights (`COLUMN_GAP_HEIGHTS`).
 
@@ -192,24 +243,9 @@ def build_text_lines(words: Sequence[Tuple[str, float, float, float, float]],
     if not words:
         return []
 
-    ordered = sorted(words, key=lambda w: (round(w[2], 1), w[1]))
-    rows: List[List[Tuple[str, float, float, float, float]]] = []
-    current: List[Tuple[str, float, float, float, float]] = []
-    top: Optional[float] = None
-
-    for word in ordered:
-        if top is None or abs(word[2] - top) <= 3.0:
-            current.append(word)
-            top = word[2] if top is None else top
-        else:
-            rows.append(current)
-            current, top = [word], word[2]
-    if current:
-        rows.append(current)
-
-    lines: List[Tuple[str, float, float, float, float]] = []
-    for row in rows:
-        # Reading order is left-to-right, and the grouping above cannot supply
+    rows_of_runs = []
+    for row in _group_rows(words):
+        # Reading order is left-to-right, and the grouping cannot supply
         # it: words are sorted by (y, x) globally, so a word sitting a third
         # of a point lower than its neighbours sorts AFTER all of them. A bold
         # "Fig. 1" set slightly off the baseline of its own caption therefore
@@ -217,16 +253,25 @@ def build_text_lines(words: Sequence[Tuple[str, float, float, float, float]],
         # label, and the whole scan misses it. Measured: this alone accounted
         # for 35 of the 50 trusted captions being lost.
         row = sorted(row, key=lambda w: w[1])
-        run = [row[0]]
+        runs, run = [], [row[0]]
         for previous, word in zip(row, row[1:]):
-            taller = max(previous[4] - previous[2], word[4] - word[2])
-            if word[1] - previous[3] > COLUMN_GAP_HEIGHTS * taller:
-                lines.append(_as_line(run))
+            if _starts_new_column(previous, word):
+                runs.append(run)
                 run = [word]
             else:
                 run.append(word)
-        lines.append(_as_line(run))
-    return lines
+        runs.append(run)
+        rows_of_runs.append(runs)
+
+    _rejoin_straddling_lines(rows_of_runs)
+    if _uses_baselines(rows_of_runs):
+        # Grouped by baseline, a superscript or subscript ("NH3+", the ring
+        # of a split "A˚") sits on its own baseline and forms a row of its
+        # own; fold it back into the line it is printed inside. ANY row, not
+        # only the next one: on a two-column page the rows of the two columns
+        # interleave, so a fragment's own line is often two rows away.
+        _absorb_fragments(rows_of_runs)
+    return [_as_line(run) for runs in rows_of_runs for run in runs]
 
 
 def find_label_lines(lines: Sequence[Tuple[str, float, float, float, float]]
@@ -274,6 +319,11 @@ CAPTION_LINE_GAP = 1.8
 #: hanging first line.
 CAPTION_MARGIN_TOLERANCE = 12.0
 
+#: A line this short (non-space characters) inside a caption is a stray symbol
+#: split from its line (a degree sign, a minus in a symbol font), stepped over
+#: when typography decides where the caption ends.
+FRAGMENT_MAX_CHARS = 3
+
 #: A caption longer than this many lines is not a caption -- the walk has run
 #: into body text. Measured: the longest real caption in the 9-document corpus
 #: is 21 lines (the tendon volume's Fig. 3.5), so this leaves generous room
@@ -284,6 +334,7 @@ MAX_CAPTION_LINES = 40
 def harvest_caption_block(
     label_line: LabelLine,
     lines: Sequence[Tuple[str, float, float, float, float]],
+    typography=None,
 ) -> str:
     """
     Read a whole caption out of the text layer, not just its first line.
@@ -305,12 +356,24 @@ def harvest_caption_block(
     * a left margin outside `CAPTION_MARGIN_TOLERANCE` -- a different column
       or a different element;
     * a line that begins a caption of its OWN -- the next figure;
-    * `MAX_CAPTION_LINES`, so a page whose layout defeats all three cannot
+    * a line set in the document's BODY type, when `typography` is given --
+      the article resuming right after the caption, at the same spacing and
+      margin, which none of the geometric stops can see (see
+      `utils/text_style.py`; 9 captions in the corpus ran on into body prose
+      without it);
+    * `MAX_CAPTION_LINES`, so a page whose layout defeats all of these cannot
       swallow the rest of the article.
+
+    With `typography`, a stray symbol line (`FRAGMENT_MAX_CHARS` or fewer,
+    such as a degree sign split from its number) is stepped over. Without it
+    such a line still stops the walk, because there it was sometimes the only
+    thing ending a caption before body text (Collagen structure Fig. 7).
 
     Args:
         label_line: the caption's opening line, from `find_label_lines`.
         lines: every text line on the page, as `build_text_lines` returns them.
+        typography: a `text_style.PageTypography` for this page, or None to
+            use the geometric stops alone.
 
     Returns:
         The caption as one space-joined string, beginning at its label. Never
@@ -320,6 +383,7 @@ def harvest_caption_block(
     left = label_line.rect[0]
     collected = [label_line.text]
     previous = label_line.rect
+    caption_style = typography.style_in(label_line.rect) if typography else None
 
     for text, x0, y0, x1, y1 in _lines_below(label_line, lines):
         if _horizontal_overlap(label_line.rect, (x0, y0, x1, y1)) == 0.0:
@@ -329,6 +393,12 @@ def harvest_caption_block(
             # fused the two columns into one line (eval/word_boxes/GATE.md,
             # Addendum 5a).
             continue
+        if typography is not None:
+            if len(text.replace(" ", "")) <= FRAGMENT_MAX_CHARS:
+                continue                            # a stray symbol, not a line
+            if typography.is_body_text(typography.style_in((x0, y0, x1, y1)),
+                                       caption_style):
+                break                               # the article resumes
         if y0 - previous[3] > (y1 - y0) * CAPTION_LINE_GAP:
             break                                   # a new paragraph begins
         if abs(x0 - left) > CAPTION_MARGIN_TOLERANCE:
@@ -359,6 +429,7 @@ def assign_labels_on_page(
     page_height: float,
     logger: Optional[logging.Logger] = None,
     text_lines: Optional[Sequence[Tuple[str, float, float, float, float]]] = None,
+    typography=None,
 ) -> List[LabelAssignment]:
     """
     Attach each figure crop on a page to the caption it belongs to.
@@ -379,6 +450,8 @@ def assign_labels_on_page(
             given, each assignment carries the WHOLE caption rather than only
             its first line — see `harvest_caption_block`. Omitting it keeps
             the first-line-only behaviour, which is all the geometry needs.
+        typography: passed to `harvest_caption_block`, so a caption ends
+            where the article's body type resumes.
 
     Returns:
         One `LabelAssignment` per crop, in the order the crops were given.
@@ -403,7 +476,7 @@ def assign_labels_on_page(
             assignments.append(LabelAssignment(None, None, "", 0, float("inf")))
             continue
         line, gap = pick
-        caption = (harvest_caption_block(line, text_lines)
+        caption = (harvest_caption_block(line, text_lines, typography)
                    if text_lines is not None else line.text)
         assignments.append(LabelAssignment(
             printed=line.printed, key=line.key, caption=caption,
@@ -700,6 +773,138 @@ def _a_caption_lies_between(upper: Sequence[float], lower: Sequence[float],
                 _horizontal_overlap(upper, line.rect) >= MIN_HORIZONTAL_OVERLAP):
             return True
     return False
+
+
+def _group_rows(words: Sequence[Tuple[str, float, float, float, float]]
+                ) -> List[List[Tuple[str, float, float, float, float]]]:
+    """
+    Words at the same height, as rows (columns are separated afterwards).
+
+    A word joins the current row when its top is within `ROW_TOLERANCE_PT` of
+    the row's FIRST word (in top order). Chaining from the previous word was
+    tried (2026-11-13) and REJECTED: it completed three truncated captions
+    but ran four others on into body prose (eval/pypdfium5/FINDINGS.md).
+    """
+    level, tolerance = _row_level(words)
+    ordered = sorted(words, key=lambda w: (round(level(w), 1), w[1]))
+    rows: List[List[Tuple[str, float, float, float, float]]] = [[ordered[0]]]
+    anchor = level(ordered[0])
+    for word in ordered[1:]:
+        if level(word) - anchor <= tolerance:
+            rows[-1].append(word)
+        else:
+            rows.append([word])
+            anchor = level(word)
+    return rows
+
+
+def _row_level(words: Sequence[tuple]):
+    """
+    What "the same height" means: the BASELINE when every word carries one.
+
+    Box tops depend on each font's ascent, so on one printed line a degree
+    sign, a symbol-font minus or a bold label start up to ~2.6 pt higher than
+    their neighbours (pypdfium2 5.x). Against a fixed 3 pt tolerance that made
+    row membership a coin flip, and a line cut in two ends its caption early.
+    Baselines are exact on a line, whatever the fonts (Collagen structure p4:
+    tops 388.0-392.3, baseline 395.69 for every word), and identical under
+    pypdfium2 4.30 and 5.x. Words without a baseline (PyMuPDF, hand-built
+    tuples) keep the box-top rule.
+
+    Returns:
+        (a function giving a word's level, the tolerance for one row).
+    """
+    if words and all(len(w) > 5 and w[5] is not None for w in words):
+        return (lambda w: w[5]), BASELINE_TOLERANCE_PT
+    return (lambda w: w[2]), ROW_TOLERANCE_PT
+
+
+def _uses_baselines(rows_of_runs: List[List[list]]) -> bool:
+    """True when the words carry baselines (see `_row_level`)."""
+    return all(len(w) > 5 and w[5] is not None
+               for runs in rows_of_runs for run in runs for w in run)
+
+
+def _starts_new_column(previous: Tuple[str, float, float, float, float],
+                       word: Tuple[str, float, float, float, float]) -> bool:
+    """
+    Does `word` begin a different column from `previous` (its left neighbour)?
+
+    Yes for a gutter-wide gap, or for a gap wider than a word space between
+    two different line grids. A superscript touches its word, and a word in
+    another font on the same line differs in top by well under a point, so
+    neither is split.
+    """
+    taller = max(previous[4] - previous[2], word[4] - word[2])
+    gap = word[1] - previous[3]
+    if gap > COLUMN_GAP_HEIGHTS * taller:
+        return True
+    other_grid = abs(word[2] - previous[2]) > GRID_SHIFT_PT
+    return gap > GRID_GAP_HEIGHTS * taller and other_grid
+
+
+def _rejoin_straddling_lines(rows_of_runs: List[List[list]]) -> None:
+    """
+    Rejoin a printed line that the row tolerance cut in two (in place).
+
+    Rows are cut at a fixed distance from their first word, so a line whose
+    words sit near that edge can be split: on book p21 (pypdfium2 5.x) the
+    caption's "Fig. 2.3" joined the body line's row, 2.6 pt above, while
+    "FACIT collagens ..." (3.08 pt) started the next row. Once the grid-shift
+    split has separated "Fig. 2.3" from the body text, the two halves are
+    rejoined when the second starts right after the first (no wider than a
+    word space) on the same grid (tops within `GRID_SHIFT_PT`).
+    """
+    for upper, lower in zip(rows_of_runs, rows_of_runs[1:]):
+        for run in upper:
+            last = run[-1]
+            for index, candidate in enumerate(lower):
+                if _continues_line(last, candidate[0]):
+                    run.extend(lower.pop(index))
+                    break
+
+
+def _absorb_fragments(rows_of_runs: List[List[list]]) -> None:
+    """Move every run that is a fragment of a line in another row into that line."""
+    for row in rows_of_runs:
+        for run in list(row):
+            host = next((line for other in rows_of_runs if other is not row
+                         for line in other if _is_fragment_of(run, line)), None)
+            if host is not None:
+                host.extend(run)
+                host.sort(key=lambda w: w[1])
+                row.remove(run)
+
+
+def _is_fragment_of(run: list, line: list) -> bool:
+    """
+    True when `run` is printed INSIDE `line`: a superscript or subscript.
+
+    Shorter than the line, within its horizontal span, and on a baseline
+    less than `FRAGMENT_BASELINE_SHIFT` of the line's text height away from
+    the line's own. Raised and lowered characters sit 2-3 pt off their line;
+    the next line of text sits a whole line pitch away. **Box overlap was
+    tried first and failed**: under pypdfium2 5.x a symbol such as "H···O"
+    has a box tall enough to reach over the next line, which was then
+    folded into it (Collagen structure Fig. 5).
+    """
+    if len(run) >= len(line):
+        return False
+    left, right = run[0][1], max(w[3] for w in run)
+    if left < line[0][1] or right > max(w[3] for w in line):
+        return False
+    height = statistics.median(w[4] - w[2] for w in line)
+    shift = abs(statistics.median(w[5] for w in run) - statistics.median(w[5] for w in line))
+    return shift < FRAGMENT_BASELINE_SHIFT * height
+
+
+def _continues_line(last: Tuple[str, float, float, float, float],
+                    first: Tuple[str, float, float, float, float]) -> bool:
+    """True when `first` is the next word after `last` on one printed line."""
+    taller = max(last[4] - last[2], first[4] - first[2])
+    gap = first[1] - last[3]
+    same_grid = abs(first[2] - last[2]) <= GRID_SHIFT_PT
+    return same_grid and -1.0 <= gap <= GRID_GAP_HEIGHTS * taller
 
 
 def _as_line(run):
