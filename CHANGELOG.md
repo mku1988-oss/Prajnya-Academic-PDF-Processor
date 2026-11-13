@@ -6,6 +6,77 @@ it in `document_info.pipeline_version`.
 
 ---
 
+## 6.4.0
+
+### Setup
+
+- **Tested with llama.cpp build b12035.** llama.cpp 1.0.0 (13 November 2026)
+  rejects some vision-projector files at load that earlier builds accepted
+  (llama.cpp PRs #32129 and #32130). Prajnya's three OCR projectors were
+  checked against those rules on file and appear to comply, but they have not
+  yet been loaded on 1.0.0; until then, stay on a build before it.
+
+- **The model server's default port is now 9931, not 8080.** llama-server
+  has used 9931 as its own default since build b11541 (10 October 2026), so a
+  server started without `--port` was no longer where Prajnya looked.
+  `run_llama_server.py` and `config/research_article_strategy.yaml` both
+  change, and a test now checks that the two agree. **If you start
+  llama-server yourself with `--port 8080`, either drop that flag or set
+  `vlm_provider.local_server.port` and `api_endpoint` back to 8080.**
+
+### Fixed
+
+- **A fresh install of 6.3.0 could not process any page.** The requirements
+  allowed any pypdfium2 from 4.24 up, so a new install received 5.x, which
+  renamed a method the page classifier calls on every page. Prajnya now works
+  with either name, and pypdfium2 is pinned below 5: version 5's newer PDFium
+  also reads text differently (on a book's contents page it drops the dots
+  and the space before each page number, so "Life . . . 45" becomes
+  "Life45"), which needs measuring before it is adopted.
+
+- **Word positions from the PDF are now exact.** The text layer's word boxes
+  were estimated by dividing each run of text evenly among its words, which
+  erased the gaps between them and, where runs overlapped, repeated characters
+  (1,922 on 240 of the corpus's 505 pages: "NiNi" for "Ni", "fifi" for the fi
+  ligature). They are now built from each character's own box, and match
+  PyMuPDF's exact boxes closely (median overlap 0.90, was 0.66). Caption text,
+  figure labels and region text read from the page no longer carry doubled
+  characters.
+- **Figure captions beside a column of prose are found again.** The caption
+  scan split a line into two columns only at a gap of 6% of the page width,
+  wider than a real two-column gutter, so on some pages a caption ran into the
+  neighbouring column's prose and its label was missed. The split is now
+  measured in text heights. Corpus: 3 figure labels gained, none lost.
+- **More figure captions are read in full.** Rotated text in a page margin
+  (a journal's "Downloaded from ..." stamp) and lines from the neighbouring
+  column no longer cut a caption short. On the corpus, 13 captions that used
+  to stop after their first line are now read further. Known issue: on 3 of
+  them the caption runs on into the first lines of the next paragraph, and a
+  caption printed in two columns can come back with its lines interleaved.
+- **Short words are no longer mistaken for rotated text.** Whether a word is
+  rotated now comes from the PDF's own character angles instead of the shape
+  of its box, which dropped words such as "of" and sent 26 prose pages to
+  the slower model read for no reason. The corpus run is 3% faster than 6.3.0.
+- **The check that sends a page for a table re-read is honest again.** It
+  credited a "missing" word if the word appeared anywhere inside another word
+  of the reading, so a page could lose 40% of its words and still pass. It
+  now credits only real ligature and hyphenation splits (including PDFium's
+  own line-end hyphen and a ligature that kept only its first letter).
+
+### Output format
+
+- **The output JSON now has a written contract.** `contract/` holds a JSON
+  Schema and a one-page explanation of what a program reading our files may
+  rely on, and `document_info.contract_version` (currently `1.0`) says which
+  version a file follows. Nothing about the existing shape changed: the schema
+  describes the files 6.3.0 already wrote, and a test checks it against all of
+  them. Things the shape alone did not say are now written down, among them
+  that chapter `page_range` counts from zero while `page_number` counts from
+  one, that figure boxes are in pixels but heading boxes are in PDF points,
+  and that two `processing_method` values mean the page's read **failed**.
+
+---
+
 ## 6.3.0
 
 ### Tables

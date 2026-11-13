@@ -97,12 +97,20 @@ ORNAMENT_PREFIX = re.compile(
     "]+"
 )
 
-#: Words further apart than this (as a fraction of page width) are in
+#: Words further apart than this many times the taller word's height are in
 #: DIFFERENT COLUMNS, not the same line. Without this, a two-column paper
 #: interleaves both columns into one line at each y, and a caption starting
 #: "Fig. 1 …" is prefixed with the neighbouring column's prose — so it no
 #: longer starts with a label and vanishes from the scan.
-COLUMN_GAP_FRACTION = 0.06
+#:
+#: The same factor `pdf.base.group_words_into_lines` uses: word gaps are about
+#: 0.3x the text height, column gutters 1.5-2x. **Until v6.4.0 this was 6% of
+#: the page width, 35.7 pt on an A4-wide page, while a two-column gutter is
+#: about 18 pt, so the split never fired there.** Captions were found anyway
+#: only because the old, gap-erasing word boxes happened to put the two
+#: columns' lines into different rows; exact boxes exposed it (Collagen
+#: structure p16 "Figure 10", Silberbush p3 "Figure 2": eval/word_boxes/GATE.md).
+COLUMN_GAP_HEIGHTS = 1.5
 
 
 @dataclass(frozen=True)
@@ -175,7 +183,8 @@ def build_text_lines(words: Sequence[Tuple[str, float, float, float, float]],
 
     Args:
         words: `(text, x0, y0, x1, y1)` per word, in page units.
-        page_width: the page's width, which sets the column-gap threshold.
+        page_width: the page's width. Kept for its callers; since v6.4.0 the
+            column gap is measured in text heights (`COLUMN_GAP_HEIGHTS`).
 
     Returns:
         `(text, x0, y0, x1, y1)` per line, top-to-bottom then left-to-right.
@@ -198,7 +207,6 @@ def build_text_lines(words: Sequence[Tuple[str, float, float, float, float]],
     if current:
         rows.append(current)
 
-    column_gap = page_width * COLUMN_GAP_FRACTION
     lines: List[Tuple[str, float, float, float, float]] = []
     for row in rows:
         # Reading order is left-to-right, and the grouping above cannot supply
@@ -211,7 +219,8 @@ def build_text_lines(words: Sequence[Tuple[str, float, float, float, float]],
         row = sorted(row, key=lambda w: w[1])
         run = [row[0]]
         for previous, word in zip(row, row[1:]):
-            if word[1] - previous[3] > column_gap:
+            taller = max(previous[4] - previous[2], word[4] - word[2])
+            if word[1] - previous[3] > COLUMN_GAP_HEIGHTS * taller:
                 lines.append(_as_line(run))
                 run = [word]
             else:
@@ -313,10 +322,17 @@ def harvest_caption_block(
     previous = label_line.rect
 
     for text, x0, y0, x1, y1 in _lines_below(label_line, lines):
+        if _horizontal_overlap(label_line.rect, (x0, y0, x1, y1)) == 0.0:
+            # Another column, beside the caption: not part of it, and not a
+            # reason to stop either. Until v6.4.0 such a line ended the
+            # caption; that went unnoticed only because the old line builder
+            # fused the two columns into one line (eval/word_boxes/GATE.md,
+            # Addendum 5a).
+            continue
         if y0 - previous[3] > (y1 - y0) * CAPTION_LINE_GAP:
             break                                   # a new paragraph begins
         if abs(x0 - left) > CAPTION_MARGIN_TOLERANCE:
-            break                                   # another column or element
+            break                                   # a different element in this column
         printed, _ = parse_printed_label(ORNAMENT_PREFIX.sub("", text))
         if printed:
             break                                   # the next figure's caption

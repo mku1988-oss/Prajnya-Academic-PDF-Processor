@@ -58,7 +58,9 @@ WORD_PATTERN = re.compile(r"[A-Za-z]{2,}")
 # Journals hyphenate across line breaks ("measure-\nments"). The text layer
 # preserves the break; the reader reads the printed word whole. Rejoin before
 # comparing, or the reader looks wrong.
-HYPHEN_BREAK_PATTERN = re.compile(r"-\s*\n\s*")
+#: PDFium writes a line-end hyphen as \x02, and some files use the soft
+#: hyphen U+00AD; both are rejoined like "-" (eval/word_boxes/GATE.md, Addendum 4).
+HYPHEN_BREAK_PATTERN = re.compile(r"[-\x02­]\s*\n\s*")
 
 # A page needs some real text before coverage means anything. A figure-only
 # page with six words would swing wildly on a single miss.
@@ -211,10 +213,19 @@ def word_coverage(reference_text: str, ocr_output: str) -> tuple:
     move a caption, and that is not content loss. Only absence is.
 
     Ligature fragments left by the text layer ("signi", "cantly") are credited
-    when they appear inside a word the OCR read correctly ("significantly") —
-    otherwise the reader is punished for being more accurate than its own
-    ground truth. The same fallback absorbs hyphen halves whose line break the
-    geometric reconstruction did not preserve (e.g. across a column boundary).
+    when the OCR read the whole word ("significantly"), or the reader would be
+    punished for being more accurate than its own ground truth. The same rule
+    absorbs the two halves of a word split across a line ("measure" +
+    "ments").
+
+    **Narrowed in v6.4.0, by the researcher's decision.** Until then ANY
+    missing word of three or more letters was credited if it appeared anywhere
+    inside the output ("for" inside "formula", "water" inside "waters"). On
+    the benchmark page with 40% of its words removed that scored 0.903 and
+    did not trip the 0.90 trigger; it used to trip only because junk tokens
+    from the old word boxes could never be matched. Credit is now given only
+    for a real ligature or line split: see `_split_word_credits` and
+    eval/word_boxes/GATE.md (Addendum 3).
 
     Args:
         reference_text: the page's digital text layer
@@ -228,22 +239,85 @@ def word_coverage(reference_text: str, ocr_output: str) -> tuple:
         return 1.0, 0, 0
 
     output_words = [word.lower() for word in WORD_PATTERN.findall(ocr_output)]
+    found = _exact_word_matches(reference_words, output_words)
+    _ligature_credits(reference_words, set(output_words), found)
+    _split_half_credits(reference_words, output_words, found)
 
-    remaining_counts = {}
+    found_count = sum(found)
+    missing = len(reference_words) - found_count
+    return found_count / len(reference_words), len(reference_words), missing
+
+
+#: Glyphs a text layer commonly drops when a font draws them as one ligature.
+LIGATURES = ("", "fi", "fl", "ff", "ffi", "ffl")
+
+
+def _exact_word_matches(reference_words: list, output_words: list) -> list:
+    """Per reference word, whether the output has a copy left to match it (a multiset)."""
+    remaining = {}
     for word in output_words:
-        remaining_counts[word] = remaining_counts.get(word, 0) + 1
-    output_blob = " ".join(output_words)
-
-    found = 0
+        remaining[word] = remaining.get(word, 0) + 1
+    found = []
     for word in reference_words:
-        if remaining_counts.get(word, 0) > 0:
-            remaining_counts[word] -= 1
-            found += 1
-        elif len(word) >= 3 and word in output_blob:
-            found += 1  # ligature fragment absorbed into a correctly-read word
+        if remaining.get(word, 0) > 0:
+            remaining[word] -= 1
+            found.append(True)
+        else:
+            found.append(False)
+    return found
 
-    missing = len(reference_words) - found
-    return found / len(reference_words), len(reference_words), missing
+
+def _ligature_credits(reference_words: list, output_set: set, found: list) -> None:
+    """Credit a missing word whose text layer lost a ligature glyph somewhere inside it.
+
+    Two ways a ligature glyph is lost, both seen in this corpus:
+      - entirely: "nancial" for "financial";
+      - down to its first letter: "modifcations" for "modifications" (the f
+        is kept, the i lost), "infammation" for "inflammation".
+    A missing word is credited when ONE such repair gives a word the output
+    holds (GATE.md Addenda 4 and 4a). Updates `found` in place.
+    """
+    for index, word in enumerate(reference_words):
+        if found[index]:
+            continue
+        found[index] = any(candidate in output_set for candidate in _ligature_repairs(word))
+
+
+def _ligature_repairs(word: str):
+    """Every spelling of `word` with one lost ligature glyph put back."""
+    for cut in range(len(word) + 1):
+        for lig in LIGATURES[1:]:
+            yield word[:cut] + lig + word[cut:]
+        if cut and word[cut - 1] == "f":
+            yield word[:cut] + "i" + word[cut:]
+            yield word[:cut] + "l" + word[cut:]
+
+
+def _split_half_credits(reference_words: list, output_words: list, found: list) -> None:
+    """Credit two missing words that are the halves of one word the output read whole.
+
+    "signi" + "cantly" -> "significantly" (a ligature lost at the split),
+    "colla" + "gens" -> "collagens" (a word hyphenated across a line). The
+    halves need not be neighbours in the reference: two columns' lines are
+    interleaved there, so a hyphen's halves often are not. Both halves must
+    be missing, and they must join EXACTLY into an output word.
+    Updates `found` in place.
+    """
+    missing = {}
+    for index, word in enumerate(reference_words):
+        if not found[index]:
+            missing.setdefault(word, []).append(index)
+    for whole in set(output_words):
+        for cut in range(2, len(whole) - 1):
+            for lig in LIGATURES:
+                head, rest = whole[:cut], whole[cut:]
+                if not rest.startswith(lig):
+                    continue
+                tail = rest[len(lig):]
+                enough = len(missing.get(head, [])) > (1 if head == tail else 0)
+                if enough and missing.get(tail):
+                    found[missing[head].pop()] = True
+                    found[missing[tail].pop()] = True
 
 
 def check_page_for_content_drop(

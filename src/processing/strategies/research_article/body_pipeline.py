@@ -46,7 +46,7 @@ from ...layout.vlm_detector import GroundingSpec, VlmGroundingDetector
 from ...models import ContentPage
 from ...events import emit
 from ...paths import REPO_ROOT, anchor_output_path
-from ...pdf.base import PdfPage
+from ...pdf.base import PdfPage, looks_horizontal
 from ...utils.caption_overleaf import (
     NEIGHBOUR_OFFSETS,
     recover_overleaf_captions,
@@ -193,7 +193,7 @@ class BodyPipeline:
             return None
 
         base_url = (f"http://{local_cfg.get('host', 'localhost')}:"
-                    f"{local_cfg.get('port', 8080)}")
+                    f"{local_cfg.get('port', 9931)}")
         router = RouterClient(base_url, logger=log)
 
         escalation_detector, escalation_models = cls._build_escalation_detector(
@@ -643,7 +643,7 @@ class BodyPipeline:
                     continue                    # past the end of the document
                 width, _ = page.size
                 words = [(w.text, w.rect.x0, w.rect.y0, w.rect.x1, w.rect.y1)
-                         for w in page.words()]
+                         for w in page.words() if looks_horizontal(w)]
                 label_lines_by_page[page_number] = find_label_lines(
                     build_text_lines(words, width))
 

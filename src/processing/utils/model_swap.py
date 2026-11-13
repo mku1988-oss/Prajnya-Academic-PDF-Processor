@@ -43,7 +43,7 @@ class RouterClient:
     A thin, poll-correct client for the llama-server model-management API.
 
     Usage (model names come from the caller's config, shown here as placeholders):
-        router = RouterClient("http://localhost:8080")
+        router = RouterClient("http://localhost:9931")
         router.set_resident([reader_model, layout_model])   # Phase A: co-resident readers
         ... run extraction + layout calls ...
         router.set_resident([understanding_model])          # Phase B: one swap, exclusive
@@ -52,7 +52,7 @@ class RouterClient:
     def __init__(self, base_url: str, logger: Optional[logging.Logger] = None):
         """
         Args:
-            base_url: root URL of the running router, e.g. "http://localhost:8080" (no trailing
+            base_url: root URL of the running router, e.g. "http://localhost:9931" (no trailing
                 path). The /models and /v1/models endpoints hang off this.
             logger: optional logger; a module logger is used if omitted.
         """

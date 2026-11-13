@@ -62,12 +62,12 @@ task_registry:
   table_desc: table_description
   title_detection: title_page_detection
 vlm_provider:
-  api_endpoint: http://localhost:8080/v1/chat/completions
+  api_endpoint: http://localhost:9931/v1/chat/completions
   local_server:
     enabled: true
     backend: router_mode
     host: localhost
-    port: 8080
+    port: 9931
     timeout: 300
     model_profiles: config/vlm_profiles/model.ini
     models_max: 1

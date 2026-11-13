@@ -103,8 +103,8 @@ FAQ_ITEMS: List[Dict[str, str]] = [
              "project's Python. It serves at http://127.0.0.1:8850 and opens a "
              "browser tab for you. Useful flags: --port to move it, --no-browser "
              "to skip opening a tab, --verbose for detailed logs. The port is "
-             "8850 rather than the more usual 8080 because 8080 is the model "
-             "server's — if the port you ask for is already busy, the launcher "
+             "8850 so that it stays clear of the model server, which uses 9931 "
+             "— if the port you ask for is already busy, the launcher "
              "says so and stops rather than starting and quietly serving "
              "nothing.",
     },

@@ -7,7 +7,7 @@ That one processes a paper and prints to the terminal; this one opens a
 window in your browser where you can pick a folder, watch a batch run, read
 the results, review flagged metadata, and change which AI model does what.
 
-    run_prajnya_studio.py                    open it, default port 8080
+    run_prajnya_studio.py                    open it, default port 8850
     run_prajnya_studio.py --port 8973        use a different port
     run_prajnya_studio.py --no-browser       start the server, don't open a tab
     run_prajnya_studio.py --verbose          DEBUG logging
@@ -117,10 +117,10 @@ import socket
 
 DEFAULT_HOST = "127.0.0.1"
 
-#: NOT 8080, and not any of the obvious neighbours. **The local llama-server
-#: — the thing this whole pipeline talks to — listens on 127.0.0.1:8080**
+#: NOT 9931 (nor 8080), and not any of the obvious neighbours. **The local llama-server
+#: — the thing this whole pipeline talks to — listens on 127.0.0.1:9931**
 #: (see CLAUDE.md, "Running things", and the offline-verification grep for
-#: `localhost:8080`). Defaulting the GUI there means the GUI cannot start on
+#: `localhost:9931`; it was 8080 before v6.4.0). Defaulting the GUI there means the GUI cannot start on
 #: exactly the machine that is set up correctly to run it. Also taken on this
 #: machine: 8765 and 8767 (SLM's dashboard), 9080. 8850 is clear of all of
 #: them and of the usual 8000/8888/3000/5000 crowd.

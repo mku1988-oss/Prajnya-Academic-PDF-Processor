@@ -2,7 +2,7 @@
 
 ### Scientific PDF Processing Engine
 
-![Status](https://img.shields.io/badge/Status-Production%20Ready-green?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.3.0-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Production%20Ready-green?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.4.0-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge)
 
 ---
 
@@ -215,7 +215,7 @@ slower, with identical output.
 
 `run_prajnya_studio.py` opens the graphical interface in your browser, at
 `http://127.0.0.1:8850` (`--port` to change it, `--no-browser` to not open a
-tab). The default is 8850 rather than 8080 because 8080 is the model server's.
+tab). The default is 8850, clear of the model server's port (9931).
 
 | screen | shortcut | what it is for |
 |---|---|---|
@@ -542,7 +542,7 @@ If you use Prajnya in your research, please cite:
   title   = {Prajnya: A Scientific PDF Processing Engine},
   author  = {Manu Unni},
   year    = {2026},
-  version = {6.3.0},
+  version = {6.4.0},
   url     = {https://github.com/mku1988-oss/Prajnya-Academic-PDF-Processor}
 }
 ```

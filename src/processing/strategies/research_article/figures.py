@@ -29,7 +29,7 @@ from PIL import Image
 
 from ...events import emit
 from ...layout.base import Detection
-from ...pdf.base import PdfPage, Rect
+from ...pdf.base import PdfPage, Rect, looks_horizontal
 from ...utils.content_drop_check import is_scanned_page
 from ...utils.text_normalization import normalize_harvested_text
 from ...utils.figure_extractor import FigureAsset, extract_and_save_figures, safe_doc_id
@@ -137,8 +137,11 @@ def attach_printed_labels(
     try:
         width, height = page.size
         scale = width / page_image.width if page_image.width else 1.0
+        # Rotated words (the "Downloaded from ..." stamp down the margin) are
+        # not caption text, and one sitting beside a caption ended it after
+        # its first line (eval/word_boxes/GATE.md, Addendum 5).
         words = [(w.text, w.rect.x0, w.rect.y0, w.rect.x1, w.rect.y1)
-                 for w in page.words()]
+                 for w in page.words() if looks_horizontal(w)]
         text_lines = build_text_lines(words, width)
         label_lines = find_label_lines(text_lines)
         boxes = [tuple(value * scale for value in asset.bbox) for asset in assets]

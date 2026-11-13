@@ -298,7 +298,7 @@ class UniversalConfig(BaseModel):
     those coercions unnecessary.
     """
 
-    api_endpoint: str = "http://localhost:8080/v1/chat/completions"
+    api_endpoint: str = "http://localhost:9931/v1/chat/completions"
     timeout_seconds: int = 900  # generous: complex two-shot tasks are slow, not hung
     default_model: str = "olmocr-7b"
     fallback_model: str = "numarkdown-8b"

@@ -113,10 +113,17 @@ class Rect:
 
 @dataclass(frozen=True)
 class Word:
-    """A single word with its bounding box, in the interface's coordinates."""
+    """A single word with its bounding box, in the interface's coordinates.
+
+    `rotated` is True for a word typeset at a quarter turn (the "Downloaded
+    from ..." stamp down a journal's margin, a sideways table), False for an
+    upright one, and None when the backend cannot say. Set from the PDF's own
+    character angles where the backend has them; see `looks_horizontal`.
+    """
 
     text: str
     rect: Rect
+    rotated: Optional[bool] = None
 
 
 @dataclass(frozen=True)
@@ -346,7 +353,14 @@ def looks_horizontal(word: Word) -> bool:
     https://..." stamp many journals print down the outer margin) is taller
     than it is wide. Single-character words are near-square either way, so they
     get the benefit of the doubt — downstream tokenizers ignore them anyway.
+
+    **The backend's own answer wins when it has one** (`Word.rotated`). The
+    shape rule is a fallback, and it fails on exact font-height boxes: a short
+    upright word such as "of" is 7.6 pt wide and 8.5 pt tall, and was thrown
+    away as marginalia (eval/word_boxes/GATE.md, Addendum 5).
     """
+    if word.rotated is not None:
+        return not word.rotated
     if len(word.text.strip()) < 2:
         return True
     return word.rect.width >= word.rect.height

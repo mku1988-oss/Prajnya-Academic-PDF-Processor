@@ -233,7 +233,7 @@ def main(host: str = "127.0.0.1", port: int = 8850, show: bool = True) -> None:
             reads and writes files anywhere on this machine (it takes a
             folder path as typed, by design), so exposing it to a network
             has to be a deliberate act, not a default.
-        port: TCP port to serve on. Deliberately NOT 8080 — that is the
+        port: TCP port to serve on. Deliberately NOT 9931 — that is the
             local llama-server's port (see run_prajnya_studio.py's
             DEFAULT_PORT note). Running this module directly gets no
             port-in-use check; the launcher is the guarded path.

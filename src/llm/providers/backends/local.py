@@ -4,7 +4,7 @@ The offline transport: HTTP to llama.cpp's OpenAI-compatible endpoint.
 
 For biology researchers: this is how a page image reaches the vision model
 running on this machine. The image becomes base64 text, it is wrapped in a
-JSON message alongside the prompt, and posted to `localhost:8080`. The whole
+JSON message alongside the prompt, and posted to `localhost:9931`. The whole
 V6 performance argument is about making *fewer* of these calls, so this is the
 expensive operation the rest of the pipeline works to avoid.
 

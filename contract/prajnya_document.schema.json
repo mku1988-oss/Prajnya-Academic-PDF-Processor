@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:prajnya:document-contract:1",
+  "title": "Prajnya document JSON",
+  "description": "One file per processed PDF: run_outputs/documents/<name>.v6.json. This schema pins the part other programs may rely on. Keys it does not name (for example pages[].metadata.analysis) are internal and may change in any release. Unknown extra keys are always allowed, so adding a key is never a breaking change. See contract/README.md for the version rules.",
+  "x-contract-version": "1.0",
+  "type": "object",
+  "required": ["document_info", "metadata_final", "pages", "summary", "profile"],
+  "properties": {
+    "document_info": {
+      "type": "object",
+      "required": ["filename", "document_type", "processing_time", "success", "pipeline_version"],
+      "properties": {
+        "filename": {"type": "string"},
+        "document_type": {"enum": ["research_article", "book_chapter", "book"]},
+        "processing_time": {"type": "number", "minimum": 0},
+        "success": {"type": "boolean"},
+        "pipeline_version": {
+          "type": "string",
+          "pattern": "^v\\d+\\.\\d+\\.\\d+$",
+          "description": "The Prajnya release that wrote this file."
+        },
+        "contract_version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+$",
+          "description": "The version of THIS contract the file follows. Absent in files written by Prajnya 6.3.0 or earlier, which follow contract 1.0 in every respect except that they do not say so."
+        },
+        "timings": {"type": "object", "additionalProperties": {"type": "number"}}
+      }
+    },
+    "metadata_final": {
+      "type": "object",
+      "required": ["title", "authors", "year", "doi", "journal", "publisher", "isbn", "editors", "validation_source", "validation_confidence"],
+      "properties": {
+        "title": {"type": ["string", "null"]},
+        "authors": {"type": "array", "items": {"type": "string"}},
+        "year": {"type": ["integer", "null"]},
+        "doi": {"type": ["string", "null"], "description": "Bare DOI, '10.xxxx/...', with no URL prefix."},
+        "journal": {"type": ["string", "null"]},
+        "publisher": {"type": ["string", "null"]},
+        "isbn": {"type": ["string", "null"], "description": "10 or 13 digits."},
+        "editors": {"type": "array", "items": {"type": "string"}},
+        "validation_source": {"type": ["string", "null"]},
+        "validation_confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+      }
+    },
+    "pages": {
+      "type": "array",
+      "description": "One entry per processed page, in page order.",
+      "items": {"$ref": "#/$defs/page"}
+    },
+    "summary": {
+      "type": "object",
+      "required": ["errors", "page_count", "figure_count"],
+      "properties": {
+        "errors": {"type": "array", "items": {"type": "string"}},
+        "page_count": {"type": "integer", "minimum": 0},
+        "figure_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "profile": {
+      "type": "object",
+      "description": "The un-flattened internal record. Only the two members named here are part of the contract.",
+      "required": ["pdf_path", "processing_result"],
+      "properties": {
+        "pdf_path": {
+          "type": "string",
+          "$comment": "Informational only. This is an ABSOLUTE path on the machine that ran Prajnya. Never open it, never publish it, never rely on it being present."
+        },
+        "processing_result": {
+          "type": "object",
+          "required": ["chapters"],
+          "properties": {
+            "chapters": {"type": "array", "items": {"$ref": "#/$defs/chapter"}}
+          }
+        }
+      }
+    },
+    "review_status": {"type": "string", "description": "Present once the metadata review step has run."},
+    "review_needed_fields": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "page": {
+      "type": "object",
+      "required": ["page_number", "content", "metadata"],
+      "properties": {
+        "page_number": {"type": "integer", "minimum": 1, "description": "1-BASED."},
+        "content": {"type": "string", "description": "The page text, as Markdown. On a model-read page it is the model's reading; on a text-layer page it is the PDF's own text."},
+        "quality_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "processing_method": {
+              "enum": [
+                "pymupdf",
+                "glm_fullpage",
+                "glm_repair",
+                "two_shot_title_page",
+                "gemini_single_pass",
+                "glm_failed",
+                "two_shot_title_failed"
+              ],
+              "description": "What ACTUALLY produced this page's text. 'pymupdf' is the historical name of the text-layer route and is kept for compatibility: the text layer is now read with pypdfium2. 'glm_failed' and 'two_shot_title_failed' mean the read FAILED; metadata.error then holds the reason and content is not a reliable reading. Absent on a book's front-matter pages (a known gap)."
+            },
+            "page_type": {
+              "enum": ["text_only", "simple_visual", "complex_visual", null],
+              "description": "What the page classifier PREDICTED before reading. Where it and processing_method disagree, processing_method is the truth. null on title pages."
+            },
+            "error": {"type": "string", "description": "Present when the page failed; see processing_method."},
+            "figures": {"type": "array", "items": {"$ref": "#/$defs/figure"}},
+            "tables": {"type": "array", "items": {"$ref": "#/$defs/table"}},
+            "headings": {"type": "array", "items": {"$ref": "#/$defs/heading"}},
+            "has_reference_heading": {"type": "boolean"},
+            "reference_density": {"type": "number"},
+            "page_time": {"type": "number", "minimum": 0}
+          }
+        }
+      }
+    },
+    "figure": {
+      "type": "object",
+      "required": ["figure_id", "page", "bbox", "caption", "image_path", "printed_label", "label_key", "panel_group_size"],
+      "properties": {
+        "figure_id": {"type": "string", "description": "Unique within its document, e.g. 'p2_fig1'."},
+        "page": {"type": "integer", "minimum": 1},
+        "bbox": {"$ref": "#/$defs/bbox_page_pixels"},
+        "caption": {"type": "string", "description": "May be empty or wrong: caption capture is a known open weakness."},
+        "image_path": {"type": "string", "description": "Relative to run_outputs/, forward slashes."},
+        "printed_label": {"type": ["string", "null"], "description": "The label as printed, e.g. 'Fig. 9'. null when none was found."},
+        "label_key": {"type": ["string", "null"], "description": "The label normalised so crops of one printed figure share it."},
+        "panel_group_size": {"type": "integer", "minimum": 1, "description": "How many crops share this figure's label."}
+      }
+    },
+    "table": {
+      "type": "object",
+      "required": ["table_id", "page", "bbox", "caption", "image_path", "grid"],
+      "properties": {
+        "table_id": {"type": "string", "description": "Unique within its document, e.g. 'p4_tab2'."},
+        "page": {"type": "integer", "minimum": 1},
+        "bbox": {"$ref": "#/$defs/bbox_page_pixels"},
+        "caption": {"type": "string"},
+        "image_path": {"type": "string", "description": "Relative to run_outputs/, forward slashes."},
+        "grid": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The table rebuilt as rows and cells, written as an HTML <table> string. A cell's text may contain LaTeX math between $...$ delimiters (e.g. '$R_{\\mathrm{b}}(\\mathrm{s}^{-1})$'); a consumer must treat that as math markup, not as prose. Cell text is a model's reading and can contain errors."
+        }
+      }
+    },
+    "heading": {
+      "type": "object",
+      "required": ["text", "bbox", "size_ratio", "weight_ratio", "caps_fraction", "is_bold"],
+      "properties": {
+        "text": {"type": "string"},
+        "bbox": {"$ref": "#/$defs/bbox_pdf_points"},
+        "size_ratio": {"type": "number", "description": "Cap height relative to the body text."},
+        "weight_ratio": {"type": "number"},
+        "caps_fraction": {"type": "number", "minimum": 0, "maximum": 1},
+        "is_bold": {"type": "boolean"}
+      }
+    },
+    "chapter": {
+      "type": "object",
+      "required": ["number", "title", "authors"],
+      "properties": {
+        "number": {"type": ["integer", "null"]},
+        "title": {"type": "string"},
+        "authors": {"type": "array", "items": {"type": "string"}, "description": "THIS chapter's authors, not the book's editors."},
+        "start_page_printed": {"type": ["integer", "null"], "description": "The page number as PRINTED in the book, not a PDF page."},
+        "page_range": {
+          "type": ["array", "null"],
+          "items": {"type": "integer", "minimum": 0},
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "[first, last] PDF pages, 0-BASED, unlike pages[].page_number which is 1-based. Add 1 to each to get page numbers. null when the chapter's boundary was not found (2 of the 17 chapters in the corpus book); the key itself may also be absent."
+        },
+        "page_range_confidence": {"type": ["string", "null"]}
+      }
+    },
+    "bbox_page_pixels": {
+      "type": "array",
+      "items": {"type": "number"},
+      "minItems": 4,
+      "maxItems": 4,
+      "description": "[x0, y0, x1, y1] in PIXELS of the page image Prajnya rendered for detection (not PDF points). Origin top-left."
+    },
+    "bbox_pdf_points": {
+      "type": "array",
+      "items": {"type": "number"},
+      "minItems": 4,
+      "maxItems": 4,
+      "description": "[x0, y0, x1, y1] in PDF POINTS (1/72 inch). A different unit from figure and table boxes in the same file."
+    }
+  }
+}

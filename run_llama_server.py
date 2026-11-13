@@ -4,7 +4,7 @@ Start the local llama-server with this repository as its working directory.
 
 For biology researchers: the pipeline does not contain an AI model. It talks to
 a separate program — `llama-server`, from llama.cpp — which loads the models and
-answers requests on `http://127.0.0.1:8080`. That program has to be running
+answers requests on `http://127.0.0.1:9931`. That program has to be running
 before you process anything. This file starts it correctly.
 
     run_llama_server.py                          start it
@@ -78,8 +78,8 @@ _PATH_KEYS = ("model", "mmproj")
 DEFAULT_MODELS_MAX = 1
 
 #: Where the pipeline expects to find the server. Changing this means changing
-#: `config/research_article_strategy.yaml`'s `router.port` too.
-DEFAULT_PORT = 8080
+#: `config/research_article_strategy.yaml`'s `vlm_provider.local_server.port` too.
+DEFAULT_PORT = 9931
 DEFAULT_HOST = "127.0.0.1"
 
 

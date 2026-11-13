@@ -29,7 +29,16 @@ LOG = logging.getLogger(__name__)
 
 #: Stamped into every document's `document_info`, so an output file says which
 #: pipeline produced it.
-PIPELINE_VERSION = "v6.3.0"
+PIPELINE_VERSION = "v6.4.0"
+
+#: The version of the output FORMAT, which moves independently of the release.
+#: Stamped into `document_info.contract_version`, and pinned against
+#: `contract/prajnya_document.schema.json` (`x-contract-version`) by
+#: `tests/test_output_contract.py`: change one without the other and the
+#: suite fails. Raise the MAJOR number when a consumer's code could break
+#: (a key removed, renamed, retyped, or given a new meaning); raise the MINOR
+#: number for anything purely additive. Rules in `contract/README.md`.
+CONTRACT_VERSION = "1.0"
 
 
 def write_result(profile: DocumentProfile, out_path: Path, elapsed: float,
@@ -100,6 +109,7 @@ def build_document_json(profile: DocumentProfile, elapsed: float,
         "processing_time": elapsed,
         "success": not errors,
         "pipeline_version": PIPELINE_VERSION,
+        "contract_version": CONTRACT_VERSION,
     }
     if timings:
         info["timings"] = dict(timings)
