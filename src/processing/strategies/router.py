@@ -38,7 +38,8 @@ def build_strategy(document_type: Optional[DocumentType], config_root: Path | st
                    chapters: Optional[Sequence[int]] = None,
                    max_body_pages: Optional[int] = None,
                    refresh_metadata: bool = False,
-                   output_root: Optional[Path] = None) -> DocumentStrategy:
+                   output_root: Optional[Path] = None,
+                   citation_level: Optional[str] = None) -> DocumentStrategy:
     """
     Build the strategy for a classified document.
 
@@ -57,6 +58,9 @@ def build_strategy(document_type: Optional[DocumentType], config_root: Path | st
             means `paths.DEFAULT_OUTPUT_ROOT`. Threaded down to `BodyPipeline`
             so that every artefact of one run lands in one place, whatever
             directory the run was launched from.
+        citation_level: a one-run override of `citations.level` in the config
+            (`--citations`). None means the config decides. A book reads no
+            config, so it only records the level; it looks nothing up.
 
     Returns:
         A strategy exposing `process(profile, test_pages_override=None)`.
@@ -82,13 +86,15 @@ def build_strategy(document_type: Optional[DocumentType], config_root: Path | st
 
         return BookChapterStrategy(config_root, pdf_backend=pdf_backend, logger=logger,
                                    refresh_metadata=refresh_metadata,
-                                   output_root=output_root)
+                                   output_root=output_root,
+                                   citation_level=citation_level)
 
     from .research_article.strategy import ResearchArticleStrategy
 
     return ResearchArticleStrategy(config_root, pdf_backend=pdf_backend, logger=logger,
                                    refresh_metadata=refresh_metadata,
-                                   output_root=output_root)
+                                   output_root=output_root,
+                                   citation_level=citation_level)
 
 
 # --- helpers (after the main function, per CLAUDE.md) -----------------------
@@ -126,7 +132,11 @@ def _book_body_pipeline(config_root: Path | str, chapters: Optional[Sequence[int
     pipeline = BodyPipeline.from_config(
         config, ProviderFactory(loader, config, logger=log),
         page_classifier=PageClassifier(title_profile), logger=log,
-        output_root=output_root)
+        output_root=output_root,
+        # Side captions in books come out of the text layer interleaved; the
+        # orphan-caption rescue would hand them to a rescued figure. Articles
+        # and single chapters build their own pipeline and keep the rescue.
+        rescue_orphan_figures=False)
 
     if pipeline is None:
         log.warning("Chapters were requested but the offline body pipeline is not "

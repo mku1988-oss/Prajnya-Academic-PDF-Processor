@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, Field
 
+from .citations.block import build_citations_block
 from .ledger.semantic_ledger import LedgerRecord, SemanticLedger, generate_hash
 
 LOG = logging.getLogger(__name__)
@@ -197,6 +198,7 @@ def build_ledger_record(pdf_path: Path, metadata: Dict[str, Any],
         document_type=_type_name(document_type),
         validation_confidence=assessment.confidence,
         validation_source=str(metadata.get("validation_source") or "vlm"),
+        citation_level=metadata.get("citation_level"),
         requires_review=assessment.requires_review,
         review_needed_fields=list(assessment.missing_fields),
         review_status=assessment.review_status,
@@ -413,6 +415,7 @@ def regenerate_document_json(json_path: Path, record: LedgerRecord,
     payload["review_status"] = record.review_status
     payload["review_needed_fields"] = list(record.review_needed_fields)
     _patch_nested_metadata(payload, record)
+    _refresh_citations_block(payload, record)
 
     try:
         with open(json_path, "w", encoding="utf-8") as handle:
@@ -593,6 +596,32 @@ def _patch_nested_metadata(payload: Dict[str, Any], record: LedgerRecord) -> Non
         return
     result["metadata"] = apply_record_to_metadata(record,
                                                   result.get("metadata") or {})
+
+
+def _refresh_citations_block(payload: Dict[str, Any], record: LedgerRecord) -> None:
+    """
+    Make the `citations` block follow a corrected record.
+
+    The block's label ("Bella, 2016") and its source are DERIVED from the
+    metadata, so a hand correction that changed an author or a year must
+    change them too. Everything else in the block is kept: the level the
+    run used, and (from level `online`) the reference list and its markers,
+    which a metadata correction does not touch.
+
+    A file written before contract 1.1 has no block. It is left without
+    one: this function corrects a document, it does not upgrade its format.
+    """
+    existing = payload.get("citations")
+    if not isinstance(existing, dict):
+        return
+
+    info = payload.get("document_info") or {}
+    file_name = info.get("filename") or record.pdf_filename or ""
+    fresh = build_citations_block(payload.get("metadata_final") or {}, file_name,
+                                  level=existing.get("level"),
+                                  level_set_by=existing.get("level_set_by"))
+    for key in ("metadata_source", "source_label", "cited_by_file_name"):
+        existing[key] = fresh[key]
 
 
 def _record_for(ledger: SemanticLedger, pdf_path: Path,

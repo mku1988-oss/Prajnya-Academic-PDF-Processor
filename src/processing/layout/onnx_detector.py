@@ -122,6 +122,18 @@ class OnnxLayoutDetector:
     def name(self) -> str:
         return "onnx"
 
+    def at_threshold(self, score_threshold: float,
+                     group_panels: bool = False) -> "OnnxLayoutDetector":
+        """
+        The same model with another cut-off, as a separate detector.
+
+        Used by the orphan-figure rescue (`utils/orphan_figures.py`), which
+        trusts weaker boxes ONLY inside a printed caption's band. A new
+        instance, because the cut-off is applied when the output is parsed.
+        """
+        return OnnxLayoutDetector(self._model_path, score_threshold=score_threshold,
+                                  group_panels=group_panels)
+
     @property
     def supports_figures(self) -> bool:
         return True

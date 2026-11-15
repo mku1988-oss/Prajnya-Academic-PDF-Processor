@@ -53,6 +53,7 @@ from ...layout.regions import TableRegion, locate_table_regions
 from ...pdf.base import PdfPage
 from ...utils.figure_extractor import safe_doc_id
 from ...utils.text_normalization import normalize_harvested_text
+from ...utils.table_continuation import ContinuationTracker
 from ...utils.table_orientation import table_read_image
 from ...utils.table_repair import CropReader, RecoveredTable
 from ...utils.table_sections import read_table_with_sections
@@ -124,6 +125,7 @@ def extract_page_tables(
     path_root: Optional[Path] = None,
     logger: Optional[logging.Logger] = None,
     read_table_crop: Optional[CropReader] = None,
+    continuation: Optional[ContinuationTracker] = None,
 ) -> List[TableAsset]:
     """
     Crop and save every table on this page, tagging each with its caption.
@@ -148,6 +150,9 @@ def extract_page_tables(
             its table prompt). A table the repair path did NOT transcribe is
             read with it, so every table leaves with a grid. None keeps the
             old behaviour: such a table's grid stays None.
+        continuation: the document's header carry (`utils/table_continuation.py`).
+            Gives a header-less continuation table the previous page's column
+            headers. None reads every table on its own, as before.
 
     Returns:
         One `TableAsset` per saved table, in page order; [] when none.
@@ -163,6 +168,8 @@ def extract_page_tables(
     out_dir = Path(tables_base_dir) / safe_doc_id(Path(pdf_path).stem)
     out_dir.mkdir(parents=True, exist_ok=True)
     grid_lookup = _grids_by_box(recovered)
+    if continuation is not None:
+        continuation.begin_page(page_idx + 1)
 
     assets: List[TableAsset] = []
     for index, region in enumerate(regions, start=1):
@@ -172,7 +179,8 @@ def extract_page_tables(
                 detections=detections, out_dir=out_dir,
                 page_number=page_idx + 1, index=index,
                 grid=_grid_for(region, grid_lookup, page_image,
-                               read_table_crop, page_idx + 1, log, page),
+                               read_table_crop, page_idx + 1, log, page,
+                               continuation=continuation),
                 path_root=path_root, logger=log,
             ))
         except Exception as error:
@@ -316,6 +324,47 @@ def _grid_for(
     page_number: int,
     logger: logging.Logger,
     page: Optional[PdfPage] = None,
+    continuation: Optional[ContinuationTracker] = None,
+) -> Optional[str]:
+    """
+    A table's transcription, with the previous page's header when it lacks one.
+
+    For biology researchers: a table continued from the previous page often
+    prints no column headers, and the model then loses track of which column is
+    which (ledger T22). When `continuation` says this is such a table, it is
+    read with the header pasted above; in every other case, and whenever that
+    read fails or does not return the header, it is read exactly as before
+    (`_plain_grid`). Either way the table is recorded, so the NEXT page can
+    borrow this one's header.
+    """
+    if continuation is None or read_table_crop is None:
+        return _plain_grid(region, grid_lookup, page_image, read_table_crop,
+                           page_number, logger, page)
+
+    crop = table_read_image(page_image, region.reading_box, page)
+    headed = None
+    try:
+        headed = continuation.headed_read(
+            crop, read_table_crop,
+            finish=lambda image, text: _with_sections(image, text, read_table_crop,
+                                                      page_number, region.box, logger))
+    except Exception as error:  # the header is a bonus, never a risk
+        logger.warning("Headed read failed on page %d at %s: %s; reading plain",
+                       page_number, tuple(region.box), error)
+    grid = headed if headed is not None else _plain_grid(
+        region, grid_lookup, page_image, read_table_crop, page_number, logger, page)
+    continuation.remember(crop, grid, was_headed=headed is not None)
+    return grid
+
+
+def _plain_grid(
+    region: TableRegion,
+    grid_lookup: Dict[Tuple[int, int, int, int], str],
+    page_image: "Image.Image",
+    read_table_crop: Optional[CropReader],
+    page_number: int,
+    logger: logging.Logger,
+    page: Optional[PdfPage] = None,
 ) -> Optional[str]:
     """A table's transcription: the repair path's if it ran, else a crop read.
 
@@ -358,8 +407,22 @@ def _grid_for(
     # One detected box can hold two printed sub-tables, and the reader stops
     # after the first (t12 lost 64 of 82 values). Runs on the repair path's
     # grid too: that is where t12's came from.
+    return _with_sections(crop, text, read_table_crop, page_number, box, logger)
+
+
+def _with_sections(
+    image: "Image.Image",
+    text: str,
+    read_table_crop: CropReader,
+    page_number: int,
+    box: Sequence[int],
+    logger: logging.Logger,
+) -> str:
+    """The read plus any second printed sub-table; the read alone if the check fails."""
+    if not text:
+        return text
     try:
-        return read_table_with_sections(crop, text, read_table_crop, logger=logger)
+        return read_table_with_sections(image, text, read_table_crop, logger=logger)
     except Exception as error:  # the extra sections are a bonus, never a risk
         logger.warning("Table section check failed on page %d at %s: %s",
                        page_number, tuple(box), error)

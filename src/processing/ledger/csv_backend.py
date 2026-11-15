@@ -165,7 +165,7 @@ class CsvLedgerBackend(SemanticLedger):
                         for opt in (
                             "doi", "title", "journal", "publisher",
                             "validation_source", "pdf_filename",
-                            "metadata_flag"
+                            "metadata_flag", "citation_level"
                         ):
                             val = row.get(opt)
                             if isinstance(val, str) and val.strip() == "":

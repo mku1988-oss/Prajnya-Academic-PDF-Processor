@@ -24,6 +24,7 @@ from .base import (
     GlyphStyle,
     ImageBlock,
     LEADER_MIN_ASPECT,
+    PrintedChar,
     Rect,
     group_characters_into_lines,
     styled_line_from_characters,
@@ -54,6 +55,7 @@ class PyMuPdfPage:
         self._page = page
         self._index = index
         self._words: Optional[List[Word]] = None
+        self._characters: Optional[List[PrintedChar]] = None
 
     @property
     def number(self) -> int:
@@ -133,6 +135,41 @@ class PyMuPdfPage:
                     # height, so it must not claim to.
                     lines.append(replace(built, cap_height=0.0))
         return lines
+
+    def characters(self) -> List[PrintedChar]:
+        """
+        Every printed character from `rawdict`, with its baseline (the span
+        origin's y), font and weight, cached. PyMuPDF's character boxes are
+        whole-line boxes (see `styled_lines`), which is what a loose box is.
+        A span is turned when its writing direction is not left-to-right.
+        """
+        if self._characters is not None:
+            return self._characters
+        try:
+            raw = self._page.get_text("rawdict")
+        except Exception:                                   # pragma: no cover
+            raw = {}
+        characters: List[PrintedChar] = []
+        for block in raw.get("blocks", []):
+            for line in block.get("lines", []):
+                turned = abs(line.get("dir", (1.0, 0.0))[1]) > 0.7
+                space_pending = True
+                for span in line.get("spans", []):
+                    weight = 700.0 if span.get("flags", 0) & _BOLD_FLAG else 400.0
+                    font = span.get("font", "").split("+")[-1]
+                    for char in span.get("chars", []):
+                        character = char.get("c") or ""
+                        if not character or character.isspace() or not character.isprintable():
+                            space_pending = True
+                            continue
+                        x0, y0, x1, y1 = char.get("bbox", (0, 0, 0, 0))
+                        characters.append(PrintedChar(
+                            text=character, rect=Rect(x0, y0, x1, y1),
+                            baseline=char.get("origin", (x0, y1))[1], font=font,
+                            weight=weight, space_before=space_pending, turned=turned))
+                        space_pending = False
+        self._characters = characters
+        return characters
 
     def text_in(self, rect: Rect) -> str:
         return " ".join(w.text for w in words_in_rect(self.words(), rect))

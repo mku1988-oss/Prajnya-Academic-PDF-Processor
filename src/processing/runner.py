@@ -37,7 +37,10 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Sequence
 
 from .batch import BookDecision, PreflightEntry
+from .citations.level import resolve_level
+from .citations.services import reference_finder_for
 from .cli_support import already_processed
+from .config.loader import ConfigLoader
 from .document_json import enum_value, write_result
 from .events import emit
 from .ledger.semantic_ledger import LedgerRecord
@@ -120,9 +123,11 @@ def process_one(entry: PreflightEntry, request: RunRequest, backend=None,
                                   chapters=decision.chapters,
                                   max_body_pages=decision.max_pages,
                                   refresh_metadata=request.force,
-                                  output_root=request.out_root)
+                                  output_root=request.out_root,
+                                  citation_level=request.citations)
         log.info("Routing to %s", type(strategy).__name__)
         profile = strategy.process(profile, test_pages_override=request.pages)
+        _stamp_citation_level(profile, request, log)
 
         elapsed = time.time() - started
         out_path = request.output_for(entry.path)
@@ -176,6 +181,7 @@ def process_batch(entries: Sequence[PreflightEntry], request: RunRequest,
     run = execute or (lambda item, req: process_one(item, req, backend=backend,
                                                     logger=log))
     results: Dict[str, Any] = {}
+    run_level = _run_citation_level(request, log)
 
     for position, entry in enumerate(entries, start=1):
         if entry.error:
@@ -183,7 +189,7 @@ def process_batch(entries: Sequence[PreflightEntry], request: RunRequest,
             continue
 
         if not request.force and already_processed(entry.path, ledger, log):
-            results[str(entry.path)] = {"skipped": "already in the ledger"}
+            results[str(entry.path)] = _skipped_result(entry.path, ledger, run_level, log)
             continue
 
         emit(log, "document_start",
@@ -192,6 +198,7 @@ def process_batch(entries: Sequence[PreflightEntry], request: RunRequest,
         outcome = run(entry, request)
         results[str(entry.path)] = _result_for(outcome, ledger, log)
 
+    _warn_about_other_levels(results, run_level, log)
     emit(log, "batch_done",
          message=f"Batch done: {len(entries)} document(s)",
          total=len(entries))
@@ -314,6 +321,134 @@ def _log_profile(profile: DocumentProfile, log: logging.Logger) -> None:
     log.info("Classified as %s (confidence %.2f)",
              enum_value(profile.document_type),
              profile.classification_confidence or 0.0)
+
+
+def _run_citation_level(request: RunRequest, log: logging.Logger) -> Optional[str]:
+    """The citation level this run uses, or None when it cannot be read."""
+    try:
+        config = ConfigLoader(request.config_root, logger=log).strategy()
+        return resolve_level(config, request.citations)[0]
+    except Exception:
+        return None
+
+
+def _skipped_result(pdf_path: Path, ledger, run_level: Optional[str],
+                    log: logging.Logger) -> Dict[str, Any]:
+    """
+    A skipped document's line in the results, saying so when its level differs.
+
+    For biology researchers: a document already in the ledger is not
+    processed again. But if it was processed at ANOTHER citation level than
+    this run asks for, skipping it silently would leave you believing your
+    whole library is now at the new level. So the difference is reported,
+    with the remedy: `--recite` changes the level without re-processing.
+    """
+    stored = _stored_citation_level(pdf_path, ledger)
+    if run_level is None or stored == run_level:
+        return {"skipped": "already in the ledger"}
+
+    was = f"citation level {stored}" if stored else "a citation level that was not recorded"
+    log.info("  %s was processed at %s; this run uses %s. --recite changes the "
+             "level without re-processing.", pdf_path.name, was, run_level)
+    return {"skipped": f"already in the ledger, at {was} (this run: {run_level})",
+            "citation_level_differs": True}
+
+
+def _stored_citation_level(pdf_path: Path, ledger) -> Optional[str]:
+    """The level on this document's ledger row, or None (also on any failure)."""
+    try:
+        from .ledger.semantic_ledger import generate_hash
+
+        record = ledger.get_record(generate_hash(str(pdf_path)))
+        return getattr(record, "citation_level", None)
+    except Exception:
+        return None
+
+
+def _warn_about_other_levels(results: Dict[str, Any], run_level: Optional[str],
+                             log: logging.Logger) -> None:
+    """One summary line when skipped documents sit at another citation level."""
+    count = sum(1 for value in results.values() if value.get("citation_level_differs"))
+    if count:
+        log.warning("%d document(s) were skipped but were processed at another citation "
+                    "level than this run's (%s). Run again with --recite to bring them to "
+                    "it: no PDF is read and no model is called.", count, run_level)
+
+
+def _stamp_citation_level(profile: DocumentProfile, request: RunRequest,
+                          log: logging.Logger) -> None:
+    """
+    Record on the result which citation level this run used, and who chose it.
+
+    For biology researchers: the level says how the paper's bibliographic
+    record was established (Prajnya alone, your Zotero library, or online
+    registries). Every output file states it, so a program reading the file
+    knows how far to trust the record and whether a reference list could be
+    present at all.
+
+    It is stamped HERE, once, rather than inside each strategy, so that
+    articles, chapters and books all get it from the same reading of the
+    same config. A config that cannot be read, or that names a level that
+    does not exist, is logged and the level is left unset (written as the
+    default): the document's extracted content is already paid for and must
+    still be written.
+    """
+    result = profile.processing_result
+    if result is None:
+        return
+    try:
+        config = ConfigLoader(request.config_root, logger=log).strategy()
+        level, set_by = resolve_level(config, request.citations)
+    except Exception as error:
+        log.error("Could not read the citation level (%s); the document is "
+                  "written with the default level.", error)
+        return
+    result.citation_level = level
+    result.citation_level_set_by = set_by
+    # The ledger row is built from the metadata, so the level travels there
+    # too. An article's enrichment has already set it; a book's has not.
+    if result.metadata is not None and not result.metadata.citation_level:
+        result.metadata.citation_level = level
+    log.info("Citation level: %s (set by %s)", level, set_by)
+    _attach_reference_list(profile, config, level, log)
+
+
+def _attach_reference_list(profile: DocumentProfile, config: Dict[str, Any],
+                           level: str, log: logging.Logger) -> None:
+    """
+    At level `online`, fetch the paper's own reference list and keep it on the result.
+
+    For biology researchers: the list is what lets a program follow a
+    paper's citations. It is looked up from the paper's DOI (Crossref, then
+    OpenAlex) and cross-checked against the list read from the PDF itself.
+
+    BOOKS ARE SKIPPED. A book has one reference list per chapter, and the
+    finder reads the PDF's last list, so it would hand back one chapter's
+    list as if it were the whole book's.
+
+    A reference list must never cost a document its output: any failure is
+    logged as an error and the document is written without a list.
+
+    Args:
+        profile: the processed document (its result receives the list).
+        config: the loaded strategy config (`citations.online` settings).
+        level: the citation level in force.
+        log: the run's logger.
+    """
+    result = profile.processing_result
+    if result is None or result.metadata is None or level != "online":
+        return
+    if enum_value(profile.document_type) == "book":
+        return
+    try:
+        finder = reference_finder_for(level, config, logger=log)
+        if finder is None:
+            return
+        result.citation_references = finder.find(result.metadata.doi, profile.pdf_path)
+    except Exception as error:
+        log.error("Could not fetch the reference list (%s); the document is "
+                  "written without one.", error)
+        result.citation_references = None
 
 
 def _outcome_from(pdf_path: Path, profile: DocumentProfile, out_path: Path,

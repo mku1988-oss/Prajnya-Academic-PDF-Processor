@@ -21,15 +21,16 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
+from .citations.block import build_citations_block
 from .models import DocumentProfile
 
 LOG = logging.getLogger(__name__)
 
 #: Stamped into every document's `document_info`, so an output file says which
 #: pipeline produced it.
-PIPELINE_VERSION = "v6.5.0"
+PIPELINE_VERSION = "v6.6.0"
 
 #: The version of the output FORMAT, which moves independently of the release.
 #: Stamped into `document_info.contract_version`, and pinned against
@@ -38,7 +39,9 @@ PIPELINE_VERSION = "v6.5.0"
 #: suite fails. Raise the MAJOR number when a consumer's code could break
 #: (a key removed, renamed, retyped, or given a new meaning); raise the MINOR
 #: number for anything purely additive. Rules in `contract/README.md`.
-CONTRACT_VERSION = "1.0"
+#:
+#: 1.1 (citation levels, S0a): the top-level `citations` block.
+CONTRACT_VERSION = "1.1"
 
 
 def write_result(profile: DocumentProfile, out_path: Path, elapsed: float,
@@ -83,7 +86,8 @@ def build_document_json(profile: DocumentProfile, elapsed: float,
 
         document_info   run-level facts — filename, wall time, success, timings
         metadata_final  the merged bibliographic record
-        pages           top-level, one entry per processed page
+        citations       how to cite it: level, source, label (contract 1.1)
+        pages          top-level, one entry per processed page
         summary         errors and counts
 
     Args:
@@ -114,9 +118,19 @@ def build_document_json(profile: DocumentProfile, elapsed: float,
     if timings:
         info["timings"] = dict(timings)
 
+    metadata_final = dumped_result.get("metadata") or {}
+
     return {
         "document_info": info,
-        "metadata_final": dumped_result.get("metadata") or {},
+        "metadata_final": metadata_final,
+        # How to cite this document, and how that was established. Derived
+        # from the metadata on every write, never stored as a fact.
+        "citations": build_citations_block(
+            metadata_final, profile.pdf_path.name,
+            level=getattr(result, "citation_level", None),
+            level_set_by=getattr(result, "citation_level_set_by", None),
+            reference_data=getattr(result, "citation_references", None),
+            page_contents=page_contents_of(pages)),
         "pages": pages,
         "summary": {
             "errors": errors,
@@ -131,6 +145,13 @@ def build_document_json(profile: DocumentProfile, elapsed: float,
 
 
 # --- helpers (after the main functions, per CLAUDE.md) ----------------------
+
+def page_contents_of(pages: List[Dict[str, Any]]) -> Dict[int, str]:
+    """`{page_number: content}` of the pages being written, for the markers' offsets."""
+    return {page["page_number"]: page["content"] for page in pages
+            if isinstance(page, dict) and isinstance(page.get("page_number"), int)
+            and isinstance(page.get("content"), str)}
+
 
 def last_resort_encoder(value: Any) -> Any:
     """

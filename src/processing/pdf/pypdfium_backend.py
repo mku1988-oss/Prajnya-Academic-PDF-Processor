@@ -33,6 +33,7 @@ from .base import (
     GlyphStyle,
     ImageBlock,
     LEADER_MIN_ASPECT,
+    PrintedChar,
     Rect,
     group_characters_into_lines,
     styled_line_from_characters,
@@ -59,6 +60,7 @@ class PyPdfiumPage:
         self._textpage: Optional["pdfium.PdfTextPage"] = None
         self._words: Optional[List[Word]] = None
         self._glyphs: Optional[List[GlyphStyle]] = None
+        self._characters: Optional[List[PrintedChar]] = None
 
     @property
     def number(self) -> int:
@@ -282,6 +284,38 @@ class PyPdfiumPage:
         self._glyphs = glyphs
         return glyphs
 
+    def characters(self) -> List[PrintedChar]:
+        """
+        Every printed character with its loose box, baseline, font and weight, cached.
+
+        One walk over PDFium's characters. Whitespace is not returned; it
+        sets `space_before` on the next printed character instead. See
+        `PdfPage.characters` for why this exists beside `styled_lines`.
+        """
+        if self._characters is not None:
+            return self._characters
+        try:
+            text_page = self._text_page()
+            count = pdfium_raw.FPDFText_CountChars(text_page)
+        except Exception:                                   # pragma: no cover
+            count = 0
+        height = self.size[1]
+        name = ctypes.create_string_buffer(256)
+        flags = ctypes.c_int()
+        characters: List[PrintedChar] = []
+        space_pending = False
+        for index in range(count):
+            character = _character_at(text_page, index)
+            if character is None or character.isspace() or not character.isprintable():
+                space_pending = space_pending or (character is not None and character.isspace())
+                continue
+            printed = _printed_character(text_page, index, character, height, name, flags, space_pending)
+            if printed is not None:
+                characters.append(printed)
+            space_pending = False
+        self._characters = characters
+        return characters
+
     def leaders(self) -> List[Rect]:
         """
         Boxes of the horizontal text runs that carry no letter or digit.
@@ -398,6 +432,26 @@ def _glyph_style(text_page, index: int, page_height: float,
     return GlyphStyle(x=(left.value + right.value) / 2,
                       y=page_height - (bottom.value + top.value) / 2,
                       font=font, x_height=x_height)
+
+
+def _printed_character(text_page, index: int, character: str, page_height: float,
+                       name, flags, space_before: bool) -> Optional[PrintedChar]:
+    """One character as a PrintedChar (top-left coordinates), or None if it has no box or origin."""
+    box = _character_box(text_page, index)
+    origin = _character_baseline(text_page, index)
+    if box is None or origin is None:
+        return None
+    try:
+        length = pdfium_raw.FPDFText_GetFontInfo(text_page, index, name, 256, ctypes.byref(flags))
+        weight = pdfium_raw.FPDFText_GetFontWeight(text_page, index)
+    except Exception:                                       # pragma: no cover
+        length, weight = 0, 0
+    font = name.raw[:max(length - 1, 0)].decode("latin-1").split("+")[-1]
+    rect = flip_y(Rect(box[0], box[1], box[2], box[3]), page_height).normalized()
+    return PrintedChar(text=character, rect=rect, baseline=page_height - origin, font=font,
+                       weight=float(weight) if weight and weight > 0 else 0.0,
+                       space_before=space_before,
+                       turned=bool(_character_is_turned(text_page, index)))
 
 
 def _character_baseline(text_page, index: int) -> Optional[float]:

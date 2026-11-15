@@ -683,15 +683,24 @@ def _adopt_orphan_captions(
     claimed = {pick[0].key for pick in resolved if pick is not None}
     ordered_lines = sorted(label_lines, key=lambda line: line.rect[1])
 
-    # Step 1: the band above each caption starts at the caption before it.
-    band_top = 0.0
-    for line in ordered_lines:
-        band_bottom = line.rect[1]
+    # The band above each caption starts at the caption before it IN ITS OWN
+    # COLUMN. A caption in the other column says nothing about where this one's
+    # figure begins: on `Collagen structure` p19, "Figure 13" (right column) sat
+    # 11 pt above "Figure 12" (left), shrank Figure 12's band to 3 pt and left
+    # its own crop unlabelled (eval/orphan_captions/GATE.md, R3b).
+    for position, line in enumerate(ordered_lines):
         if line.key not in claimed and line.starts_a_block:
             _adopt_within_band(figure_boxes, resolved, line,
-                               band_top, band_bottom)
-        band_top = line.rect[3]
+                               _band_top(line, ordered_lines[:position]),
+                               line.rect[1])
     return resolved
+
+
+def _band_top(line: LabelLine, earlier: Sequence[LabelLine]) -> float:
+    """Bottom of the nearest earlier caption line in the same column, else 0."""
+    tops = [other.rect[3] for other in earlier
+            if _horizontal_overlap(line.rect, other.rect) >= MIN_HORIZONTAL_OVERLAP]
+    return max(tops, default=0.0)
 
 
 def _adopt_within_band(

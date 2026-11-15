@@ -2,7 +2,7 @@
 
 ### Scientific PDF Processing Engine
 
-![Status](https://img.shields.io/badge/Status-Production%20Ready-green?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.5.0-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Production%20Ready-green?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.6.0-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge)
 
 ---
 
@@ -37,6 +37,9 @@ Prajnya focuses on building that foundation.
 - Document structure reconstruction
 - Figure and multi-panel figure extraction
 - Table detection and reconstruction
+- **Reference lists, with every in-text citation linked to the entry it
+  names**, numbered (`[12]`, `(3–7)`, superscripts) and author–year
+  (`(Doi et al., 2005)`, `Berendsen (1962)`). See [Citations](#citations).
 - Efficient processing and GPU-aware inference
 - Structured, provenance-aware output
 
@@ -73,7 +76,7 @@ What changed in each release is in [`CHANGELOG.md`](CHANGELOG.md).
 
 - [How it works](#how-it-works) · [Requirements](#requirements) · [Installation](#installation) · [Quick start](#quick-start)
 - [Prajnya Studio](#prajnya-studio) · [The command line](#the-command-line) · [Local or cloud](#local-or-cloud)
-- [Books](#books) · [Metadata review](#metadata-review)
+- [Books](#books) · [Metadata review](#metadata-review) · [Citations](#citations)
 - [What you get](#what-you-get) · [Performance](#performance) · [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting) · [Roadmap](#roadmap) · [Citation](#citation) · [Licence](#licence)
 
@@ -253,6 +256,8 @@ run_prajnya.py --review
 | `--max-pages N` | books: hard ceiling on body pages read |
 | `--out PATH` | where results go (default `run_outputs/` in this repository) |
 | `--noninteractive` | never prompt. Books take the cheap default; review is deferred to `--review` |
+| `--citations LEVEL` | `local`, `zotero` or `online` for this run (see [Citations](#citations)); otherwise the configured level |
+| `--recite` | re-derive the citation record of documents **already processed**, at the current level, and stop. **No PDF page is read again, no model is called.** |
 | `--front-matter-pages N` | leading pages scanned for DOI / ISBN / ISSN (default 10) |
 | `--backend NAME` | PDF backend, `pypdfium2` (default) or `pymupdf` |
 | `--verbose` | debug logging |
@@ -267,6 +272,8 @@ run_prajnya.py --pdf "C:/papers" --recursive --noninteractive # a folder, unatte
 run_prajnya.py --pdf "C:/papers" --force --out "C:/rerun"     # redo, ignoring the ledger
 run_prajnya.py --pdf "volume.pdf" --chapters 3-5              # chapters of a book
 run_prajnya.py --review                                       # fix incomplete metadata later
+run_prajnya.py --pdf "paper.pdf" --citations online           # with its reference list and linked citations
+run_prajnya.py --recite --citations online                    # add them to everything already processed
 ```
 
 ---
@@ -358,6 +365,61 @@ create a duplicate and an interrupted batch loses nothing.
 
 ---
 
+## Citations
+
+A scientific paper rests on other papers. A sentence that ends "… was shown
+previously [12]" or "… (Doi et al., 2005)" makes a claim and says whose work it
+stands on. Prajnya can give each document its **reference list** and link
+**every citation printed in its text** to the entry it names. A passage
+retrieved later then carries its sources with it, and a downstream system can
+write "Doi et al., 2005, cited in Bella, 2016 (p. 10)" instead of attributing a
+reviewed finding to the review.
+
+### Three levels, one setting per run
+
+| level | how the document is cited | reference list and linked citations | what leaves your machine |
+|---|---|---|---|
+| `local` *(default)* | Prajnya's own reading: text-layer DOI and title page | no | **nothing** |
+| `zotero` | checked against your Zotero library | no | title queries to Zotero |
+| `online` | Crossref, by DOI or by title under a strict acceptance rule; OpenAlex as fallback | **yes** | the DOI or the title, to Crossref and OpenAlex. **Never page content.** |
+
+Set it in `config/research_article_strategy.yaml` (`citations.level`), or for
+one run with `--citations`. Every document records the level it was cited at.
+`--recite` brings documents already processed up to the current level in
+seconds, without reading their pages again or calling a model.
+
+### What `online` adds
+
+- **The reference list**, in printed order: the publisher's deposited list
+  (Crossref), gaps filled from OpenAlex, **checked against the list printed in
+  the PDF itself**. Each entry carries its position, printed number, first
+  author, year, title, journal, DOI and the text as printed. Whether the two
+  readings agree on the length of the list is recorded (`counts_agree`).
+- **The in-text citations.** Each citation becomes a marker that names the
+  entries it cites and says where it stands in the page text Prajnya writes
+  out (`content_offset`), so a citation glued to a word ("stability²⁴⁵") is
+  still known to be a citation. Both styles of science are read:
+  - **numbered**: brackets `[3–7]`, parentheses `(12, 14)`, superscripts;
+  - **author–year**: `(Doi et al., 2005; Smith and Jones, 1999a)`,
+    `Berendsen (1962)`, `Bella et al., 1994, 1995`, a citation broken across a
+    line or a page.
+
+### A wrong link is worse than none
+
+A missing link costs a reader a lookup. A wrong one sends them to the wrong
+paper. So every rule prefers to say nothing:
+
+- A **numbered** citation links only where a list entry's printed number equals
+  its place in the list. Numbers beyond the list, affiliation marks on author
+  lines (`Lambert¹,¹³`) and lane numbers in figure legends are not citations.
+- An **author–year** citation links only when **exactly one** entry has that
+  surname and year. A second author or "et al." may narrow the candidates; a
+  year with a letter (`2001a`) needs that letter printed in the entry. Two
+  candidates ("Holmes et al., 2001", printed twice without letters), or none:
+  no link.
+
+---
+
 ## What you get
 
 ```
@@ -387,9 +449,21 @@ Each document JSON:
                              "reference_density",     // how bibliographic the page reads, 0-1
                              "has_reference_heading",
                              "chapter": { "number", "title", "authors" } } } ],
-  "summary": { "errors", "page_count", "figure_count" }
+  "summary": { "errors", "page_count", "figure_count" },
+  "citations": { "level", "source_label",                // how to cite this document
+                 "reference_list": { "status", "source", "style", "count", "counts_agree" },
+                 "references": [ { "position", "number", "first_author", "year",
+                                   "title", "container", "doi", "printed_text" } ],
+                 "markers":    [ { "page_number", "text", "kind",
+                                   "numbers",            // positions in `references`
+                                   "context_before", "content_offset" } ] }
 }
 ```
+
+The output's shape is a published contract,
+[`contract/prajnya_document.schema.json`](contract/prajnya_document.schema.json),
+with a worked example in
+[`contract/examples/citations_online.json`](contract/examples/citations_online.json).
 
 `processing_method` says how each page was read: `pymupdf` (text layer, no
 GPU), `glm_fullpage` (a vision-model read), `glm_repair` (a page read whose
@@ -542,7 +616,7 @@ If you use Prajnya in your research, please cite:
   title   = {Prajnya: A Scientific PDF Processing Engine},
   author  = {Manu Unni},
   year    = {2026},
-  version = {6.5.0},
+  version = {6.6.0},
   url     = {https://github.com/mku1988-oss/Prajnya-Academic-PDF-Processor}
 }
 ```

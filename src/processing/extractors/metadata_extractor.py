@@ -125,19 +125,25 @@ class MetadataExtractor:
                 return (isbn, 0.95)
         
         # Pattern 2: Bare ISBN (lower confidence - 0.85)
-        # Matches: 13-digit or 10-digit number patterns
-        # 13-digit ISBN (starts with 978 or 979)
-        isbn13_match = self.isbn13_pattern.search(text)
-        if isbn13_match:
-            isbn = isbn13_match.group(1).replace('-', '').replace(' ', '').strip()
-            if len(isbn) == 13 and isbn.isdigit():
+        # An unlabelled run of 10 or 13 digits is only an ISBN if its CHECK
+        # DIGIT is right. Without that test any ten digits counted: Springer
+        # Nature PDFs carry a hidden "1234567890():,;" string on every page,
+        # which made a Nature Communications article score as a BOOK (S1
+        # confirmation, session 33). Every candidate is tried, not just the
+        # first, so a stray number before the real ISBN does not hide it.
+        for match in self.isbn13_pattern.finditer(text):
+            isbn = match.group(1).replace('-', '').replace(' ', '').strip()
+            if is_valid_isbn(isbn):
                 return (isbn, 0.85)
-        
-        # 10-digit ISBN pattern
-        isbn10_match = self.isbn10_pattern.search(text)
-        if isbn10_match:
-            isbn = isbn10_match.group(1).replace('-', '').replace(' ', '').strip()
-            if len(isbn) == 10:
+
+        # A bare ISBN-10 must ALSO be printed in its four groups ("0-262-03384-4").
+        # Ten plain digits are a DOI suffix ("pnas.2220167120") or a font-test
+        # string ("Vol.:(0123456789)"); one separator is a page range in a
+        # reference list ("28523-28526"). All three were read as ISBNs.
+        for match in self.isbn10_pattern.finditer(text):
+            raw = match.group(1)
+            isbn = raw.replace('-', '').replace(' ', '').strip().upper()
+            if len(re.findall(r'[-\s]', raw)) == 3 and is_valid_isbn(isbn):
                 return (isbn, 0.85)
         
         # No ISBN found
@@ -291,3 +297,31 @@ class MetadataExtractor:
         
         # No chapter number found
         return (None, 0.0)
+
+
+# --- helpers (after the class, per CLAUDE.md) --------------------------------
+
+def is_valid_isbn(digits: str) -> bool:
+    """
+    Whether a string of 10 or 13 characters is a real ISBN (its check digit is right).
+
+    For biology researchers: the last character of an ISBN is computed from the
+    others, like a DOI's checksum would be if it had one. A random run of ten
+    digits passes this test only about one time in eleven, so it separates a
+    real ISBN from a page number, a phone number or a font-test string.
+
+        ISBN-10: sum of digit x weight (weights 10 down to 1) divisible by 11;
+                 the last character may be "X", meaning 10.
+        ISBN-13: digits weighted 1, 3, 1, 3, ... sum divisible by 10.
+
+    Example:
+        >>> is_valid_isbn("0262033844"), is_valid_isbn("1234567890")
+        (True, False)
+    """
+    if len(digits) == 13 and digits.isdigit():
+        total = sum(int(d) * (1 if i % 2 == 0 else 3) for i, d in enumerate(digits))
+        return total % 10 == 0
+    if len(digits) == 10 and digits[:9].isdigit() and (digits[9].isdigit() or digits[9] == "X"):
+        values = [int(d) for d in digits[:9]] + [10 if digits[9] == "X" else int(digits[9])]
+        return sum(v * w for v, w in zip(values, range(10, 0, -1))) % 11 == 0
+    return False

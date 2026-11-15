@@ -68,6 +68,9 @@ class RunRequest:
         noninteractive: never prompt; books take the cheap default.
         verbose: DEBUG logging, and tracebacks on a failed document.
         ledger_path: an explicit ledger file, or None for the default.
+        citations: a one-run override of the citation level (`local`,
+            `zotero` or `online`), from `--citations`. None means the config's
+            `citations.level` decides. See `citations/level.py`.
         book_overrides: a per-run policy override — how a GUI passes a choice
             without writing the config file. Same keys as the YAML `books` block.
     """
@@ -87,6 +90,7 @@ class RunRequest:
     verbose: bool = False
     ledger_path: Optional[Path] = None
     book_overrides: Optional[Dict[str, Any]] = None
+    citations: Optional[str] = None
 
     @classmethod
     def from_args(cls, args: Any, paths: Optional[List[Path]] = None) -> "RunRequest":
@@ -142,6 +146,7 @@ class RunRequest:
             recursive=args.recursive,
             noninteractive=args.noninteractive,
             verbose=args.verbose,
+            citations=getattr(args, "citations", None),
         )
 
     def output_for(self, pdf_path: Path) -> Path:
@@ -179,6 +184,7 @@ class RunRequest:
             "verbose": self.verbose,
             "ledger_path": str(self.ledger_path) if self.ledger_path else None,
             "book_overrides": self.book_overrides,
+            "citations": self.citations,
         }
 
     @classmethod
@@ -203,6 +209,7 @@ class RunRequest:
             verbose=bool(raw.get("verbose")),
             ledger_path=_optional_path(raw.get("ledger_path")),
             book_overrides=raw.get("book_overrides"),
+            citations=raw.get("citations"),
         )
 
 

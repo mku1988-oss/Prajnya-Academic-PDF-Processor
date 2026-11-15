@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import re
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence, Tuple
 
@@ -220,6 +222,11 @@ def _repair_caption(asset, assignment) -> Optional[str]:
     if not asset.caption or _is_panel_sublabel(asset.caption):
         return assignment.caption
 
+    # Case 4: the stored caption is a TRUNCATION of the text-layer caption.
+    # Checked first because it also covers captions that start at their label.
+    if _is_truncation_of(asset.caption, assignment.caption):
+        return assignment.caption
+
     # Case 3: put back only the opening, and only when that is what is wrong —
     # a caption already beginning at its own label is never touched.
     stored_label, _ = parse_printed_label(asset.caption.strip())
@@ -230,6 +237,49 @@ def _repair_caption(asset, assignment) -> Optional[str]:
     if not head:
         return None
     return f"{head} {asset.caption.strip()}"
+
+
+#: How many trailing characters of the stored caption may disagree with the
+#: text-layer caption and still count as "the same caption, cut short".
+#: MEASURED on the 101 stored figures (session 30, eval/caption_source/GATE.md):
+#: the six real truncations diverge by 0 to 16 characters (a title with no
+#: body, or a box whose last words are a stray fragment), while the first
+#: interleaved-column caption in the book diverges by 59. 30 sits between them.
+MAX_DIVERGENT_TAIL = 30
+
+
+def _is_truncation_of(stored: str, harvested: str) -> bool:
+    """
+    True when `stored` is the first part of `harvested`, cut short.
+
+    For biology researchers: the detector's caption box sometimes holds only the
+    figure's TITLE ("Figure 7 Preferences for ring conformation in proline"),
+    or stops mid-caption, while the text layer holds the whole legend (panels
+    A to E, abbreviations). Taking the longer text is only safe when it is the
+    SAME text continued, so the test is how far the two agree from the start:
+    a truncated caption agrees right to its end, whereas a two-column book
+    caption interleaved with body prose disagrees early and is left alone.
+
+    Args:
+        stored: the caption the figure already carries.
+        harvested: the caption read from the text layer.
+
+    Returns:
+        True if the harvested caption is longer and the stored one tracks it to
+        within `MAX_DIVERGENT_TAIL` characters of its end.
+    """
+    stored_key = _comparison_key(stored)
+    harvested_key = _comparison_key(normalize_harvested_text(harvested))
+    if len(harvested_key) <= len(stored_key):
+        return False
+    agreeing = len(os.path.commonprefix([stored_key, harvested_key]))
+    return len(stored_key) - agreeing <= MAX_DIVERGENT_TAIL
+
+
+def _comparison_key(text: str) -> str:
+    """Lower-case text with all whitespace removed, so line breaks and
+    hyphenation spaces cannot make two copies of one caption look different."""
+    return re.sub(r"\s+", "", text).lower()
 
 
 #: The shortest run of characters that counts as a real overlap between the

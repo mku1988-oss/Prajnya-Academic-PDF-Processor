@@ -166,6 +166,38 @@ class Word:
 
 
 @dataclass(frozen=True)
+class PrintedChar:
+    """One printed character: where it sits and how it is set.
+
+    For biology researchers: a reference list and its citation markers are
+    read from these. Where a character sits says which line and column it
+    belongs to (and whether it is raised, like a superscript citation
+    "collagen²⁴⁵"); how it is set (font, weight) says which part of an entry
+    it is (the journal is often italic, the volume bold).
+
+    Attributes:
+        text: the character (never whitespace; see `space_before`).
+        rect: its LOOSE box (font ascent to descent), top-left coordinates,
+            so every letter of one font on a line has the same height.
+        baseline: the y of its origin, the point on the line it sits on
+            (top-left coordinates). Raised digits have a SMALLER baseline.
+        font: the font name with any subset prefix ("ABCDEF+") removed.
+        weight: font weight (~400 regular, ~700 bold); 0.0 = not recorded.
+        space_before: a whitespace character came just before it in the
+            PDF's own text, so a word boundary is printed there.
+        turned: set at more than 45 degrees from upright (a margin stamp).
+    """
+
+    text: str
+    rect: "Rect"
+    baseline: float
+    font: str = ""
+    weight: float = 0.0
+    space_before: bool = False
+    turned: bool = False
+
+
+@dataclass(frozen=True)
 class StyledLine:
     """A typeset line, with the typography needed to tell a heading from prose.
 
@@ -261,6 +293,18 @@ class PdfPage(Protocol):
         page with no text layer returns an empty list rather than raising --
         a scan has no typography to report, and that must never cost the page
         its content.
+        """
+        ...
+
+    def characters(self) -> List[PrintedChar]:
+        """
+        Every printed (non-whitespace) character in the PDF's text order.
+
+        The basis of reading reference lists and citation markers, where
+        `styled_lines()` will not do: it groups characters by the BOTTOM of
+        their ink, which splits off descenders ("g", "p", "y") into lines of
+        their own, and it joins the lines of neighbouring columns. A page with
+        no text layer returns []. Cached by the backend.
         """
         ...
 

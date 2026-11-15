@@ -1,0 +1,112 @@
+{
+  "document_info": {
+    "filename": "example_review.pdf",
+    "document_type": "research_article",
+    "processing_time": 150.0,
+    "success": true,
+    "pipeline_version": "v6.6.0",
+    "contract_version": "1.1"
+  },
+  "metadata_final": {
+    "title": "Collagen structure: new tricks from a very old dog",
+    "authors": ["Jordi Bella"],
+    "year": 2016,
+    "doi": "10.1042/BJ20151169",
+    "journal": "Biochemical Journal",
+    "publisher": null,
+    "isbn": null,
+    "editors": [],
+    "validation_source": "crossref",
+    "validation_confidence": 0.95
+  },
+  "citations": {
+    "level": "online",
+    "level_set_by": "config",
+    "metadata_source": "crossref",
+    "source_label": "Bella, 2016",
+    "cited_by_file_name": false,
+    "network": "ok",
+    "reference_list": {
+      "status": "found",
+      "source": "crossref",
+      "style": "numbered",
+      "count": 3,
+      "local_count": 3,
+      "counts_agree": true
+    },
+    "references": [
+      {
+        "position": 1,
+        "number": 1,
+        "first_author": "Ramachandran",
+        "year": 1954,
+        "title": "Structure of collagen",
+        "container": "Nature",
+        "doi": "10.1038/174269c0",
+        "source": "crossref",
+        "printed_text": "Ramachandran, G.N. and Kartha, G. (1954) Structure of collagen. Nature 174, 269-270"
+      },
+      {
+        "position": 2,
+        "number": 2,
+        "first_author": "Doi",
+        "year": 2005,
+        "title": null,
+        "container": null,
+        "doi": null,
+        "source": "crossref",
+        "printed_text": "Doi, M., Nishi, Y., Uchiyama, S., Nishiuchi, Y., Nishio, H., Nakazawa, T., Ohkubo, T. and Kobayashi, Y. (2005) ..."
+      },
+      {
+        "position": 3,
+        "number": 3,
+        "first_author": "Myllyharju",
+        "year": 2004,
+        "title": "Collagens, modifying enzymes and their mutations in humans, flies and worms",
+        "container": "Trends in Genetics",
+        "doi": "10.1016/j.tig.2003.11.004",
+        "source": "crossref",
+        "printed_text": null
+      }
+    ],
+    "markers": [
+      {
+        "page_number": 1,
+        "text": "[2]",
+        "kind": "bracket",
+        "numbers": [2],
+        "context_before": "a dramatic decrease in thermal stability ",
+        "content_offset": 89
+      },
+      {
+        "page_number": 1,
+        "text": "[1,3]",
+        "kind": "bracket",
+        "numbers": [1, 3],
+        "context_before": "as reviewed elsewhere ",
+        "content_offset": 116
+      }
+    ]
+  },
+  "pages": [
+    {
+      "page_number": 1,
+      "content": "Replacing hydroxyproline in this position gives a dramatic decrease in thermal stability [2], as reviewed elsewhere [1,3].",
+      "quality_score": 1.0,
+      "metadata": {
+        "processing_method": "pymupdf",
+        "page_type": "text_only",
+        "figures": [],
+        "tables": [],
+        "headings": [],
+        "has_reference_heading": false,
+        "reference_density": 0.0
+      }
+    }
+  ],
+  "summary": {"errors": [], "page_count": 1, "figure_count": 0},
+  "profile": {
+    "pdf_path": "/example/only/example_review.pdf",
+    "processing_result": {"chapters": []}
+  }
+}

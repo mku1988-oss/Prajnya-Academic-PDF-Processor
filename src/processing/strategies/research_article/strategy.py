@@ -25,11 +25,13 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ...citations.level import require_built, resolve_level
+from ...citations.services import online_chain_for, zotero_service_for
 from ...config.loader import ConfigLoader, resolve_reference
 from ...ledger.csv_backend import CsvLedgerBackend
 from ...ledger.semantic_ledger import SemanticLedger
 from ...models import ContentPage, DocumentProfile, ExtractedMetadata, ProcessingResult
-from ...paths import DEFAULT_LEDGER_PATH, DEFAULT_ZOTERO_CACHE_PATH
+from ...paths import DEFAULT_LEDGER_PATH
 from ...pdf import get_backend
 from ...pdf.base import PdfBackend
 from ...utils.page_classifier import PageClassifier
@@ -56,6 +58,8 @@ class ResearchArticleStrategy:
             omitted.
         onnx_model_path: the CPU layout model (see models/README.md).
         logger: optional logger.
+        citation_level: a one-run override of `citations.level` in the config
+            (the `--citations` flag). None means the config decides.
     """
 
     def __init__(
@@ -66,6 +70,7 @@ class ResearchArticleStrategy:
         logger: Optional[logging.Logger] = None,
         refresh_metadata: bool = False,
         output_root: Optional[Path] = None,
+        citation_level: Optional[str] = None,
     ) -> None:
         self.logger = logger or logging.getLogger("ResearchArticleStrategy")
         # Where this run's figures and tables go. None means the repository's
@@ -80,7 +85,7 @@ class ResearchArticleStrategy:
         self.backend = pdf_backend or get_backend()
         self.factory = ProviderFactory(self.loader, self.config, logger=self.logger)
 
-        self._init_services()
+        self._init_services(citation_level)
         self._init_title_page()
         self._init_classifier_and_pipelines(onnx_model_path)
 
@@ -143,35 +148,46 @@ class ResearchArticleStrategy:
 
     # --- helpers (after the main methods, per CLAUDE.md) ------------------
 
-    def _init_services(self) -> None:
-        """Ledger + Zotero, exactly as V5 gated them (zotero.enabled)."""
-        self.ledger: Optional[SemanticLedger] = None
-        self.zotero_service: Optional[ZoteroService] = None
+    def _init_services(self, citation_level: Optional[str] = None) -> None:
+        """
+        The ledger, and whatever the citation level needs.
 
-        zotero_config = self.config.get("zotero", {})
-        if zotero_config.get("enabled", False):
-            self.logger.info("Zotero integration is enabled. Initializing services.")
-            # Both defaults are repository-anchored (see `paths.py`): they were
-            # CWD-relative, so a run from another directory quietly built its
-            # own second ledger and forgot everything the first one knew.
-            ledger_path = Path(os.getenv("SARA_LEDGER_PATH", DEFAULT_LEDGER_PATH))
-            self.ledger = CsvLedgerBackend(file_path=str(ledger_path.resolve()))
-            try:
-                cache_dir = Path(os.getenv("SARA_CACHE_PATH",
-                                           DEFAULT_ZOTERO_CACHE_PATH))
-                self.zotero_service = ZoteroService(config=zotero_config,
-                                                    cache_dir=str(cache_dir.resolve()))
-            except (ImportError, ValueError) as error:
-                # ValueError is new with V6's real ${ENV} interpolation: an
-                # unset ZOTERO_LIBRARY_ID reaches the service as None instead
-                # of V5's truthy literal "${ZOTERO_LIBRARY_ID}", so the
-                # service's own guard finally fires. Degrade loudly, not
-                # fatally — a missing key must not end the document run.
-                self.logger.error("ZoteroService unavailable (%s). "
-                                  "Continuing without Zotero.", error)
-                self.zotero_service = None
-        else:
-            self.logger.info("Zotero integration is disabled in the configuration.")
+        For biology researchers: the citation level (`local`, `zotero`,
+        `online`) decides which outside services this run may contact. At
+        `local` none is even constructed: building the Zotero service
+        already contacts Zotero to check the key, and `local` promises that
+        nothing leaves the machine.
+
+        The ledger is opened at every level. It used to be opened only when
+        Zotero was switched on, which tied "remember what was processed" to
+        "use Zotero" for no reason.
+        """
+        self.zotero_service: Optional[ZoteroService] = None
+        self.citation_level, self.citation_level_set_by = resolve_level(
+            self.config, citation_level)
+        require_built(self.citation_level)
+        self.logger.info("Citation level: %s (set by %s)",
+                         self.citation_level, self.citation_level_set_by)
+
+        # Repository-anchored default (see `paths.py`): it was CWD-relative,
+        # so a run from another directory quietly built its own second
+        # ledger and forgot everything the first one knew.
+        # It is only READ here (the runner owns every write), so a ledger
+        # that does not exist yet is not created as a side effect.
+        ledger_path = Path(os.getenv("SARA_LEDGER_PATH", DEFAULT_LEDGER_PATH))
+        self.ledger: Optional[SemanticLedger] = (
+            CsvLedgerBackend(file_path=str(ledger_path.resolve()))
+            if ledger_path.is_file() else None)
+
+        # None at every level but `zotero`, and None there too when the
+        # credentials are missing (logged loudly, never fatal).
+        self.zotero_service = zotero_service_for(
+            self.citation_level, self.config, logger=self.logger)
+
+        # None at every level but `online`: Crossref and OpenAlex.
+        self.online_chain = online_chain_for(
+            self.citation_level, self.config, zotero_service=self.zotero_service,
+            logger=self.logger)
 
         self.doi_threshold = self.config["metadata"]["doi_confidence_threshold"]
 
@@ -263,6 +279,9 @@ class ResearchArticleStrategy:
             doi_threshold=self.doi_threshold,
             use_ledger_cache=not self.refresh_metadata,
             logger=self.logger,
+            citation_level=self.citation_level,
+            file_name=profile.pdf_path.name,
+            online_chain=self.online_chain,
         )
 
     def _run_local(self, cache: DocumentCache, profile: DocumentProfile,

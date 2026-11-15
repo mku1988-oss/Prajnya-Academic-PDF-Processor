@@ -118,7 +118,10 @@ from typing import Any, Dict, Optional
 
 from src.processing.batch import PreflightEntry, find_pdfs, write_batch_summary
 from src.processing.book_prompt import ask_about_book, show_preflight
+from src.processing.citations.level import CITATION_LEVELS, require_built, resolve_level
+from src.processing.citations.recite import SKIPPED as RECITE_SKIPPED, recite_documents
 from src.processing.cli_support import parse_chapters, parse_pages
+from src.processing.config.loader import ConfigLoader
 
 # Several names below are imported but not called here. That is deliberate:
 # they used to be DEFINED in this file, and callers — the test suite among them
@@ -175,8 +178,14 @@ def main() -> int:
     if args.review:
         return run_review(log)
 
+    if args.recite:
+        return run_recite(args, log)
+
     if not args.pdf:
         log.error("Give me a --pdf (a file or a folder), or --review.")
+        return 1
+
+    if not _citation_level_is_usable(args, log):
         return 1
 
     target = Path(args.pdf)
@@ -204,6 +213,42 @@ def run_review(log: logging.Logger) -> int:
 
     review_ledger(ledger, logger=log)
     return 0
+
+
+def run_recite(args: argparse.Namespace, log: logging.Logger) -> int:
+    """
+    Re-cite documents that are already processed. No PDF is read, no model runs.
+
+    For biology researchers: this is `--recite`. Use it after changing the
+    citation level (`citations.level` in the config, or `--citations`): it
+    works out each document's bibliographic record again at that level from
+    what its run already read, in well under a second per paper, and
+    leaves every page, figure and table exactly as it was.
+
+        run_prajnya.py --recite                       every document in run_outputs/
+        run_prajnya.py --recite --citations local     at a level, for this once
+        run_prajnya.py --recite --pdf <file|folder>   only these PDFs' documents
+        run_prajnya.py --recite --out <run dir>       documents of another run
+
+    A record somebody corrected by hand is never replaced.
+    """
+    if not _citation_level_is_usable(args, log):
+        return 1
+
+    out_root = resolve_batch_output(args.out)
+    json_paths, missing = _documents_to_recite(args, out_root)
+    for pdf in missing:
+        log.warning("%s has not been processed yet (no %s): nothing to re-cite.",
+                    pdf.name, f"{pdf.stem}.v6.json")
+    if not json_paths:
+        log.error("No processed documents to re-cite under %s.", out_root / "documents")
+        return 1
+
+    config = ConfigLoader(CONFIG_ROOT, logger=log).strategy()
+    results = recite_documents(json_paths, config, override=args.citations,
+                               ledger=_open_ledger(log), logger=log)
+    _report_recite(results, log)
+    return 2 if any(result.status == RECITE_SKIPPED for result in results) else 0
 
 
 def run_folder(folder: Path, args: argparse.Namespace,
@@ -291,6 +336,76 @@ def run_one_document(pdf_path: Path, args: argparse.Namespace,
 
 # --- helpers (after the main functions, per CLAUDE.md) ----------------------
 
+def _documents_to_recite(args: argparse.Namespace, out_root: Path):
+    """
+    The output files `--recite` should work on, and the PDFs that have none.
+
+    With `--pdf`, only the documents of that PDF (or of the PDFs in that
+    folder); without it, every document in the run directory.
+
+    Returns:
+        `(json_paths, pdfs_without_a_document)`.
+    """
+    documents = out_root / "documents"
+    if not args.pdf:
+        return sorted(documents.glob("*.v6.json")), []
+
+    target = Path(args.pdf)
+    pdfs = find_pdfs(target, recursive=args.recursive) if target.is_dir() else [target]
+    found, missing = [], []
+    for pdf in pdfs:
+        json_path = documents / f"{pdf.stem}.v6.json"
+        (found if json_path.is_file() else missing).append(json_path if json_path.is_file() else pdf)
+    return found, missing
+
+
+def _report_recite(results, log: logging.Logger) -> None:
+    """One line per document that changed, then the totals."""
+    for result in results:
+        for name, (before, after) in result.changed.items():
+            log.info("  %s  %s: %r -> %r", result.document[:40], name, before, after)
+        if result.level_after == "online" and result.reference_list_status:
+            log.info("  %s  references: %s", result.document[:40],
+                     _reference_summary(result))
+    counts = {status: sum(1 for r in results if r.status == status)
+              for status in ("recited", "level_recorded", RECITE_SKIPPED)}
+    flagged = sum(1 for r in results if r.requires_review)
+    level = next((r.level_after for r in results if r.level_after), "?")
+    log.info("Re-cited at level %s: %d derived again, %d kept (level recorded), "
+             "%d skipped; %d flagged for review.", level, counts["recited"],
+             counts["level_recorded"], counts[RECITE_SKIPPED], flagged)
+
+
+def _reference_summary(result) -> str:
+    """'254 (found)' when a list was written, else just its status, e.g. 'not_available'."""
+    if result.reference_count:
+        return f"{result.reference_count} ({result.reference_list_status})"
+    return str(result.reference_list_status)
+
+
+def _citation_level_is_usable(args: argparse.Namespace, log: logging.Logger) -> bool:
+    """
+    Check the citation level ONCE, before any PDF is opened or model loaded.
+
+    For biology researchers: the level decides what may leave this computer.
+    A misspelt level in the config, or a level that is not built yet, must
+    stop the run here with a plain message, not after the first document's
+    GPU work, and never by quietly running at some other level.
+
+    Returns:
+        Whether the run can go ahead.
+    """
+    try:
+        config = ConfigLoader(CONFIG_ROOT, logger=log).strategy()
+        level, set_by = resolve_level(config, args.citations)
+        require_built(level)
+    except (ValueError, NotImplementedError) as error:
+        log.error("%s", error)
+        return False
+    log.info("Citation level for this run: %s (set by %s)", level, set_by)
+    return True
+
+
 def _backend_for(request: RunRequest):
     """The PDF backend this run uses — built once and shared, as a batch does."""
     from src.processing.pdf import get_backend
@@ -363,6 +478,16 @@ def _parse_args() -> argparse.Namespace:
                         help="1-based pages: '4', '2-5', or '1 3-5' (default: all)")
     parser.add_argument("--force", action="store_true",
                         help="re-process even if the ledger already has the document")
+    parser.add_argument("--recite", action="store_true",
+                        help="re-cite documents ALREADY processed, at the current citation "
+                             "level, and stop: no PDF is read and no model is called. "
+                             "With --pdf, only those documents; without, every document "
+                             "in the run directory (--out, default run_outputs)")
+    parser.add_argument("--citations", default=None, choices=CITATION_LEVELS,
+                        help="how the bibliographic record is established, for this run only: "
+                             "local (nothing leaves the machine), zotero (your Zotero "
+                             "library) or online (not built yet). Default: `citations.level` "
+                             "in config/research_article_strategy.yaml")
     parser.add_argument("--out", default=None,
                         help="where results go. For one PDF, a JSON path; for a "
                              "folder, the run directory. Default: "

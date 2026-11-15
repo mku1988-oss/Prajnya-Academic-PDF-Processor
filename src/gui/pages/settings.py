@@ -32,7 +32,7 @@ from nicegui import ui
 
 from src.processing.book_prompt import parse_chapter_selection
 
-from .. import persistent_settings, theme
+from .. import persistent_settings, strategy_editor, theme
 
 _BOOK_POLICY_OPTIONS = {
     "": "Inherit from processing_policy.yaml (default: ask)",
@@ -40,6 +40,13 @@ _BOOK_POLICY_OPTIONS = {
     "ask": "Ask — show a dialog for every book",
     "all": "Read every chapter (hours of GPU on a full volume)",
     "chapters": "Read specific chapters (listed below)",
+}
+
+#: Every level that can be run today.
+_CITATION_LEVEL_OPTIONS = {
+    "local": "Local — Prajnya's own reading of the PDF. Nothing leaves this computer",
+    "zotero": "Zotero — checked against your Zotero library (contacts Zotero)",
+    "online": "Online — checked against Crossref and OpenAlex (sends the DOI, or the title and first author)",
 }
 
 _PDF_BACKEND_OPTIONS = {
@@ -63,6 +70,7 @@ def mount() -> None:
 
         fields: Dict[str, Any] = {}
         _section_paths(fields, settings)
+        _section_citations(fields)
         _section_book_policy(fields, settings)
         _section_processing_defaults(fields, settings)
         _section_appearance(fields, settings)
@@ -133,6 +141,37 @@ def _section_book_policy(fields: Dict[str, Any], settings: Dict[str, Any]) -> No
         ).classes("w-full").props("outlined dense")
 
 
+def _section_citations(fields: Dict[str, Any]) -> None:
+    """
+    The citation level: how much leaves this computer to identify a paper.
+
+    Unlike every other field on this page, this one is NOT stored in the
+    GUI's own settings file. It lives in the strategy YAML
+    (`citations.level`), which is the single source for the command line and
+    the GUI alike, and Save edits that one line of it.
+    """
+    with _section("Citations"):
+        ui.label("How a paper's bibliographic record is established. Stored in "
+                 "config/research_article_strategy.yaml, so the command line "
+                 "uses the same choice.").classes("text-xs").style(
+            f'color: {theme.var("text_muted")};'
+        )
+        try:
+            current = strategy_editor.read_citation_level()
+        except Exception as error:                  # an unreadable or misspelt YAML
+            ui.label(f"Could not read the citation level: {error}").classes(
+                "text-xs").style(f'color: {theme.var("vermillion")};')
+            return
+        fields["citation_level"] = ui.select(
+            _CITATION_LEVEL_OPTIONS, value=current, label="Citation Level",
+        ).classes("w-full").props("outlined dense")
+        fields["citation_level_at_load"] = current
+        ui.label("Online (Crossref / OpenAlex, with the paper's reference list) "
+                 "is planned and not built yet.").classes("text-xs").style(
+            f'color: {theme.var("text_muted")};'
+        )
+
+
 def _section_processing_defaults(fields: Dict[str, Any], settings: Dict[str, Any]) -> None:
     with _section("Processing Defaults"):
         with ui.row().classes("w-full justify-between items-center"):
@@ -192,8 +231,31 @@ def _save(fields: Dict[str, Any], status_label: ui.label) -> None:
     settings["ui_theme"] = fields["ui_theme"].value
 
     persistent_settings.SettingsManager.save(settings)
+    if not _save_citation_level(fields):
+        status_label.text = ""
+        return
     status_label.text = "Saved."
     ui.notify("Settings saved.", type="positive")
+
+
+def _save_citation_level(fields: Dict[str, Any]) -> bool:
+    """
+    Write a changed citation level into the strategy YAML (one line of it).
+
+    Returns:
+        False when the write failed; the user is told why and "Saved." is
+        not shown, because one of the things on this page was NOT saved.
+    """
+    select = fields.get("citation_level")
+    if select is None or select.value == fields.get("citation_level_at_load"):
+        return True
+    try:
+        strategy_editor.write_citation_level(select.value)
+    except Exception as error:
+        ui.notify(f"The citation level was not saved: {error}", type="negative")
+        return False
+    fields["citation_level_at_load"] = select.value
+    return True
 
 
 def _validated_chapters(text: str) -> str:

@@ -6,6 +6,100 @@ it in `document_info.pipeline_version`.
 
 ---
 
+## 6.6.0
+
+### New: reference lists, with every in-text citation linked
+
+- **At citation level `online`, each paper gets its reference list**, in
+  printed order: the publisher's deposited list from Crossref, gaps filled
+  from OpenAlex, checked against the list printed in the PDF. Each entry
+  carries its position, printed number, first author, year, title, journal,
+  DOI and the text as printed.
+- **Every citation printed in the paper's text is linked to the entry it
+  names**, numbered (`[3–7]`, `(12, 14)`, superscripts) and author–year
+  (`(Doi et al., 2005)`, `Berendsen (1962)`). Each one records the entries it
+  cites and where it stands in the page text Prajnya writes out.
+- **A wrong link is worse than none.** A numbered citation links only where
+  an entry's printed number equals its place in the list; numbers beyond the
+  list and affiliation marks on author lines are not citations. An
+  author–year citation links only when exactly one entry has that surname and
+  year; two candidates, or none, give no link.
+- **`online` sends only the paper's DOI or title** to Crossref and OpenAlex,
+  never page content. The default level is still `local`, which sends
+  nothing. `--recite --citations online` adds reference lists and links to
+  documents already processed, without reading their pages again.
+
+### Changed: the citation level, and its default
+
+- **One setting now decides how a paper's bibliographic record is
+  established:** `citations.level` in
+  `config/research_article_strategy.yaml`, with `--citations` on the command
+  line to override it for one run, and a "Citation Level" choice on the
+  Studio's Settings page.
+  - `local` (**the new default**): Prajnya's own reading of the PDF. Nothing
+    leaves the computer.
+  - `zotero`: checked against your Zotero library, as before.
+  - `online`: Crossref, by DOI or by title under a strict acceptance rule,
+    with OpenAlex as fallback; the only level with reference lists and
+    linked citations.
+- **If you use Zotero, set `level: zotero`.** Until now Zotero was used
+  whenever its credentials were present; from this release it is used only
+  at that level. At `zotero` the results are unchanged (checked on the
+  corpus). At `local` the title, authors and DOI are the same for every
+  corpus document that prints a DOI, but the journal name is less reliable
+  (`eval/citation_levels/GATE_S0B.md`).
+- **`--recite` changes the level of documents already processed, without
+  re-processing them.** It works out each document's record again from what
+  its run already read: about two seconds for nine documents, with no PDF
+  read and no model called. Pages, figures and tables are untouched, and a
+  record corrected by hand is never replaced. A run that skips documents
+  processed at another level now says so
+  (`eval/citation_levels/GATE_S0C.md`).
+- The old `zotero.enabled` and `zotero.offline_mode` switches are gone from
+  the shipped config. A config file that still has them and names no level
+  behaves as it did.
+- A document's record of where its DOI came from (`doi_source`) is now kept
+  in the output; it used to be dropped.
+
+### Output format (contract 1.1)
+
+- **Every document now says how to cite it.** A new top-level `citations`
+  block gives the citation level the run used (`local`, `zotero` or
+  `online`), which step supplied the metadata, and a short label to cite the
+  document by ("Bella, 2016"). A document with no usable author, editor or
+  title is cited by its file name, and says so; the file name is never
+  written into the title. At `online` the block also carries the paper's
+  reference list (`references`) and its linked in-text citations
+  (`markers`, whose `numbers` are positions in `references`).
+  This is an addition: programs written for contract 1.0 are unaffected.
+  Two example files are in `contract/examples/`
+  (`docs/citation_levels_plan.md`).
+
+### Improved
+
+- **A table continued onto the next page gets its column headers back.** When
+  a table runs over two pages and the second page prints no header row, the
+  header is taken from the first page and shown to the reader above the
+  continuation, then removed from the result. It applies only when the two
+  pages' column lines match exactly and the reader returns the header; any
+  doubt reads the table as before. On the corpus it fixes the Springer book's
+  Table 13.1 continuation (a dropped column put every value under the wrong
+  gene) and improves Table 13.3's; the continuations that print their own
+  header are unchanged, as are all other tables
+  (`eval/header_carry/GATE.md`).
+- **A figure the layout detector missed is recovered from its caption.**
+  When a printed caption ("Figure 11 ...") has no figure cut out on its page,
+  the space above that caption is searched again with a lower confidence
+  threshold, and what is found there becomes the figure. Two corpus figures
+  that were never extracted are now there, and a figure that had been given
+  the wrong number from the previous page now carries its own
+  (`eval/orphan_captions/GATE.md`).
+- **A figure caption cut short is completed from the PDF's text** when the
+  detected caption is only the figure's title, or stops partway: six article
+  captions now carry their full legend (`eval/caption_source/GATE.md`).
+
+---
+
 ## 6.5.0
 
 ### Setup

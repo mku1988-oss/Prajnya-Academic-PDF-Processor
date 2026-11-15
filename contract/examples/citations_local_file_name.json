@@ -1,0 +1,53 @@
+{
+  "document_info": {
+    "filename": "scan0042.pdf",
+    "document_type": "research_article",
+    "processing_time": 95.0,
+    "success": true,
+    "pipeline_version": "v6.6.0",
+    "contract_version": "1.1"
+  },
+  "metadata_final": {
+    "title": null,
+    "authors": [],
+    "year": null,
+    "doi": null,
+    "journal": null,
+    "publisher": null,
+    "isbn": null,
+    "editors": [],
+    "validation_source": "file_name",
+    "validation_confidence": 0.0
+  },
+  "citations": {
+    "level": "local",
+    "level_set_by": "default",
+    "metadata_source": "file_name",
+    "source_label": "scan0042.pdf",
+    "cited_by_file_name": true,
+    "reference_list": {"status": "not_requested"},
+    "references": [],
+    "markers": []
+  },
+  "pages": [
+    {
+      "page_number": 1,
+      "content": "A scanned page whose title page could not be read.",
+      "quality_score": 0.6,
+      "metadata": {
+        "processing_method": "glm_fullpage",
+        "page_type": "complex_visual",
+        "figures": [],
+        "tables": [],
+        "headings": []
+      }
+    }
+  ],
+  "summary": {"errors": [], "page_count": 1, "figure_count": 0},
+  "profile": {
+    "pdf_path": "/example/only/scan0042.pdf",
+    "processing_result": {"chapters": []}
+  },
+  "review_status": "provisional",
+  "review_needed_fields": ["title", "authors", "doi", "journal"]
+}

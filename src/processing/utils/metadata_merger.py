@@ -207,6 +207,21 @@ def merge_metadata(
         elif key in vlm_metadata:
             merged[key] = vlm_metadata[key]
 
+    # --------------------------
+    # Where the DOI came from
+    # --------------------------
+    # `doi_source` / `doi_confidence` describe the DOI Prajnya itself read
+    # (text layer or vision model). They used to be dropped here, because
+    # this function copies a fixed list of keys, so no output file could say
+    # where its DOI came from. They are kept only while the merged DOI IS
+    # that DOI; a DOI supplied by the canonical record is not described by
+    # them.
+    extracted_doi = normalize_doi(vlm_doi)
+    if merged.get("doi") and extracted_doi and merged["doi"].lower() == extracted_doi.lower():
+        for key in ("doi_source", "doi_confidence"):
+            if vlm_metadata.get(key) is not None:
+                merged[key] = vlm_metadata[key]
+
     # Normalize blanks
     for key in ["doi", "journal", "publisher", "title"]:
         if merged.get(key) == "":

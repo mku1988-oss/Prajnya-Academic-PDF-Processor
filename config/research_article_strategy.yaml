@@ -17,9 +17,44 @@ processing:
   retry_delay_seconds: 2
   log_level: INFO
   detailed_logging: false
+# --- Citations: how a paper's bibliographic record is established ----------
+# ONE setting decides how much leaves this computer to find out what paper a
+# PDF is (docs/citation_levels_plan.md). `--citations <level>` on the command
+# line overrides it for a single run.
+#
+#   local    Prajnya's own reading of the PDF: the text-layer DOI and the
+#            title page. NOTHING leaves the machine. The default, and what
+#            every release ships with: `tools/stage_transform.py` pins this
+#            line to `local` on the way to GitHub, whatever it says here.
+#   zotero   the record is checked against your Zotero library (title
+#            queries and a library sync go to Zotero's servers). Needs the
+#            `zotero` credentials below.
+#   online   Crossref, then OpenAlex, are asked for the record. Only a DOI, or
+#            a title and first-author surname, is ever sent: never page text,
+#            the file name or a path. (The paper's reference list: stage S2,
+#            not built yet.)
+#
+# At every level, a document with no usable author, editor or title is cited
+# by its file name and flagged for review.
+citations:
+  level: local
+  # Used at level `online` only. Every answer is kept in
+  # persistence/citation_cache/, so a re-run sends nothing.
+  online:
+    prefer_zotero: false        # true: ask your Zotero library before the registries
+    pacing_seconds: 1.2         # least time between two live requests
+    timeout_seconds: 20
+    max_hits: 5                 # candidates examined per search
+    title_similarity: 0.90      # a record's title must be at least this close
+    year_tolerance: 1           # print vs online year; editions differ by more
+    contact_email: null         # put yours here for the registries' faster "polite" pool
+    crossref_host: https://api.crossref.org
+    openalex_host: https://api.openalex.org
+    openalex_api_key: ${OPENALEX_API_KEY}   # optional; unset = free tier
 zotero:
-  enabled: true
-  offline_mode: false
+  # Credentials only. Whether Zotero is used is decided by `citations.level`
+  # above (the old `enabled` / `offline_mode` switches are gone; a config
+  # file that still has them and names no level behaves as it did).
   # Interpolated by config/loader.py from the environment (V6 has real ${ENV}
   # interpolation; unset variables resolve to null so guards fire early).
   # The entrypoint must call load_dotenv() first.

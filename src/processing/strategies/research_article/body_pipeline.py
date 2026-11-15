@@ -71,6 +71,8 @@ from .figure_escalation import (
     page_needs_second_opinion,
 )
 from .figures import extract_page_figures, write_figure_manifest
+from ...utils.orphan_figures import RESCUE_THRESHOLD, rescue_orphan_figures
+from ...utils.table_continuation import ContinuationTracker
 from .tables import append_table_anchors, extract_page_tables, write_table_manifest
 from .provider_factory import ProviderFactory
 from .rendering import DocumentCache
@@ -111,6 +113,7 @@ class BodyPipeline:
         figure_escalation_models: Optional[List[str]] = None,
         logger: Optional[logging.Logger] = None,
         table_crop_max_tokens: Optional[int] = None,
+        rescue_orphan_figures: bool = True,
     ) -> None:
         self.extraction_provider = extraction_provider
         # Output cap for table-crop reads; None keeps the model's own limit.
@@ -135,6 +138,16 @@ class BodyPipeline:
         self.figure_escalation_detector = figure_escalation_detector
         self.figure_escalation_models = figure_escalation_models or []
         self.logger = logger or logging.getLogger("BodyPipeline")
+        # The header carry for continued tables: one per document's body pass
+        # (`process_body_pages`), None outside it. See utils/table_continuation.py.
+        self._table_continuation: Optional[ContinuationTracker] = None
+        # The layout model at the rescue cut-off, built on first use only
+        # (see `_rescue_orphan_figures`).
+        self._rescue_detector = None
+        # Whether a printed caption with no crop may add a figure the layout
+        # model missed (see `_rescue_orphan_figures`). ON for articles and
+        # single chapters; a whole-book read switches it OFF.
+        self.rescue_orphan_figures = rescue_orphan_figures
 
     # ------------------------------------------------------------------ #
     # construction from config
@@ -149,6 +162,7 @@ class BodyPipeline:
         onnx_model_path: Path | str = DEFAULT_ONNX_MODEL_PATH,
         logger: Optional[logging.Logger] = None,
         output_root: Optional[Path] = None,
+        rescue_orphan_figures: bool = True,
     ) -> Optional["BodyPipeline"]:
         """
         Wire the pipeline from the strategy config, or return None when the
@@ -160,6 +174,8 @@ class BodyPipeline:
                 None means `paths.DEFAULT_OUTPUT_ROOT` — the same absolute
                 place a run from the repo root has always produced, so nothing
                 moves unless `--out` says so.
+            rescue_orphan_figures: False switches the orphan-caption figure
+                rescue off for this pipeline (the whole-book reader does).
         """
         log = logger or logging.getLogger("BodyPipeline")
         local_cfg = strategy_config.get("vlm_provider", {}).get("local_server", {})
@@ -231,6 +247,7 @@ class BodyPipeline:
             figure_escalation_models=escalation_models,
             logger=log,
             table_crop_max_tokens=table_crop_max_tokens,
+            rescue_orphan_figures=rescue_orphan_figures,
         )
         log.info(
             "GLM two-phase offline path ENABLED: extraction=%s, layout=%s, "
@@ -260,6 +277,9 @@ class BodyPipeline:
 
         results: Dict[int, ContentPage] = {}
         page_total = len(page_indices)
+        # A table continued onto the next page may print no column headers;
+        # this carries the previous page's header to it (ledger T22).
+        self._table_continuation = ContinuationTracker(logger=self.logger)
         for position, page_idx in enumerate(page_indices, start=1):
             # The only NEW log line on the GPU-hot path. It changes no
             # extracted byte, but it is why a progress bar can exist at all.
@@ -277,6 +297,7 @@ class BodyPipeline:
                     metadata={"error": str(error), "processing_method": "glm_failed"},
                 )
             _record_page_time(results[page_idx], time.perf_counter() - page_started)
+        self._table_continuation = None
 
         self._second_opinion_on_figures(cache, results)
         self._recover_overleaf_captions(cache, results)
@@ -351,6 +372,8 @@ class BodyPipeline:
             page_idx, read_crop=self._read_caption_crop,
             path_root=self.figures_path_root, logger=self.logger,
             body_style=cache.body_style())
+        figures = self._rescue_orphan_figures(cache, page, page_idx, page_image,
+                                              detections, figures)
         if figures:
             final_text = append_figure_anchors(final_text, figures)
 
@@ -363,7 +386,8 @@ class BodyPipeline:
             page, page_image, detections, cache.pdf_path, self.tables_base_dir,
             page_idx, recovered=repair_meta.get("recovered_tables"),
             path_root=self.figures_path_root, logger=self.logger,
-            read_table_crop=self._read_table_crop)
+            read_table_crop=self._read_table_crop,
+            continuation=self._table_continuation)
         if tables:
             final_text = append_table_anchors(final_text, tables)
 
@@ -782,6 +806,48 @@ class BodyPipeline:
             # read already produced, instead of paying for it twice.
             "recovered_tables": result.tables,
         }
+
+    def _rescue_orphan_figures(self, cache: DocumentCache, page: PdfPage, page_idx: int,
+                               page_image: Image.Image,
+                               detections: Optional[List[Detection]],
+                               figures: List) -> List:
+        """
+        Add a figure the detector missed when its printed caption has no crop.
+
+        For biology researchers: some real figures score below the detector's
+        cut-off (ledger T24). A caption on the page that no crop claims is the
+        evidence; only in the space above that caption are weaker boxes
+        trusted (`utils/orphan_figures.py`). When something is found, figure
+        extraction is re-run with it, so the rescued figure is cropped,
+        labelled and captioned by the normal path. Any failure keeps the
+        figures as they were.
+
+        Switched OFF (`self.rescue_orphan_figures = False`) when a whole book's
+        chapters are read. Two-column books print side captions, which the
+        text layer returns interleaved with the neighbouring column, and the
+        rescued figure would carry that garbled caption. In the measured book
+        the rescue found nothing the GPU second opinion did not already give.
+        """
+        if not self.rescue_orphan_figures:
+            return figures
+        if detections is None or not hasattr(self.layout_detector, "at_threshold"):
+            return figures
+        try:
+            if self._rescue_detector is None:
+                self._rescue_detector = self.layout_detector.at_threshold(RESCUE_THRESHOLD)
+            rescued = rescue_orphan_figures(page, page_image, figures, detections,
+                                            self._rescue_detector, logger=self.logger)
+            if not rescued:
+                return figures
+            return extract_page_figures(
+                page, page_image, list(detections) + rescued, cache.pdf_path,
+                self.figures_base_dir, page_idx, read_crop=self._read_caption_crop,
+                path_root=self.figures_path_root, logger=self.logger,
+                body_style=cache.body_style())
+        except Exception as error:  # a rescue must never cost the page its figures
+            self.logger.warning("Orphan-figure rescue failed on page %d: %s",
+                                page_idx + 1, error)
+            return figures
 
     def _read_table_crop(self, crop_image: Image.Image) -> str:
         """Re-read one cropped table with the extraction model."""

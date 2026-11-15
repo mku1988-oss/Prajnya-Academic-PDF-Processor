@@ -30,6 +30,10 @@ class LedgerRecord(BaseModel):
 
     validation_confidence: float
     validation_source: str
+    # The citation level this row was established at (local / zotero /
+    # online). None on rows written before levels existed. A re-run at a
+    # different level does not reuse the row's metadata.
+    citation_level: Optional[str] = None
     manual_entry: bool = False
     
     # PHASE 3.8: NEW FIELDS

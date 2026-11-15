@@ -54,6 +54,8 @@ DEFAULT_OUTPUT_ROOT = REPO_ROOT / "run_outputs"
 PERSISTENCE_ROOT = REPO_ROOT / "persistence"
 DEFAULT_LEDGER_PATH = str(PERSISTENCE_ROOT / "semantic_ledger.csv")
 DEFAULT_ZOTERO_CACHE_PATH = str(PERSISTENCE_ROOT / "zotero_cache")
+#: Raw Crossref / OpenAlex answers (citation level `online`), one file per request.
+DEFAULT_CITATION_CACHE_PATH = str(PERSISTENCE_ROOT / "citation_cache")
 
 
 def anchor_output_path(value: Optional[Any], output_root: Optional[Path],

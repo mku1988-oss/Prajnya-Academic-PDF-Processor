@@ -44,7 +44,6 @@ class SettingsManager:
         "default_batch_folder": "",
         "recursive_default": False,
         "skip_review_default": True,
-        "zotero_enabled": True,
         "default_strategy_profile": "research_article_strategy.yaml",
         "ui_theme": "saraswati_light",
         "log_level": "INFO",

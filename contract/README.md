@@ -7,9 +7,19 @@ This folder says exactly what they may rely on.
 - **`prajnya_document.schema.json`** is the promise, as a JSON Schema
   (draft 2020-12). It is checked by `tests/test_output_contract.py` against
   the writer's output and against every document in `run_outputs/`.
-- **Contract version: 1.0.** Every file written from v6.4.0 on says so in
-  `document_info.contract_version`. A file without that key was written by
-  6.3.0 or earlier and follows contract 1.0 in every respect.
+- **Contract version: 1.1.** Every file written from v6.4.0 on says its
+  version in `document_info.contract_version`. A file without that key was
+  written by 6.3.0 or earlier and follows contract 1.0 in every respect.
+- **`examples/`** holds two small hand-written documents that follow the
+  contract, so a reader can be built and tested before real files exist:
+  `citations_online.json` (a reference list and linked marks) and
+  `citations_local_file_name.json` (a document cited by its file name).
+  Their bibliographic content is illustrative. The tests validate both.
+
+| version | first release | what changed |
+|---|---|---|
+| 1.0 | v6.4.0 | the contract is written down |
+| 1.1 | v6.6.0 | the top-level `citations` block: how to cite the document, at which level that was established, and (level `online`) its reference list and linked in-text marks. Additive: a 1.0 reader is unaffected. |
 
 Anything the schema does not name is internal and may change in any release:
 for example `pages[].metadata.analysis`, `coverage`, and the rest of the
@@ -59,6 +69,33 @@ compares the first two fails if you forget.
    considering that it names a directory on someone's computer.
 9. **A book's front-matter pages carry no `processing_method`** (a known,
    deferred gap). A reader should call their route "unknown", not guess.
+
+10. **The `citations` block is present at every level** (from contract 1.1).
+    A file with no block follows contract 1.0: treat it as carrying no
+    reference list. Never infer the level from what is missing; read
+    `citations.level`.
+11. **`level` is what was allowed; `metadata_source` is what happened.** A
+    run at `zotero` whose paper is not in the library has
+    `metadata_source: extracted`.
+12. **`source_label` is how to cite the document** ("Bella, 2016"). When
+    `cited_by_file_name` is true it is the PDF's file name, and
+    `metadata_final.title` is null: the file name is never written into
+    the title. Such a document needs a human.
+13. **`reference_list.status` separates three kinds of "no list"**:
+    `not_requested` (the level does not fetch one), `not_available` (asked;
+    none exists) and `not_reached` (the network failed, nothing is known).
+14. **A reference is a cited work, not a read one.** Prajnya has not read
+    the paper behind `references[]`. A sentence resting on it should be
+    cited as "Doi et al., 2005, cited in Bella, 2016", never as the primary
+    paper alone.
+15. **`markers` can be empty while `references` is not.** Marks are linked
+    only when the list passed its checks; a wrong link is worse than none.
+    A mark's `numbers` are the `position`s of the references it cites (for a
+    numbered list a linked reference's printed number equals its position;
+    an author-year mark, `kind` "author_year", is linked by author and year
+    and only when exactly one entry fits).
+    `content_offset` indexes that page's `content` string and is null when
+    the mark could not be found there exactly once.
 
 ## Checking a file yourself
 

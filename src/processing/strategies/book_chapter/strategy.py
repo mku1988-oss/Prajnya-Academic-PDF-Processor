@@ -47,11 +47,13 @@ class BookChapterStrategy:
                  logger: Optional[logging.Logger] = None,
                  article_strategy: Optional[ResearchArticleStrategy] = None,
                  refresh_metadata: bool = False,
-                 output_root: Optional[Path] = None) -> None:
+                 output_root: Optional[Path] = None,
+                 citation_level: Optional[str] = None) -> None:
         self.logger = logger or logging.getLogger("BookChapterStrategy")
         self.reader = article_strategy or ResearchArticleStrategy(
             config_root, pdf_backend=pdf_backend, logger=self.logger,
-            refresh_metadata=refresh_metadata, output_root=output_root)
+            refresh_metadata=refresh_metadata, output_root=output_root,
+            citation_level=citation_level)
 
     def process(self, profile: DocumentProfile,
                 test_pages_override: Optional[List[int]] = None) -> DocumentProfile:

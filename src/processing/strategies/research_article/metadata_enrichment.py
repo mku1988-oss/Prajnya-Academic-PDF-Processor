@@ -29,6 +29,10 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from ....processing.ledger.semantic_ledger import SemanticLedger, generate_hash
+from ...citations.block import SOURCE_FILE_NAME, source_label
+from ...citations.acceptance import clean_author_list
+from ...citations.level import LEVEL_LOCAL, LEVEL_ONLINE
+from ...citations.local_confidence import CONFIDENCE_UNCONFIRMED, local_confidence
 from ...models import ContentPage, DocumentProfile
 from ...utils.metadata_merger import merge_metadata
 from ...utils.zotero_service import ZoteroService, normalize_doi_for_compare
@@ -96,11 +100,30 @@ def enrich_metadata(
     doi_threshold: float = 0.85,
     use_ledger_cache: bool = True,
     logger: Optional[logging.Logger] = None,
+    citation_level: Optional[str] = None,
+    file_name: Optional[str] = None,
+    online_chain: Any = None,
 ) -> Dict[str, Any]:
     """
     The final enrichment step: ledger cache -> Zotero -> merge -> provenance.
 
+    The citation level decides what happens here (see `citations/level.py`):
+
+        local    nobody is asked. Confidence comes from how well the
+                 vision model's reading and the PDF's text layer agree.
+        zotero   the Zotero library is asked, exactly as before the level
+                 existed.
+        (none)   `citation_level=None`: the behaviour from before the level
+                 existed, kept for callers that never name one.
+
+    At every named level a record with no author, editor or title to cite
+    by is marked as cited by its file name and flagged for review.
+
     Args:
+        citation_level: the level this run uses, or None (see above).
+        online_chain: the Crossref/OpenAlex chain, at level `online`.
+        file_name: the PDF's file name, for the file-name fallback. Defaults
+            to `pdf_path`'s name.
         vlm_metadata: the title-page extraction (a hypothesis).
         pdf_path: the source PDF (hashed for the ledger lookup).
         title_page_text: referee text for the three-way merge.
@@ -118,20 +141,22 @@ def enrich_metadata(
         runner) decides when to write it to the ledger.
     """
     log = logger or logging.getLogger("MetadataEnrichment")
-    log.info("Enriching metadata using cache + Zotero + referee text…")
-
-    # The text-layer DOI must win BEFORE the Zotero lookup, which matches on
-    # DOI first — otherwise a garbled VLM DOI fetches the wrong paper.
-    vlm_metadata = prefer_text_layer_doi(vlm_metadata, profile,
-                                         doi_threshold=doi_threshold, logger=log)
+    log.info("Enriching metadata (citation level: %s)…", citation_level or "not named")
 
     document_id = generate_hash(str(pdf_path))
 
     if ledger and use_ledger_cache:
         cached = ledger.get_record(document_id)
-        if cached:
+        if cached and _cached_row_is_usable(cached, citation_level):
             log.info("Ledger cache hit for document %s", document_id[:12])
             return cached.model_dump()
+        if cached:
+            # A row written at another level answers a different question:
+            # a `local` row has never been checked against Zotero, and
+            # returning it at `zotero` would hide that for ever.
+            log.info("Ledger row for %s was written at citation level %r, not %r: "
+                     "re-deriving metadata.", document_id[:12],
+                     getattr(cached, "citation_level", None), citation_level)
     elif ledger:
         # `--force` means redo the work, and metadata is work. Without this,
         # re-processing a document returned the row written by the FIRST run:
@@ -140,6 +165,59 @@ def enrich_metadata(
         # when a Zotero mapping fix appeared to have no effect.
         log.info("Ledger cache bypassed for %s — re-deriving metadata.",
                  document_id[:12])
+
+    return establish_metadata(
+        vlm_metadata, title_page_text=title_page_text, profile=profile,
+        zotero_service=zotero_service, doi_threshold=doi_threshold,
+        citation_level=citation_level, online_chain=online_chain,
+        file_name=file_name or Path(pdf_path).name, logger=log)
+
+
+def establish_metadata(
+    vlm_metadata: Dict[str, Any],
+    title_page_text: str = "",
+    profile: Any = None,
+    zotero_service: Optional[ZoteroService] = None,
+    doi_threshold: float = 0.85,
+    citation_level: Optional[str] = None,
+    file_name: str = "",
+    logger: Optional[logging.Logger] = None,
+    online_chain: Any = None,
+) -> Dict[str, Any]:
+    """
+    Establish a document's bibliographic record from what was read of it.
+
+    For biology researchers: this is the part of enrichment that needs
+    nothing but the READINGS: the vision model's title-page extraction,
+    the text-layer DOI and the title page's text. It needs no PDF on disk
+    and no ledger. That is what lets `--recite` change a document's
+    citation level in seconds, from its output file alone, with no GPU
+    (`citations/recite.py`). A normal run reaches it through
+    `enrich_metadata`, which adds the ledger cache in front.
+
+    Args:
+        vlm_metadata: the title-page extraction (a hypothesis).
+        title_page_text: referee text for the three-way merge.
+        profile: anything with `.doi` and `.doi_confidence` (the text
+            layer's DOI and how it was found), or None.
+        zotero_service: the Zotero library, at level `zotero` only.
+        doi_threshold: minimum text-layer DOI confidence to trust it.
+        citation_level: `local`, `zotero`, `online`, or None for the
+            behaviour from before levels existed.
+        file_name: the PDF's file name, for the file-name fallback.
+        logger: optional logger.
+        online_chain: the Crossref/OpenAlex chain (`citations/chain.py`),
+            used at level `online` only.
+
+    Returns:
+        The merged metadata dict, provenance included.
+    """
+    log = logger or logging.getLogger("MetadataEnrichment")
+
+    # The text-layer DOI must win BEFORE the Zotero lookup, which matches on
+    # DOI first — otherwise a garbled VLM DOI fetches the wrong paper.
+    vlm_metadata = prefer_text_layer_doi(vlm_metadata, profile,
+                                         doi_threshold=doi_threshold, logger=log)
 
     zotero_record: Dict[str, Any] = {}
     zotero_confidence = 0.0
@@ -155,9 +233,21 @@ def enrich_metadata(
             log.error("Zotero lookup failed: %s", error)
             zotero_record = {}
 
+    network = None
+    if citation_level == LEVEL_ONLINE and online_chain is not None:
+        zotero_record, zotero_confidence, zotero_source, network = _online_lookup(
+            online_chain, vlm_metadata, title_page_text, log)
+        if zotero_record:
+            # The model sometimes returns the whole author line as one string.
+            # With a registry record to merge against, tidy it first.
+            vlm_metadata = {**vlm_metadata,
+                            "authors": clean_author_list(vlm_metadata.get("authors"))}
+
     merged = merge_metadata(vlm_metadata, zotero_record, title_page_text)
     merged["validation_confidence"] = zotero_confidence
     merged["validation_source"] = zotero_source
+    apply_citation_level(merged, citation_level, title_page_text, file_name,
+                         logger=log, network=network)
     log.info("Merged Metadata (pre-review): %s", merged)
 
     provenance = annotate_provenance(merged)
@@ -170,8 +260,117 @@ def enrich_metadata(
     return merged
 
 
+def apply_citation_level(merged: Dict[str, Any], citation_level: Optional[str],
+                         title_page_text: str, file_name: str,
+                         logger: Optional[logging.Logger] = None,
+                         network: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Set a merged record's confidence and source according to the level.
+
+    For biology researchers: this is where "how much do we trust this
+    record, and who vouched for it?" is answered once the readings have
+    been merged.
+
+      - No level named: nothing changes (the behaviour before levels).
+      - `zotero`: nothing changes either. Zotero already set the confidence
+        and the source, and this level must give the same record as before.
+      - `local`: nobody vouched, so the confidence comes from how well
+        Prajnya's own readings agree (`citations/local_confidence.py`).
+      - `online`: an accepted Crossref/OpenAlex record keeps the confidence
+        and source the chain gave it. When no record was accepted, the
+        record stands on Prajnya's own reading exactly as at `local`; if the
+        cause was a dead network (`network == "unavailable"`) the confidence
+        is also capped at the unconfirmed value so the document is flagged.
+      - Any named level: a record with no author, editor or title is
+        cited by the PDF's file name. Its confidence becomes 0.0 and its
+        source `file_name`, which flags it for review. The file name itself
+        is NOT written into the record (it is the `source_label` of the
+        output's `citations` block): the title stays empty.
+
+    Args:
+        merged: the merged metadata; changed in place and returned.
+        citation_level: `local`, `zotero`, `online` or None.
+        title_page_text: the title page's text (referee for `local`).
+        file_name: the PDF's file name.
+        logger: optional logger.
+
+    Returns:
+        `merged`, carrying `citation_level` when one was named.
+    """
+    log = logger or logging.getLogger("MetadataEnrichment")
+    if citation_level is None:
+        return merged
+
+    merged["citation_level"] = citation_level
+
+    if citation_level == LEVEL_LOCAL:
+        confidence, source = local_confidence(merged, title_page_text)
+        merged["validation_confidence"] = confidence
+        merged["validation_source"] = source
+        log.info("Citation level local: confidence %.2f (%s).", confidence, source)
+
+    if citation_level == LEVEL_ONLINE and merged.get("validation_source") in (None, "", "unknown"):
+        confidence, source = local_confidence(merged, title_page_text)
+        if network == "unavailable":
+            confidence = min(confidence, CONFIDENCE_UNCONFIRMED)
+            merged["network"] = "unavailable"
+            log.warning("Citation level online, but no registry could be reached: "
+                        "the record stands on Prajnya's own reading and is flagged.")
+        merged["validation_confidence"] = confidence
+        merged["validation_source"] = source
+
+    _label, by_file_name = source_label(merged, file_name)
+    if by_file_name:
+        merged["validation_confidence"] = 0.0
+        merged["validation_source"] = SOURCE_FILE_NAME
+        log.warning("No author, editor or title could be established: %s is "
+                    "cited by its file name and flagged for review.", file_name)
+    return merged
+
+
+def _online_lookup(chain: Any, vlm_metadata: Dict[str, Any], title_page_text: str,
+                   log: logging.Logger):
+    """
+    Ask the online chain and unpack its answer for the merger.
+
+    A DOI the registry returned a DIFFERENT paper for is removed from the
+    reading first (acceptance rule 6): left in, the merger would copy it
+    into the final record.
+
+    Returns:
+        `(record, confidence, source, network)`.
+    """
+    try:
+        found = chain.get_canonical_metadata(vlm_metadata, title_page_text)
+    except Exception as error:      # a registry problem must never end a document run
+        log.error("Online citation lookup failed: %s", error)
+        return {}, 0.0, "unknown", "unavailable"
+    if found.get("drop_doi"):
+        log.warning("DOI %s belongs to a different paper than the title page: dropped.",
+                    vlm_metadata.get("doi"))
+        vlm_metadata["doi"] = None
+        vlm_metadata.pop("doi_source", None)
+        vlm_metadata.pop("doi_confidence", None)
+    return (found.get("record") or {}, found.get("confidence", 0.0),
+            found.get("source", "unknown"), found.get("network"))
+
+
+def _cached_row_is_usable(cached: Any, citation_level: Optional[str]) -> bool:
+    """
+    Whether a stored ledger row may stand in for re-deriving the metadata.
+
+    With no level named, any row is used (the behaviour before levels).
+    With one, only a row written at that same level: a row from another
+    level, or from before levels were recorded, is derived again. That
+    costs no GPU time; the title page has already been read by this point.
+    """
+    if citation_level is None:
+        return True
+    return getattr(cached, "citation_level", None) == citation_level
+
+
 def prefer_text_layer_doi(vlm_metadata: Dict[str, Any],
-                          profile: Optional[DocumentProfile] = None,
+                          profile: Any = None,
                           doi_threshold: float = 0.85,
                           logger: Optional[logging.Logger] = None) -> Dict[str, Any]:
     """
@@ -270,6 +469,10 @@ def annotate_provenance(merged: Dict[str, Any]) -> Dict[str, Any]:
 
     provenance["validation_confidence"] = merged.get("validation_confidence", 0.0)
     provenance["validation_source"] = merged.get("validation_source", "unknown")
+
+    network = merged.pop("network", None)      # metadata about metadata, like suspicious_authors
+    if network:
+        provenance["network"] = network
 
     retrieval = merged.get("retrieval_provenance", {})
     if retrieval:

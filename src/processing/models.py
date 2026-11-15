@@ -101,6 +101,9 @@ class ExtractedMetadata(BaseModel):
         None, description="Confidence (0.0-1.0) in the metadata, based on its source")
     last_updated: Optional[str] = Field(
         None, description="Timestamp of the last verification or update")
+    citation_level: Optional[str] = Field(
+        None, description="Citation level this record was established at: "
+                          "local, zotero or online (see citations/level.py)")
 
     # Provenance tracking. Stored as 'provenance' in the model while dicts use
     # the '_provenance' key — intentional, pydantic fields cannot start with
@@ -188,6 +191,22 @@ class ProcessingResult(BaseModel):
                     "`start_page_printed` is the page number as printed in the "
                     "book, NOT an index into the PDF — mapping between the two "
                     "needs the body pages (see plan.md, book reading pipeline)")
+
+    # How the bibliographic record was established. Stamped by the runner,
+    # once, for every strategy (see `citations/level.py`). None means the
+    # result was built outside a run.
+    citation_level: Optional[str] = Field(
+        None, description="Citation level the run used: local, zotero or online")
+    citation_level_set_by: Optional[str] = Field(
+        None, description="What decided the level: cli, config, legacy_config, default")
+    # The paper's own reference list (level `online`, articles only). It is
+    # EXCLUDED from dumps on purpose: the whole profile is written into the
+    # output file under `profile`, and the list must appear once, in the
+    # `citations` block, not twice.
+    citation_references: Optional[Dict[str, Any]] = Field(
+        None, exclude=True,
+        description="Reference list found at level online: {reference_list, "
+                    "references}. Carried to the writer; never dumped with the profile")
 
     # Quality and bookkeeping
     overall_quality: Optional[float] = Field(None, ge=0.0, le=1.0,

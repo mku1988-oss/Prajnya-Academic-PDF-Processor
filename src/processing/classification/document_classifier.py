@@ -191,6 +191,10 @@ def gather_classification_signals(page_texts: Dict[int, str], page_count: int,
 # the book strategy's TOC parser recognises exactly the same lines.
 DOT_LEADER_PATTERN = DOT_LEADER_LINE_PATTERN
 
+# What a contents entry's title ends with, just before its leaders: a word of
+# three or more letters (accented letters included), not a number or a sign.
+TOC_ENTRY_ENDS_IN_WORD = re.compile(r"[^\W\d_]{3,}[\s\.:,;)\]]*$")
+
 # A DOI whose suffix says "this is part of a book". Three shapes, all seen in
 # the sample corpus and all publisher conventions rather than guesses:
 #   10.1007/978-3-030-80614-9      Springer — the book's own ISBN as the suffix
@@ -329,8 +333,20 @@ def _count_toc_evidence(text: str) -> int:
     V5 searched only for the words "table of contents", which the real page
     never contains — its heading is the roman page number `v`. Counting the
     leaders themselves is what makes a book's TOC visible at all.
+
+    Only lines whose text just before the leaders ENDS IN A WORD (three or
+    more letters) count. A figure can set data in the same dotted form: the
+    Nature Communications Wnt3/Sp5 paper has rows "Nile tilapia 5 4 . . . . . 4",
+    "a b . . . . . 50", "ZfWnt3-3997 + + . . . . . 0" on page 7, which counted
+    as a contents page and made the article a book (session 33). A contents
+    entry names a section; a data row ends in a number, a sign or a label.
     """
-    return len(DOT_LEADER_PATTERN.findall(text))
+    count = 0
+    for line in text.splitlines():
+        leaders = DOT_LEADER_PATTERN.search(line)
+        if leaders and TOC_ENTRY_ENDS_IN_WORD.search(line[:leaders.start()]):
+            count += 1
+    return count
 
 
 # --- scoring (helpers) ------------------------------------------------------

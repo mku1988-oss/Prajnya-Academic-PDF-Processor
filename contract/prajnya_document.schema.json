@@ -3,9 +3,20 @@
   "$id": "urn:prajnya:document-contract:1",
   "title": "Prajnya document JSON",
   "description": "One file per processed PDF: run_outputs/documents/<name>.v6.json. This schema pins the part other programs may rely on. Keys it does not name (for example pages[].metadata.analysis) are internal and may change in any release. Unknown extra keys are always allowed, so adding a key is never a breaking change. See contract/README.md for the version rules.",
-  "x-contract-version": "1.0",
+  "x-contract-version": "1.1",
   "type": "object",
   "required": ["document_info", "metadata_final", "pages", "summary", "profile"],
+  "if": {
+    "$comment": "A file that says it follows contract 1.1 or later must carry the citations block. Files from contract 1.0 (or with no version stamp) have none.",
+    "required": ["document_info"],
+    "properties": {
+      "document_info": {
+        "required": ["contract_version"],
+        "properties": {"contract_version": {"pattern": "^(1\\.[1-9]\\d*|[2-9]\\d*\\.\\d+|[1-9]\\d+\\.\\d+)$"}}
+      }
+    }
+  },
+  "then": {"required": ["citations"]},
   "properties": {
     "document_info": {
       "type": "object",
@@ -44,6 +55,7 @@
         "validation_confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
       }
     },
+    "citations": {"$ref": "#/$defs/citations"},
     "pages": {
       "type": "array",
       "description": "One entry per processed page, in page order.",
@@ -80,6 +92,90 @@
     "review_needed_fields": {"type": "array", "items": {"type": "string"}}
   },
   "$defs": {
+    "citations": {
+      "type": "object",
+      "description": "How to cite this document, and how that was established. Present in every file from contract 1.1 on, at every level. Since contract 1.1.",
+      "required": ["level", "level_set_by", "metadata_source", "source_label", "cited_by_file_name", "reference_list", "references", "markers"],
+      "properties": {
+        "level": {
+          "enum": ["local", "zotero", "online"],
+          "description": "The run setting. 'local': Prajnya's own reading of the PDF, nothing left the machine. 'zotero': checked against the researcher's Zotero library. 'online': Crossref / OpenAlex; only this level can carry references and markers."
+        },
+        "level_set_by": {
+          "enum": ["cli", "config", "legacy_config", "default"],
+          "description": "What decided the level: the --citations flag, citations.level in the config, an older config's zotero block, or nothing (the default, 'local')."
+        },
+        "metadata_source": {
+          "enum": ["extracted", "zotero", "crossref", "openalex", "user", "file_name"],
+          "description": "Which step actually supplied metadata_final. 'extracted' is Prajnya's own reading. 'user' is a hand correction. 'file_name' means nothing usable was found (see cited_by_file_name). The level says what was allowed; this says what happened."
+        },
+        "source_label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The short form to cite the document by: 'Bella, 2016', 'Fullerton et al., 2006', 'Halper (ed.), 2021'. Derived from metadata_final. When cited_by_file_name is true it is the PDF's file name."
+        },
+        "cited_by_file_name": {
+          "type": "boolean",
+          "description": "true when no author, editor or title was usable. The file name is then in source_label ONLY; metadata_final.title stays null. Such a document needs a human."
+        },
+        "network": {
+          "enum": ["ok", "unavailable"],
+          "description": "Level 'online' only: whether the services could be reached. Absent at the other levels."
+        },
+        "reference_list": {
+          "type": "object",
+          "required": ["status"],
+          "properties": {
+            "status": {
+              "enum": ["not_requested", "found", "not_available", "not_reached"],
+              "description": "'not_requested': the level does not fetch lists (local, zotero). 'found': references holds it. 'not_available': asked, and no service holds one. 'not_reached': the network failed, so nothing is known."
+            },
+            "source": {"enum": ["crossref", "openalex", "local"], "description": "Where the entries came from, when found."},
+            "style": {"enum": ["numbered", "author_year"], "description": "How the paper prints its list."},
+            "count": {"type": "integer", "minimum": 0, "description": "Entries in references."},
+            "local_count": {"type": ["integer", "null"], "minimum": 0, "description": "Entries Prajnya's own splitter counted in the PDF, an independent second reading. null when the splitter could not read the list."},
+            "counts_agree": {"type": ["boolean", "null"], "description": "Whether count and local_count are equal. null when local_count is null."}
+          }
+        },
+        "references": {
+          "type": "array",
+          "description": "The paper's own reference list, in printed order. Empty unless reference_list.status is 'found'.",
+          "items": {"$ref": "#/$defs/reference"}
+        },
+        "markers": {
+          "type": "array",
+          "description": "In-text citation marks linked to references. Empty unless the list passed its checks: a wrong link is worse than none.",
+          "items": {"$ref": "#/$defs/citation_marker"}
+        }
+      }
+    },
+    "reference": {
+      "type": "object",
+      "required": ["position", "number", "first_author", "year", "doi", "source"],
+      "properties": {
+        "position": {"type": "integer", "minimum": 1, "description": "Place in printed order, from 1. Always present."},
+        "number": {"type": ["integer", "null"], "minimum": 1, "description": "The number as PRINTED in a numbered list ('[245]' cites number 245). null in an author-year list."},
+        "first_author": {"type": ["string", "null"], "description": "First author's surname."},
+        "year": {"type": ["integer", "null"]},
+        "title": {"type": ["string", "null"]},
+        "container": {"type": ["string", "null"], "description": "The journal or book the cited work appeared in."},
+        "doi": {"type": ["string", "null"], "description": "Bare DOI of the CITED work, when known."},
+        "source": {"enum": ["crossref", "openalex", "local"]},
+        "printed_text": {"type": ["string", "null"], "description": "The entry as printed in the PDF, when Prajnya's splitter read it."}
+      }
+    },
+    "citation_marker": {
+      "type": "object",
+      "required": ["page_number", "text", "kind", "numbers", "context_before", "content_offset"],
+      "properties": {
+        "page_number": {"type": "integer", "minimum": 1, "description": "1-BASED, as pages[].page_number."},
+        "text": {"type": "string", "description": "The mark as printed: '[3-7]', '12,14', 'Doi et al., 2005', 'Berendsen (1962)'."},
+        "kind": {"enum": ["bracket", "paren", "superscript", "author_year"]},
+        "numbers": {"type": "array", "items": {"type": "integer", "minimum": 1}, "description": "The references it cites, as the `position`s of those references in `references` (1-based). For a numbered list a linked reference's position equals its printed number, so '[3-7]' gives 3..7 (ranges expanded); for an author-year list, a mark names its references by author and year and the list decides which entries they are."},
+        "context_before": {"type": "string", "description": "The text just before the mark, to find it again."},
+        "content_offset": {"type": ["integer", "null"], "minimum": 0, "description": "Character offset of the mark in that page's content string. null when it could not be found there exactly once."}
+      }
+    },
     "page": {
       "type": "object",
       "required": ["page_number", "content", "metadata"],

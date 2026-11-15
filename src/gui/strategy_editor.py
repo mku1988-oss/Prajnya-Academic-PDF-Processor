@@ -385,6 +385,55 @@ def write_profile_registry_roles(new_roles: Dict[str, Optional[str]],
     return backup_path
 
 
+def read_citation_level(strategy_path: Path = STRATEGY_YAML_PATH) -> str:
+    """
+    The citation level the strategy YAML asks for, as a run would resolve it.
+
+    For biology researchers: the level decides how much leaves this computer
+    to establish what paper a PDF is (`local`, `zotero` or `online`). The
+    YAML is the single source of that setting; this reads it with the same
+    rule a run uses, so the screen can never show a level the run would not
+    use (including for an older file that names none).
+    """
+    from src.processing.citations.level import resolve_level
+
+    config = yaml.safe_load(strategy_path.read_text(encoding="utf-8")) or {}
+    return resolve_level(config)[0]
+
+
+def write_citation_level(level: str, strategy_path: Path = STRATEGY_YAML_PATH) -> Path:
+    """
+    Set `citations.level` in the strategy YAML, changing that ONE line.
+
+    Every other line of the file, and every comment, is left untouched: the
+    comments are the reasoning, and a YAML dumper would strip them. A file
+    with no `citations:` block (written before the setting existed) gets one
+    appended.
+
+    Args:
+        level: `local`, `zotero` or `online`.
+
+    Returns:
+        The backup file's path.
+
+    Raises:
+        ValueError: `level` is not a citation level.
+        NotImplementedError: the level's lookups are not built yet
+            (`online`, until stage S1). The file is not changed.
+    """
+    # Worked out BEFORE the backup, so a refused level leaves no backup file.
+    new_text = _with_citation_level(strategy_path.read_text(encoding="utf-8"), level)
+    backup_path = _backup(strategy_path)
+    _write_text(strategy_path, new_text)
+    return backup_path
+
+
+def preview_citation_level_diff(level: str, strategy_path: Path = STRATEGY_YAML_PATH) -> str:
+    """A unified diff of what `write_citation_level` would change, without writing it."""
+    text = strategy_path.read_text(encoding="utf-8")
+    return _unified_diff(text, _with_citation_level(text, level), strategy_path.name)
+
+
 def preview_profile_registry_diff(new_roles: Dict[str, Optional[str]],
                                   strategy_path: Path = STRATEGY_YAML_PATH) -> str:
     """A unified diff of what `write_profile_registry_roles` would change, without writing it."""
@@ -786,6 +835,60 @@ def _unified_diff(before: str, after: str, label: str) -> str:
         fromfile=f"{label} (current)", tofile=f"{label} (proposed)",
     )
     return "".join(diff)
+
+
+def _with_citation_level(text: str, level: str) -> str:
+    """The strategy YAML's text with `citations.level` set to `level`."""
+    from src.processing.citations.level import CITATION_LEVELS, require_built
+
+    if level not in CITATION_LEVELS:
+        raise ValueError(f"{level!r} is not a citation level. "
+                         f"Use one of: {', '.join(CITATION_LEVELS)}.")
+    require_built(level)
+
+    lines = text.splitlines(keepends=True)
+    try:
+        start, end = _find_block(lines, "citations")
+    except ValueError:
+        # An older file: no block yet. Append one, after a clean line end.
+        ending = "" if text.endswith("\n") or not text else "\n"
+        return f"{text}{ending}citations:\n  level: {level}\n"
+
+    for index in range(start + 1, end):
+        match = _ROLE_LINE.match(lines[index])
+        if match and match.group(2) == "level":
+            indent, _, _, comment = match.groups()
+            lines[index] = f"{indent}level: {level}{comment or ''}\n"
+            return "".join(lines)
+
+    # The block exists but names no level: add the line right under its key.
+    lines.insert(start + 1, f"  level: {level}\n")
+    return "".join(lines)
+
+
+def _find_block(lines: List[str], key: str) -> tuple[int, int]:
+    """
+    [start, end) line indices of the top-level `<key>:` block, where `end`
+    is the first later line back at column 0 that is not blank.
+
+    Raises:
+        ValueError: the file has no such top-level key.
+    """
+    start = None
+    for index, line in enumerate(lines):
+        if line.startswith(f"{key}:"):
+            start = index
+            break
+    if start is None:
+        raise ValueError(f"'{key}:' not found in the strategy YAML.")
+
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
+        if line.strip() and not line[0].isspace():
+            end = index
+            break
+    return start, end
 
 
 def _find_registry_block(lines: List[str]) -> tuple[int, int]:
