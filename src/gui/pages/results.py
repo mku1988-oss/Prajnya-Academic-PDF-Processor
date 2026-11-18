@@ -42,6 +42,7 @@ from src.processing.paths import DEFAULT_OUTPUT_ROOT
 from src.processing.utils.figure_extractor import safe_doc_id
 
 from .. import theme
+from ..table_html import prepare_grid_html
 
 
 def mount() -> None:
@@ -234,7 +235,9 @@ def _render_page_viewer(document: Dict[str, Any]) -> None:
                     ui.label(f"Quality score: {score:.2f}").classes("text-xs").style(
                         f'color: {theme.var("text_muted")};'
                     )
-                ui.markdown(page.get("content") or "*(no text)*").classes("w-full").style(
+                # 'latex' extra: draws $...$ formulas (needs no internet)
+                ui.markdown(page.get("content") or "*(no text)*",
+                            extras=["fenced-code-blocks", "tables", "latex"]).classes("w-full").style(
                     "max-height: 480px; overflow-y: auto;"
                 )
 
@@ -270,7 +273,18 @@ def _figure_card(figure: Dict[str, Any]) -> None:
         )
 
 
+_GRID_CSS = """
+.prajnya-grid table { border-collapse: collapse; }
+.prajnya-grid th, .prajnya-grid td {
+    border: 1px solid rgba(128,128,128,.45);
+    padding: 3px 10px; text-align: left; vertical-align: top;
+}
+.prajnya-grid th { font-weight: 600; background: rgba(128,128,128,.15); }
+"""
+
+
 def _render_table_gallery(tables: List[Dict[str, Any]]) -> None:
+    ui.add_css(_GRID_CSS)
     with ui.expansion(f"Tables ({len(tables)})", icon="table_chart").classes("w-full"):
         for table in tables:
             with ui.column().classes("w-full gap-1 mb-4"):
@@ -284,9 +298,9 @@ def _render_table_gallery(tables: List[Dict[str, Any]]) -> None:
                     )
                     grid = table.get("grid")
                     if grid:
-                        ui.html(grid, sanitize=False).classes("text-xs").style(
-                            "max-width: 500px; overflow-x: auto;"
-                        )
+                        ui.html(prepare_grid_html(grid), sanitize=False).classes(
+                            "text-xs prajnya-grid"
+                        ).style("max-width: 760px; overflow-x: auto;")
 
 
 def _render_raw_json_section(document: Dict[str, Any]) -> None:

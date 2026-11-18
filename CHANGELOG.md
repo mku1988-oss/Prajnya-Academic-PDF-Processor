@@ -6,6 +6,18 @@ it in `document_info.pipeline_version`.
 
 ---
 
+## 6.6.1
+
+- **Results screen: formulas and table headers display properly.** Table cells
+  that hold LaTeX (`$R_{\mathrm{b}}(\mathrm{s}^{-1})$`) were shown as raw text;
+  they are now drawn as formulas, offline, in both the table grids and the page
+  text. A table's header row is marked as a header, a caption repeated as the
+  first row is not shown twice, and grids get borders and padding. Display only:
+  the stored JSON is unchanged.
+- **README rewritten**, with screenshots of Prajnya Studio.
+
+---
+
 ## 6.6.0
 
 ### New: reference lists, with every in-text citation linked

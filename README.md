@@ -1,72 +1,61 @@
 # Prajnya
 
-### Scientific PDF Processing Engine
+### Scientific PDF Processing Engine for RAG
 
-![Status](https://img.shields.io/badge/Status-Production%20Ready-green?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.6.0-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Active%20development-orange?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.6.1-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge)
 
----
+<p align="center">
+  <img src="assets/readme/prajnya_overview.png" alt="How Prajnya processes a scientific PDF: a CPU pre-pass, text-layer or vision-model reading, and structured JSON output" width="100%">
+</p>
 
-Prajnya is a scientific PDF processing engine for extracting and reconstructing
-information from research documents.
+**Prajnya turns scientific PDFs into RAG-ready JSON: text, verified metadata,
+figures with their panels grouped, tables rebuilt as grids, and citations linked
+to the reference list, each traced to the page it came from. It runs fully
+offline on a single 8 GB GPU.**
 
-Scientific PDFs are not simply collections of text. Important information is
-distributed across document structure, metadata, figures, tables, captions,
-scanned pages, and complex layouts. Prajnya is designed to process these
-components while preserving their relationships and provenance.
-
-The project evolved through a series of increasingly difficult problems:
-
-**Metadata extraction → OCR → Document classification → Pipeline optimization → Multimodal extraction**
-
-The underlying motivation is straightforward:
+*prajñā* (Sanskrit): insight, wisdom. Built by a biologist, for researchers.
 
 > **«In RAG, what goes in determines what comes out.»**
 
-A poor representation of the source document leads to poor retrieval and
-unreliable downstream reasoning. For scientific applications, the document
-processing layer therefore needs to be treated as a core part of the system,
-not as a preprocessing afterthought.
-
-Prajnya focuses on building that foundation.
+Scientific PDFs are not simply collections of text. What matters is spread
+across metadata, figures, tables, captions, scanned pages and complex layouts,
+and a poor representation of the document leads to poor retrieval and
+unreliable reasoning downstream. Prajnya treats the document layer as a core
+part of the system, not a preprocessing afterthought: **get the document right
+first.**
 
 ## Current capabilities
 
-- Scientific document and page classification
-- OCR and text extraction
-- Metadata extraction and validation
-- Document structure reconstruction
-- Figure and multi-panel figure extraction
-- Table detection and reconstruction
+- **Document and page classification on the CPU.** Papers, books and book
+  chapters each get their own pipeline, and every page is sorted before any
+  model runs.
+- **Plain prose straight from the text layer**, with no model call. Only scans
+  and dense layouts are read by a vision model.
+- **Metadata verified, not believed.** The title page, the text layer and an
+  optional authority are reconciled, and the source of every value is recorded.
+- **Figures as objects**: cropped, captioned, with multi-panel figures grouped
+  under the label a reader would cite ("Fig. 3").
+- **Tables as objects**: cropped and rebuilt as grids. A table continued onto
+  the next page keeps its column headers.
 - **Reference lists, with every in-text citation linked to the entry it
   names**, numbered (`[12]`, `(3–7)`, superscripts) and author–year
-  (`(Doi et al., 2005)`, `Berendsen (1962)`). See [Citations](#citations).
-- Efficient processing and GPU-aware inference
-- Structured, provenance-aware output
+  (`(Doi et al., 2005)`, `Berendsen (1962)`). This is the opt-in `online`
+  citation level, which sends only a DOI or title, never page content. See
+  [Citations](#citations).
+- **Books**, with a chapter map of each chapter's authors and start page.
+- **One model on the GPU at a time**, so an 8 GB card is enough. Or no GPU at
+  all, with a cloud model.
+- **Provenance on everything**: each page records how it was read, against a
+  published JSON schema.
 
-**Fully offline by default, and that was one of the reasons for building it.**
-Research documents are frequently unpublished, embargoed, or covered by a
-licence that does not permit uploading them to a third party, so a processing
-layer that can only work by sending every page to someone else's API is not
-usable for a great deal of scientific work. Prajnya runs end to end on local
-models: in the shipped configuration no page, no title and no citation leaves
-your machine. It can also be pointed at a cloud vision model instead, per role,
-which needs no local GPU at all: see
-[Local or cloud](#local-or-cloud). That is a choice you make, never a default.
+**Fully offline by default.** Unpublished, embargoed and licensed papers often
+cannot be uploaded to a third party. In the shipped configuration no page, no
+title and no citation leaves your machine. A role can be pointed at a cloud
+model instead (see [Local or cloud](#local-or-cloud)), but that is a choice you
+make, never a default.
 
-Prajnya is being developed as a general document-intelligence layer for
-scientific knowledge systems. It is also the foundation of the larger
-**Shastrasaara** project, which aims to build a local, multimodal scientific
-RAG system.
-
-The immediate goal is simple:
-
-> **«Get the document right first.»**
-
-> **A note on names.** **Prajnya** is this engine, and **Prajnya Studio** is its
-> graphical interface. **Shastrasaara** is the larger scientific RAG system the
-> engine is built to feed. The project began as Shastrasaara, which is why the
-> name still appears in the source tree, in the `SARA_*` environment variables,
-> and as the suggested conda environment name.
+Prajnya is the ingestion layer of **Shastrasaara**, a local, multimodal
+scientific RAG system in development.
 
 What changed in each release is in [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -74,7 +63,7 @@ What changed in each release is in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Contents
 
-- [How it works](#how-it-works) · [Requirements](#requirements) · [Installation](#installation) · [Quick start](#quick-start)
+- [How it works](#how-it-works) · [Is Prajnya right for you?](#is-prajnya-right-for-you) · [Requirements](#requirements) · [Installation](#installation) · [Quick start](#quick-start)
 - [Prajnya Studio](#prajnya-studio) · [The command line](#the-command-line) · [Local or cloud](#local-or-cloud)
 - [Books](#books) · [Metadata review](#metadata-review) · [Citations](#citations)
 - [What you get](#what-you-get) · [Performance](#performance) · [Configuration](#configuration)
@@ -120,6 +109,22 @@ change.
 
 ---
 
+## Is Prajnya right for you?
+
+**Use it if** you need scientific PDFs (papers, books, chapters) turned into
+structured data you own: for a RAG system, a literature database or your own
+scripts, and especially if the documents cannot leave your machine.
+
+**It does not (yet):**
+
+- chat with your papers, chunk, embed or retrieve. It is the ingestion layer;
+  retrieval is Shastrasaara's job.
+- read anything but PDFs. No DOCX, HTML or slides.
+- install in one click. Local mode needs `llama-server` and about 13 GB of
+  model weights.
+
+---
+
 ## Requirements
 
 | | |
@@ -138,6 +143,12 @@ of the interface.
 ---
 
 ## Installation
+
+> **A note on names.** **Prajnya** is this engine, and **Prajnya Studio** is its
+> graphical interface. **Shastrasaara** is the larger scientific RAG system the
+> engine is built to feed. The project began as Shastrasaara, which is why the
+> name still appears in the source tree, in the `SARA_*` environment variables,
+> and as the conda environment name below.
 
 **1. Get the code and the Python environment.**
 
@@ -219,6 +230,22 @@ slower, with identical output.
 `run_prajnya_studio.py` opens the graphical interface in your browser, at
 `http://127.0.0.1:8850` (`--port` to change it, `--no-browser` to not open a
 tab). The default is 8850, clear of the model server's port (9931).
+
+<p align="center">
+  <img src="assets/readme/studio_results_tables.png" alt="Prajnya Studio, Results: each table's crop from the PDF shown beside its reconstructed grid" width="100%">
+</p>
+<p align="center"><em>Results: every table's crop beside its reconstructed grid.</em></p>
+
+<p align="center">
+  <img src="assets/readme/studio_results_metadata.png" alt="Prajnya Studio, Results: verified metadata (title, authors, journal, DOI, validation source) above the page text" width="49%">
+  <img src="assets/readme/studio_library.png" alt="Prajnya Studio, Library / Batch: a scanned folder of PDFs, each classified as a research article, book chapter or book, with confidence and page count" width="49%">
+</p>
+<p align="center"><em>Left: verified metadata and page text. Right: a folder classified on the CPU, before any model runs.</em></p>
+
+<p align="center">
+  <img src="assets/readme/studio_strategy_lab.png" alt="Prajnya Studio, Strategy Lab: each role (title detection, extraction, layout detection, figure escalation) bound to a model, with the detected GPU memory" width="70%">
+</p>
+<p align="center"><em>Strategy Lab: each role bound to a model, swappable without touching code.</em></p>
 
 | screen | shortcut | what it is for |
 |---|---|---|
@@ -616,7 +643,7 @@ If you use Prajnya in your research, please cite:
   title   = {Prajnya: A Scientific PDF Processing Engine},
   author  = {Manu Unni},
   year    = {2026},
-  version = {6.6.0},
+  version = {6.6.1},
   url     = {https://github.com/mku1988-oss/Prajnya-Academic-PDF-Processor}
 }
 ```
