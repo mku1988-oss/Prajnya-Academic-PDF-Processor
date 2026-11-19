@@ -151,6 +151,7 @@ from src.processing.review_prompt import (
     review_record,
 )
 from src.processing.run_request import RunRequest
+from src.processing.utils.log_privacy import silence_http_request_logs
 from src.processing.runner import (
     build_document_profile,
     decide_for_single,
@@ -486,7 +487,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--citations", default=None, choices=CITATION_LEVELS,
                         help="how the bibliographic record is established, for this run only: "
                              "local (nothing leaves the machine), zotero (your Zotero "
-                             "library) or online (not built yet). Default: `citations.level` "
+                             "library) or online (Crossref and OpenAlex; also builds the "
+                             "reference list and links in-text citations). Default: `citations.level` "
                              "in config/research_article_strategy.yaml")
     parser.add_argument("--out", default=None,
                         help="where results go. For one PDF, a JSON path; for a "
@@ -517,6 +519,9 @@ def _setup_logging(verbose: bool) -> None:
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
+    # The HTTP libraries print request addresses, and Zotero's address holds
+    # the user's API key. See src/processing/utils/log_privacy.py.
+    silence_http_request_logs()
 
 
 if __name__ == "__main__":

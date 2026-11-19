@@ -6,6 +6,20 @@ it in `document_info.pipeline_version`.
 
 ---
 
+## 6.6.4
+
+- **API keys no longer appear in the log.** The HTTP library under the Zotero
+  client printed every request address at the normal log level, and Zotero's
+  address contains your API key; `--verbose` could likewise print an OpenAlex
+  key. These libraries now log only warnings and errors. **If you shared a
+  Prajnya log made with a Zotero key, regenerate the key** (zotero.org,
+  Settings, Security, Applications).
+- **`online` is no longer described as unbuilt** in Studio's Settings and in
+  `--help`. It has shipped since 6.6.0.
+- Output is unchanged from 6.6.3.
+
+---
+
 ## 6.6.3
 
 - **The real example explains its Figure 1B.** `contract/examples/README.md`

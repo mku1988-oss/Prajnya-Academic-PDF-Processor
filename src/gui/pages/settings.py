@@ -166,8 +166,9 @@ def _section_citations(fields: Dict[str, Any]) -> None:
             _CITATION_LEVEL_OPTIONS, value=current, label="Citation Level",
         ).classes("w-full").props("outlined dense")
         fields["citation_level_at_load"] = current
-        ui.label("Online (Crossref / OpenAlex, with the paper's reference list) "
-                 "is planned and not built yet.").classes("text-xs").style(
+        ui.label("Online also builds the paper's reference list and links each "
+                 "in-text citation to it. It sends only the DOI, or the title "
+                 "and first author, never page content.").classes("text-xs").style(
             f'color: {theme.var("text_muted")};'
         )
 

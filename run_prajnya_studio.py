@@ -189,6 +189,11 @@ def _setup_logging(verbose: bool) -> None:
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
+    # Imported here, not at the top: this file checks the interpreter before
+    # it imports anything from src/. Same reason as in run_prajnya.py: the
+    # HTTP libraries would print the Zotero API key inside a request address.
+    from src.processing.utils.log_privacy import silence_http_request_logs
+    silence_http_request_logs()
 
 
 def _port_is_taken(host: str, port: int) -> bool:

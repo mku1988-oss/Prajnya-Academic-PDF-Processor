@@ -34,6 +34,11 @@ from .pages import chapters, help as help_page, ledger, library, results, review
 from .session import RunRegistry  # noqa: F401  (imported so pages can reach it; used from S6)
 
 logging.basicConfig(level=logging.INFO)
+# Runs are subprocesses of run_prajnya.py, which has its own guard. This one is
+# a precaution: should anything in the GUI's own process ever contact Zotero or
+# OpenAlex, its request addresses (which carry API keys) stay out of the log.
+from src.processing.utils.log_privacy import silence_http_request_logs  # noqa: E402
+silence_http_request_logs()
 logger = logging.getLogger("prajnya_studio")
 
 #: nicegui's app.storage.user needs a stable key to encrypt its cookie. A
