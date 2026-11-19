@@ -6,6 +6,17 @@ it in `document_info.pipeline_version`.
 
 ---
 
+## 6.6.2
+
+- **A real example of the output**, in
+  `contract/examples/frontiers_hippo_hydra/`: one open-access paper (CC BY 4.0)
+  processed end to end at citation level `online`, unedited. It holds the
+  document JSON, the figure and table manifests and three crops; the
+  attribution is in `contract/examples/README.md`. Documentation only: the
+  code and the output are unchanged from 6.6.1.
+
+---
+
 ## 6.6.1
 
 - **Results screen: formulas and table headers display properly.** Table cells

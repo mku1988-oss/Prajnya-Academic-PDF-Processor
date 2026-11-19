@@ -15,6 +15,8 @@ This folder says exactly what they may rely on.
   `citations_online.json` (a reference list and linked marks) and
   `citations_local_file_name.json` (a document cited by its file name).
   Their bibliographic content is illustrative. The tests validate both.
+  `examples/frontiers_hippo_hydra/` is real, unedited output for one CC BY
+  paper (see `examples/README.md`), also validated by the tests.
 
 | version | first release | what changed |
 |---|---|---|

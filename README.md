@@ -2,7 +2,7 @@
 
 ### Scientific PDF Processing Engine for RAG
 
-![Status](https://img.shields.io/badge/Status-Active%20development-orange?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.6.1-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Active%20development-orange?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.6.2-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge)
 
 <p align="center">
   <img src="assets/readme/prajnya_overview.png" alt="How Prajnya processes a scientific PDF: a CPU pre-pass, text-layer or vision-model reading, and structured JSON output" width="100%">
@@ -461,6 +461,9 @@ Results go to `run_outputs/` in this repository whatever directory you launch
 from (`--out` overrides it). Every path inside is relative to the run root, so
 the whole tree can be moved and every crop still resolves.
 
+A real, unedited example (one open-access paper, with its figure and table
+manifests) is in [`contract/examples/frontiers_hippo_hydra/`](contract/examples/frontiers_hippo_hydra/).
+
 Each document JSON:
 
 ```jsonc
@@ -643,7 +646,7 @@ If you use Prajnya in your research, please cite:
   title   = {Prajnya: A Scientific PDF Processing Engine},
   author  = {Manu Unni},
   year    = {2026},
-  version = {6.6.1},
+  version = {6.6.2},
   url     = {https://github.com/mku1988-oss/Prajnya-Academic-PDF-Processor}
 }
 ```
