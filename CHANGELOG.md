@@ -6,6 +6,15 @@ it in `document_info.pipeline_version`.
 
 ---
 
+## 6.6.3
+
+- **The real example explains its Figure 1B.** `contract/examples/README.md`
+  now says why the example's one table (`p6_tab1`) is panel B of Figure 1 and
+  has an empty caption. Documentation only: the code and the output are
+  unchanged from 6.6.1.
+
+---
+
 ## 6.6.2
 
 - **A real example of the output**, in

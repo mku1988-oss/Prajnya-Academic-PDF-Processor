@@ -35,6 +35,15 @@ reads, 1 repaired page and the title page; 80 references; 103 in-text marks,
 all linked to a reference (19 carry `content_offset: null`, which the contract
 allows, because the mark is not found exactly once in its page text).
 
+**Figure 1B is reported as a table.** In the paper, Figure 1 has three panels,
+and panel B is drawn as a table (percent identity of the Hydra homologs with
+*Drosophila* and human). Prajnya's layout detector sees a table and reads it as
+one: `p6_tab1` has a correct cell grid (all 18 values match), but its `caption`
+is empty, because the printed caption belongs to Figure 1. Panels A and C are
+the two figure crops `p6_fig1` and `p6_fig2`, which both carry the Figure 1
+caption. A reader should expect a table-like panel inside a figure to appear
+this way.
+
 ### Attribution
 
 Unni M, Reddy PC, Pal M, Sagi I, Galande S (2021). Identification of Components
