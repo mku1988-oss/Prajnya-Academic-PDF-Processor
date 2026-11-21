@@ -1,0 +1,126 @@
+{
+  "document": "PMC5880930",
+  "figure_count": 8,
+  "figures": [
+    {
+      "figure_id": "p6_fig1",
+      "image_path": "figures/PMC5880930/p6_fig1.png",
+      "caption": "FIGURE 1 | Multiple alignments of the deduced amino acid sequences of HrpG and HrpX proteins. (A) HrpG with AAC00-1 and Aac5; (B) HrpX with AAC00-1 and Aac5.",
+      "page": 6,
+      "bbox": [
+        224,
+        288,
+        2323,
+        1388
+      ],
+      "printed_label": "FIGURE 1",
+      "label_key": "figure 1",
+      "panel_group_size": 1
+    },
+    {
+      "figure_id": "p7_fig1",
+      "image_path": "figures/PMC5880930/p7_fig1.png",
+      "caption": "FIGURE 3 | Effects of hrpG and hrpX gene on Acidovorax citrulli inducing a hypersensitive response (HR) on Nicotiana tabacum. Loss of HR-inducing ability on N. tabacum by the hrpG and hrpX mutants. The wild-type Aac5 and mutant carrying empty pBBRNolac-4FLAG and complemented strains 1hrpG-comp, 1hrpX-comp were inoculated into the N. tabacum leaves at a concentration of OD600 = 0.3 and incubated for 24 h. Ten millimolars of MgCl2 was used as a negative control. The photographs were obtained using EOS 70D (Canon, Japan). The experiment was conducted three times.",
+      "page": 7,
+      "bbox": [
+        1292,
+        288,
+        2229,
+        1160
+      ],
+      "printed_label": "FIGURE 3",
+      "label_key": "figure 3",
+      "panel_group_size": 1
+    },
+    {
+      "figure_id": "p7_fig2",
+      "image_path": "figures/PMC5880930/p7_fig2.png",
+      "caption": "FIGURE 2 | Effects of hrpG and hrpX genes on Acidovorax citrulli biofilm formation. The biofilm formation of A. citrulli in 24-well multi-dishes as quantified using crystal violet staining. WT-EV, wild-type strain Aac5 transformed with empty vector, pBBRNolac-4FLAG; 1hrpG-EV, hrpG mutant transformed with empty vector, pBBRNolac-4FLAG; 1hrpX-EV, hrpX mutant transformed with the empty vector pBBRNolac-4FLAG; 1hrpG-comp, hrpG complemented with vector, pBBRHBhrpG (native promoter); 1hrpX-comp, hrpX complemented with the vector, pBBRHBhrpX (native promoter). Each column shows the mean and standard deviation. The experiment was conducted three times. Averages and standard deviations from one of three experiments with similar results are shown. Different letters above bars indicate statistically significant differences as determined by one-way analysis of variance (ANOVA) and Tukey’s honest significant difference (HSD), p < 0.05.",
+      "page": 7,
+      "bbox": [
+        297,
+        313,
+        1147,
+        1028
+      ],
+      "printed_label": "FIGURE 2",
+      "label_key": "figure 2",
+      "panel_group_size": 1
+    },
+    {
+      "figure_id": "p8_fig1",
+      "image_path": "figures/PMC5880930/p8_fig1.png",
+      "caption": "FIGURE 4 | Electrolyte leakage quantification assay for verification of hypersensitive response (HR) in Nicotiana tabacum induced by Acidovorax citrulli strains. Electrolyte leakage quantification for the detection of HR. Values are mean conductivity of bathing water (µS mm−2 leaf ml−1 bath water) ± standard deviation (SD) (n = 3 plants). Different letters above bars indicate statistically significant differences as determined by one-way analysis of variance (ANOVA) and Tukey’s honest significant difference (HSD), p < 0.05.",
+      "page": 8,
+      "bbox": [
+        221,
+        297,
+        1227,
+        1061
+      ],
+      "printed_label": "FIGURE 4",
+      "label_key": "figure 4",
+      "panel_group_size": 1
+    },
+    {
+      "figure_id": "p8_fig2",
+      "image_path": "figures/PMC5880930/p8_fig2.png",
+      "caption": "FIGURE 6 | Contributions of hrpG and hrpX gene to Acidovorax citrulli virulence. Bacterial fruit blotch severity on watermelon induced by wildtype (Aac5), hrpG and hrpX deletion mutants of A. citrulli in seedling transmission assays. Disease severity was assessed according to (Bahar et al., 2009b). The experiment was conducted three times. (A) Disease severity of plants inoculated with different strains. The 10 mM MgCl2 was used as a mock treatment. Each column shows the mean and standard deviation. Different letters above bars indicate statistically significant differences as determined by one-way analysis of variance (ANOVA) and Tukey’s honest significant difference (HSD), p < 0.05; (B) representative picture was taken after 12 days by EOS 70D (Canon, Japan).",
+      "page": 8,
+      "bbox": [
+        1348,
+        288,
+        2323,
+        1049
+      ],
+      "printed_label": "FIGURE 6",
+      "label_key": "figure 6",
+      "panel_group_size": 1
+    },
+    {
+      "figure_id": "p8_fig3",
+      "image_path": "figures/PMC5880930/p8_fig3.png",
+      "caption": "FIGURE 5 | Effects of hrpG and hrpX gene on Acidovorax citrulli inducing ROS on Nicotiana benthamiana. Reactive oxygen species (ROS) generation by the wild-type A. citrulli strain Aac5 and the hrpG and hrpX deletion mutants. ROS assay results are presented as mean and standard deviations based on three replicates from three different plants. Different letters above bars indicate statistically significant differences as determined by one-way analysis of variance (ANOVA) and Tukey’s honest significant difference (HSD), p < 0.05.",
+      "page": 8,
+      "bbox": [
+        285,
+        1448,
+        1203,
+        2085
+      ],
+      "printed_label": "FIGURE 5",
+      "label_key": "figure 5",
+      "panel_group_size": 1
+    },
+    {
+      "figure_id": "p9_fig1",
+      "image_path": "figures/PMC5880930/p9_fig1.png",
+      "caption": "FIGURE 7 | The interaction of hrpG and hrpX in Acidovorax citrulli. (A) Western blotting analysis showed that HrpG activated HrpX. The WT, 1hrpG, and 1hrpX strains were cultured in liquid T3SS-inducing medium up to OD600 = 0.5. Total cell extracts were analyzed by SDS-PAGE and immunoblotting, using specific antibodies. The experiment was performed three times. (B) Represents real-time quantitative RT-PCR to determine hrpX mRNA levels. hrpX expression was analyzed through RT-qPCR in wild-type strains Aac5 and the hrpG mutant strain, using specific primers. Bacteria were grown in liquid T3SS-inducing medium to OD600 = 0.45 and harvested to extract total RNA. (C) Represents real-time quantitative RT-PCR to determine hrpG mRNA levels. hrpX expression was assayed through RT-qPCR in wild-type strain Aac5 and the hrpX mutant, using specific primers. All the data shown are means ± standard deviation of duplicate samples from one representative experiment and are reported as fold induction relative to expression of WT. The rpoB gene was used as a reference gene. Each column shows the mean and standard deviation. The experiment was performed three times, with similar results obtained each time. Asterisks above bars indicate significant differences as determined by t-test, p < 0.05.",
+      "page": 9,
+      "bbox": [
+        909,
+        805,
+        1612,
+        1324
+      ],
+      "printed_label": "FIGURE 7",
+      "label_key": "figure 7",
+      "panel_group_size": 1
+    },
+    {
+      "figure_id": "p10_fig1",
+      "image_path": "figures/PMC5880930/p10_fig1.png",
+      "caption": "FIGURE 8 | Effects of hrpG and hrpX genes on the regulation of type 3 effectors in Acidovorax citrulli. (A) Real-time quantitative RT-PCR was used to determine Aac5_2166 mRNA levels. Putative type 3 secreted effector (T3E) Aac5_2166 gene expression was assayed through RT-qPCR in wild-type strain Aac5 and the hrpG and hrpX deletion mutant strains, using specific primers. The data shown are means ±standard deviation of duplicate samples from one representative experiment and are reported as fold induction relative to expression of WT. The rpoB gene was used as a reference gene. The experiment was performed three times, with similar results obtained each time. Asterisks above bars indicate significant differences as determined by t-test, p < 0.05; (B) The detection of promoter activity of the putative T3E Aac5_2166 was determined by assaying GUS activity. The pBBR2166GUS was constructed with Aac5_2166 native promoter and GUS reporter gene. The wild-type strain Aac5 transformed with vector pBBR2166GUS carrying the GUS reporter gene, WT-2166GUS; the hrpG mutant transformed with vector pBBR2166GUS carrying the GUS reporter gene, 1hrpG-2166GUS; the hrpG mutant transformed with vector pBBR2166GUS carry GUS reporter gene, 1hrpX-2166GUS; the wild-type strain Aac5 transformed with pBBRNolacGUS without promoter sequence, WT-GUS (negative control). Each column shows the mean and standard deviation. All experiments were performed three times, with similar results obtained each time. Different letters above bars indicate significant differences as determined by one-way analysis of variance (ANOVA) and Tukey’s honest significant differences test, p < 0.05.",
+      "page": 10,
+      "bbox": [
+        484,
+        299,
+        2047,
+        980
+      ],
+      "printed_label": "FIGURE 8",
+      "label_key": "figure 8",
+      "panel_group_size": 1
+    }
+  ]
+}

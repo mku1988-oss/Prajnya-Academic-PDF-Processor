@@ -330,6 +330,11 @@ FRAGMENT_MAX_CHARS = 3
 #: while still bounding a runaway.
 MAX_CAPTION_LINES = 40
 
+#: How far a second caption column's x-height may sit from the first
+#: column's legend lines and still be the same legend (the 6% of
+#: `text_style.SIZE_CHANGE`).
+SECOND_COLUMN_SIZE_CHANGE = 0.06
+
 
 def harvest_caption_block(
     label_line: LabelLine,
@@ -361,8 +366,13 @@ def harvest_caption_block(
       margin, which none of the geometric stops can see (see
       `utils/text_style.py`; 9 captions in the corpus ran on into body prose
       without it);
+    * a line that is only a link (PLOS prints the figure's DOI under it);
     * `MAX_CAPTION_LINES`, so a page whose layout defeats all of these cannot
       swallow the rest of the article.
+
+    A caption set in two columns is read column by column: when typography
+    shows a second column starting level with the label in the legend's own
+    font and size, the walk continues down it (`_second_caption_column`).
 
     With `typography`, a stray symbol line (`FRAGMENT_MAX_CHARS` or fewer,
     such as a degree sign split from its number) is stepped over. Without it
@@ -380,13 +390,42 @@ def harvest_caption_block(
         empty: at worst it is the label line alone, which is what the caller
         had before.
     """
-    left = label_line.rect[0]
-    collected = [label_line.text]
-    previous = label_line.rect
     caption_style = typography.style_in(label_line.rect) if typography else None
+    below = _lines_below(label_line, lines)
+    collected = [label_line.text]
+    first_column = _walk_caption_column(label_line.rect, below, typography,
+                                        caption_style, MAX_CAPTION_LINES - 1)
+    collected += [line[0] for line in first_column]
 
-    for text, x0, y0, x1, y1 in _lines_below(label_line, lines):
-        if _horizontal_overlap(label_line.rect, (x0, y0, x1, y1)) == 0.0:
+    # A caption set in TWO columns (Nature Communications sets long legends
+    # across the page foot): its second column starts level with the label.
+    second = _second_caption_column(label_line, lines, first_column, typography)
+    if second is not None:
+        room = MAX_CAPTION_LINES - len(collected) - 1
+        collected.append(second[0])
+        collected += [line[0] for line in _walk_caption_column(
+            second[1:], below, typography, caption_style, room)]
+
+    return " ".join(part.strip() for part in collected if part.strip())
+
+
+def _walk_caption_column(start_rect: Tuple[float, float, float, float],
+                         below: Sequence[Tuple[str, float, float, float, float]],
+                         typography, caption_style, max_lines: int
+                         ) -> List[Tuple[str, float, float, float, float]]:
+    """
+    The caption lines in ONE column, walking down from `start_rect` (the
+    label line, or a second column's first line) until a stop fires; see
+    `harvest_caption_block` for the stops.
+    """
+    left = start_rect[0]
+    previous = start_rect
+    taken: List[Tuple[str, float, float, float, float]] = []
+    for line in below:
+        text, x0, y0, x1, y1 = line
+        if y0 <= start_rect[1]:
+            continue                                # at or above the start
+        if _horizontal_overlap(start_rect, (x0, y0, x1, y1)) == 0.0:
             # Another column, beside the caption: not part of it, and not a
             # reason to stop either. Until v6.4.0 such a line ended the
             # caption; that went unnoticed only because the old line builder
@@ -403,15 +442,83 @@ def harvest_caption_block(
             break                                   # a new paragraph begins
         if abs(x0 - left) > CAPTION_MARGIN_TOLERANCE:
             break                                   # a different element in this column
+        if _is_bare_url(text):
+            break                                   # PLOS's figure DOI line
         printed, _ = parse_printed_label(ORNAMENT_PREFIX.sub("", text))
         if printed:
             break                                   # the next figure's caption
-        collected.append(text)
+        taken.append(line)
         previous = (x0, y0, x1, y1)
-        if len(collected) >= MAX_CAPTION_LINES:
+        if len(taken) >= max_lines:
             break
+    return taken
 
-    return " ".join(part.strip() for part in collected if part.strip())
+
+def _second_caption_column(label_line: LabelLine,
+                           lines: Sequence[Tuple[str, float, float, float, float]],
+                           first_column: Sequence[Tuple[str, float, float, float, float]],
+                           typography) -> Optional[Tuple[str, float, float, float, float]]:
+    """
+    The first line of a caption's second column, or None.
+
+    Only with typography, and only when the line (1) sits to the right of the
+    label line, (2) starts level with it (within one line height), (3) does
+    not open a caption of its own, (4) is set in the SAME font and size as
+    the caption's own legend lines (the first column's first line), and (5)
+    does not CONTINUE a legend-style line just above it. Body text beside a
+    one-column caption fails (4). Another figure's caption running down the
+    next column fails (5): its label sits higher up, so the line level with
+    ours is a continuation (Collagen structure p19, Silberbush p5).
+    """
+    if typography is None or not first_column:
+        return None
+    legend = typography.style_in(first_column[0][1:])
+    if legend is None or not legend.x_height:
+        return None
+    lx0, ly0, lx1, ly1 = label_line.rect
+    candidates = []
+    for line in lines:
+        text, x0, y0, x1, y1 = line
+        if x0 <= lx1 or abs(y0 - ly0) > (ly1 - ly0):
+            continue
+        if parse_printed_label(ORNAMENT_PREFIX.sub("", text))[0]:
+            continue
+        if _in_style(typography, (x0, y0, x1, y1), legend) and                 not _continues_a_line_above(line, lines, typography, legend):
+            candidates.append(line)
+    return min(candidates, key=lambda line: line[1]) if candidates else None
+
+
+def _in_style(typography, rect: Tuple[float, float, float, float], legend) -> bool:
+    """Whether the text in `rect` is in the legend's font, at its size."""
+    style = typography.style_in(rect)
+    return (style is not None and style.font == legend.font and bool(style.x_height)
+            and abs(style.x_height - legend.x_height)
+            <= SECOND_COLUMN_SIZE_CHANGE * legend.x_height)
+
+
+def _continues_a_line_above(line: Tuple[str, float, float, float, float],
+                            lines: Sequence[Tuple[str, float, float, float, float]],
+                            typography, legend) -> bool:
+    """Whether a legend-style line, or another caption's LABEL line, sits just
+    above `line` in its column: it is then the middle of something, not the
+    top of a second column. (Collagen structure p19: Figure 13's label line,
+    set a size larger than its legend, sits just above.)"""
+    _, x0, y0, x1, y1 = line
+    height = y1 - y0
+    for above_text, ax0, ay0, ax1, ay1 in lines:
+        # Tops, not a gap: line boxes overlap by a point or two (Silberbush
+        # p5: the line above ends 2 pt below this one's top).
+        if (ay0 < y0 - height / 2 and y0 - ay1 <= height * CAPTION_LINE_GAP
+                and _horizontal_overlap((x0, y0, x1, y1), (ax0, ay0, ax1, ay1)) > 0
+                and (_in_style(typography, (ax0, ay0, ax1, ay1), legend)
+                     or parse_printed_label(ORNAMENT_PREFIX.sub("", above_text))[0])):
+            return True
+    return False
+
+
+def _is_bare_url(text: str) -> bool:
+    """A line that is nothing but a link ('https://doi.org/10.1371/...g001')."""
+    return bool(re.fullmatch(r"\s*(?:https?://|doi:\s*|www\.)\S+\s*", text, re.I))
 
 
 def _lines_below(label_line: LabelLine,

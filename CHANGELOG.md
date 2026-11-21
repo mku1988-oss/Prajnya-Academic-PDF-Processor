@@ -6,6 +6,45 @@ it in `document_info.pipeline_version`.
 
 ---
 
+## 6.7.0
+
+**Links to figures and tables, a cleaner page text, and a published benchmark.**
+The output contract goes from 1.1 to 1.3 by adding fields; every existing field
+keeps its meaning.
+
+- **Figure and table mentions are linked** (contract 1.2). A new top-level
+  `mentions` block ties every "Fig. 3B", "Figures 2 and 4" or "Table 2" in the
+  text to the figure or table object carrying that printed label, with its page
+  and its place in the text. It is made at every citation level, offline.
+  Supplementary items ("Figure S1", "Extended Data Fig. 2") are counted and left
+  unlinked.
+- **Running heads and page numbers are labelled, and each page has a `body`**
+  (contract 1.3). `pages[].metadata.furniture` marks running heads, footers and
+  page numbers; `metadata.outside_body` marks placeholders, tables, legends and
+  the reference list; `pages[].body` is the running text without them, ready to
+  split into passages. `content` is unchanged and every offset still indexes it.
+- **Better reading on the pages the benchmark found weak:** authors at the
+  `local` level when the title page prints them as one string with affiliation
+  marks; Cell Reports captions no longer stop after their bold title; table
+  titles ("Table 2") taken from the text layer; author-year citations linked on
+  Cell Press papers whose Methods follow the reference list; a scanned page whose
+  text boxes cross the column gutter is no longer split into the wrong columns.
+- **Studio shows the links.** Results lists, under every figure and table, the
+  sentences that mention it; under every page, the links that start on it; and
+  the reference list with the sentences citing each entry. The figure gallery
+  follows the printed order.
+- **A benchmark against leading open-source tools**, run blind on 40 biology
+  papers with the publisher's XML as the answer key: `BENCHMARK.md`, with the
+  code to rerun it in `benchmark/`.
+- **New README and a manual.** The README says what Prajnya is for; everything
+  on using it is in `MANUAL.md`. The real example in `contract/examples/` is now
+  `frontiers_acidovorax_hrp/`, a benchmark paper with all its crops. The conda
+  environment in the instructions is now named `prajnya`.
+- The release corpus (9 documents) was re-run on this code and passed the
+  release marks against 6.6.0.
+
+---
+
 ## 6.6.4
 
 - **API keys no longer appear in the log.** The HTTP library under the Zotero

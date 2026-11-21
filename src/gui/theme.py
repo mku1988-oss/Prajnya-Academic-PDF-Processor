@@ -83,6 +83,7 @@ THEME_LIGHT = {
     'row_provisional': 'rgba(255, 167, 38, 0.10)',
     'row_zebra': 'rgba(44, 62, 80, 0.03)',        # alternating table rows
     'overlay_shadow': 'rgba(0, 0, 0, 0.15)',      # dialog drop shadow
+    'crop_backing': '#FFFFFF',      # behind a figure crop: printed paper, in both themes
 
     # Legacy mappings (for backward compatibility with V5-derived CSS)
     'primary': '#2C3E50',          # Maps to indigo
@@ -138,6 +139,7 @@ THEME_DARK = {
     'row_provisional': 'rgba(224, 185, 94, 0.14)',
     'row_zebra': 'rgba(255, 255, 255, 0.03)',
     'overlay_shadow': 'rgba(0, 0, 0, 0.55)',
+    'crop_backing': '#FFFFFF',      # a crop is printed paper; dark around it would dim it
 
     'primary': '#D8E0E8',
     'accent': '#D8593A',

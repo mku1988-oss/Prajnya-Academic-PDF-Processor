@@ -30,7 +30,8 @@ from typing import Any, Dict, Optional
 
 from ....processing.ledger.semantic_ledger import SemanticLedger, generate_hash
 from ...citations.block import SOURCE_FILE_NAME, source_label
-from ...citations.acceptance import clean_author_list
+from ...citations.acceptance import (clean_author_list, complete_truncated_authors,
+                                      is_truncated_author_list)
 from ...citations.level import LEVEL_LOCAL, LEVEL_ONLINE
 from ...citations.local_confidence import CONFIDENCE_UNCONFIRMED, local_confidence
 from ...models import ContentPage, DocumentProfile
@@ -103,6 +104,7 @@ def enrich_metadata(
     citation_level: Optional[str] = None,
     file_name: Optional[str] = None,
     online_chain: Any = None,
+    next_page_text: str = "",
 ) -> Dict[str, Any]:
     """
     The final enrichment step: ledger cache -> Zotero -> merge -> provenance.
@@ -127,6 +129,8 @@ def enrich_metadata(
         vlm_metadata: the title-page extraction (a hypothesis).
         pdf_path: the source PDF (hashed for the ledger lookup).
         title_page_text: referee text for the three-way merge.
+        next_page_text: the page after the title page, where a shortened
+            author list is printed in full (Cell Press).
         profile: carries the orchestrator's text-layer DOI + confidence.
         ledger: long-term memory; a cache hit short-circuits everything.
         use_ledger_cache: False re-derives metadata even when the ledger
@@ -170,7 +174,8 @@ def enrich_metadata(
         vlm_metadata, title_page_text=title_page_text, profile=profile,
         zotero_service=zotero_service, doi_threshold=doi_threshold,
         citation_level=citation_level, online_chain=online_chain,
-        file_name=file_name or Path(pdf_path).name, logger=log)
+        file_name=file_name or Path(pdf_path).name, logger=log,
+        next_page_text=next_page_text)
 
 
 def establish_metadata(
@@ -183,6 +188,7 @@ def establish_metadata(
     file_name: str = "",
     logger: Optional[logging.Logger] = None,
     online_chain: Any = None,
+    next_page_text: str = "",
 ) -> Dict[str, Any]:
     """
     Establish a document's bibliographic record from what was read of it.
@@ -198,6 +204,8 @@ def establish_metadata(
     Args:
         vlm_metadata: the title-page extraction (a hypothesis).
         title_page_text: referee text for the three-way merge.
+        next_page_text: the page after the title page, where a shortened
+            author list is printed in full (Cell Press).
         profile: anything with `.doi` and `.doi_confidence` (the text
             layer's DOI and how it was found), or None.
         zotero_service: the Zotero library, at level `zotero` only.
@@ -237,13 +245,22 @@ def establish_metadata(
     if citation_level == LEVEL_ONLINE and online_chain is not None:
         zotero_record, zotero_confidence, zotero_source, network = _online_lookup(
             online_chain, vlm_metadata, title_page_text, log)
-        if zotero_record:
-            # The model sometimes returns the whole author line as one string.
-            # With a registry record to merge against, tidy it first.
-            vlm_metadata = {**vlm_metadata,
-                            "authors": clean_author_list(vlm_metadata.get("authors"))}
 
-    merged = merge_metadata(vlm_metadata, zotero_record, title_page_text)
+    # The model sometimes returns the whole author line as ONE string. Split
+    # it at every level, not only when a registry record exists: the merger's
+    # "Fix-D" discards a single concatenated block on the assumption that a
+    # registry list will replace it, and at `local` none does, so 4 of the 10
+    # benchmark pilot papers ended with no authors at all (session 40).
+    truncated = is_truncated_author_list(vlm_metadata.get("authors"))
+    completed = complete_truncated_authors(vlm_metadata.get("authors"),
+                                           next_page_text) if truncated else None
+    if completed:
+        log.info("Author list was shortened on the title page; %d authors read "
+                 "from the next page's byline.", len(completed))
+    vlm_metadata = {**vlm_metadata,
+                    "authors": completed or clean_author_list(vlm_metadata.get("authors"))}
+
+    merged =merge_metadata(vlm_metadata, zotero_record, title_page_text)
     merged["validation_confidence"] = zotero_confidence
     merged["validation_source"] = zotero_source
     apply_citation_level(merged, citation_level, title_page_text, file_name,
@@ -251,6 +268,9 @@ def establish_metadata(
     log.info("Merged Metadata (pre-review): %s", merged)
 
     provenance = annotate_provenance(merged)
+    if truncated and not completed:
+        # The names shown are kept, but the list is known to be incomplete.
+        provenance["authors_truncated"] = True
     # Remove any stale provenance keys, then attach the fresh one — prevents
     # the circular reference V5 once shipped.
     merged.pop("_provenance", None)

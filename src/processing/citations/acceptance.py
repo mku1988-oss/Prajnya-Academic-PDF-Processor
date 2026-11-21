@@ -70,7 +70,8 @@ def title_similarity(left: Any, right: Any) -> float:
 
 #: Affiliation marks the vision model leaves glued to a name: "Jordi Bella*1",
 #: "Smith†", "Lee¹". No real name contains a digit or these signs.
-_AFFILIATION_MARKS = re.compile(r"[*†‡§¶#\d¹²³⁰-₟]+")
+#: "+" is a mark too ("Audrey Esclatine¹**+", PLOS Pathogens).
+_AFFILIATION_MARKS = re.compile(r"[*†‡§¶#+\d¹²³⁰-₟]+")
 
 
 def clean_name(name: Any) -> str:
@@ -89,17 +90,108 @@ def clean_author_list(authors: Any) -> List[str]:
     Zhang, Raymond P. Boot-Handford"). A string is split at its commas only
     when EVERY part is a full name (two or more words), so "Bella, Jordi" and
     "Michael P. Sarras, Jr." stay whole.
+
+    Seen on the benchmark pilots (session 40): a whole byline in one string
+    with numbered marks, "Paula Istvan1,2*, Einar Birkeland1,2†, ... Paula
+    Berstad4 and Trine B. Roughe2,3,11". Removing "1,2" leaves an empty piece
+    between two commas, and the last two names are joined by "and"; both are
+    separators here, never part of a name.
     """
     cleaned: List[str] = []
     for entry in authors if isinstance(authors, (list, tuple)) else []:
         text = clean_name(entry)
         text = re.sub(r"^(and|&)\s+", "", text, flags=re.I)
-        parts = [clean_name(part) for part in text.split(",")]
+        if _ELLIPSIS.match(text):
+            continue            # "..." of a shortened list is not a name
+        # The joined form is used only if the split succeeds; otherwise the
+        # entry is kept exactly as it was ("Smith, J and Jones, K" stays).
+        joined = re.sub(r"\s+(?:and|&)\s+", ", ", text, flags=re.I)
+        parts = [clean_name(part) for part in joined.split(",")]
+        parts = [part for part in parts                # pieces left by "1,2",
+                 if part and not _ELLIPSIS.match(part)]  # and a list's "..."
         if len(parts) > 1 and all(len(part.split()) >= 2 for part in parts):
             cleaned.extend(re.sub(r"^(and|&)\s+", "", p, flags=re.I) for p in parts)
         elif text:
             cleaned.append(text)
     return cleaned
+
+
+#: An author list the page itself shortened: "A, B, C, ..., Y, Z".
+_ELLIPSIS = re.compile(r"^\s*(?:\.\s*){3,}\s*$|^\s*…\s*$")
+
+#: How far past the first author the byline may run (characters).
+_BYLINE_REACH = 3000
+
+#: Spacing accents a PDF text layer leaves beside their letter
+#: ("Kova´ c", "He´ le` ne"), mapped to the combining form.
+_SPACING_ACCENTS = {"´": "́", "`": "̀", "¨": "̈",
+                    "ˆ": "̂", "˜": "̃", "ˇ": "̌"}
+
+
+def is_truncated_author_list(authors: Any) -> bool:
+    """Whether the reading holds an ellipsis in place of some authors."""
+    if not isinstance(authors, (list, tuple)):
+        return False
+    pieces = [piece for entry in authors if isinstance(entry, str)
+              for piece in entry.split(",")]
+    return any(_ELLIPSIS.match(piece) for piece in pieces)
+
+
+def complete_truncated_authors(authors: Any, next_page_text: str) -> Optional[List[str]]:
+    """
+    The full author list for a reading the page itself shortened.
+
+    For biology researchers: a Cell Press article's first page is a summary
+    page whose "Authors" box shortens long lists ("Biana Bernshtein, Esther
+    Ndungo, Deniz Cizmeci, ..., Galit Alter"). The vision model copies that
+    faithfully. The full byline is printed on the NEXT page, starting with
+    the same first author and ending with the same last author, so it is
+    read from there: the text from the first author's name to the last
+    author's surname, split as any byline is.
+
+    Returns None (keep the reading as it is) unless every name in the short
+    list is found in the full one and the full one is longer.
+    """
+    shown = _names_around_ellipsis(authors)
+    if len(shown) < 2 or not next_page_text:
+        return None
+    text = _rejoin_spacing_accents(" ".join(next_page_text.split()))
+    start = text.find(shown[0])
+    if start < 0:
+        return None
+    last_surname = shown[-1].split()[-1]
+    end = text.find(last_surname, start, start + _BYLINE_REACH)
+    if end < 0:
+        return None
+    full = clean_author_list([text[start:end + len(last_surname)]])
+    full_surnames = {surname_of(name) for name in full}
+    if len(full) <= len(shown) or not all(surname_of(n) in full_surnames for n in shown):
+        return None
+    return full
+
+
+def _names_around_ellipsis(authors: Any) -> List[str]:
+    """The names a shortened list does show, in order, ellipsis removed."""
+    names: List[str] = []
+    for entry in authors if isinstance(authors, (list, tuple)) else []:
+        if not isinstance(entry, str):
+            continue
+        for piece in re.split(r",|\s+(?:and|&)\s+", entry):
+            if _ELLIPSIS.match(piece):
+                continue
+            name = clean_name(piece)
+            if len(name.split()) >= 2:
+                names.append(name)
+    return names
+
+
+def _rejoin_spacing_accents(text: str) -> str:
+    """'Kova´ c' -> 'Kovác', 'He´ le` ne' -> 'Hélène'."""
+    def combine(match: "re.Match[str]") -> str:
+        return unicodedata.normalize(
+            "NFC", match.group(1) + _SPACING_ACCENTS[match.group(2)])
+    accents = "".join(_SPACING_ACCENTS)
+    return re.sub(rf"([A-Za-z])\s?([{accents}])\s?", combine, text)
 
 
 def surname_of(name: Any) -> str:

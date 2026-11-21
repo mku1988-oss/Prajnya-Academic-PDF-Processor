@@ -80,10 +80,10 @@ def _wrong_interpreter(problem: str) -> None:
         f"  version     : {sys.version.split()[0]}"
         f"   (this project needs {_REQUIRED_PYTHON[0]}.{_REQUIRED_PYTHON[1]}.x)\n"
         "\n"
-        "Use the project's environment -- a conda env named 'shastrasaara',\n"
+        "Use the project's environment -- a conda env named 'prajnya',\n"
         "created from requirements.txt:\n"
         "\n"
-        "  conda activate shastrasaara\n"
+        "  conda activate prajnya\n"
         "  python run_prajnya_studio.py\n"
         "\n"
         "If activation cannot find it by name, it is registered by path.\n"
@@ -92,7 +92,7 @@ def _wrong_interpreter(problem: str) -> None:
         "\n"
         "  <env>/python.exe run_prajnya_studio.py\n"
         "\n"
-        "See README.md, 'The Python environment'.\n"
+        "See MANUAL.md, 'Installation in detail'.\n"
     )
 
 

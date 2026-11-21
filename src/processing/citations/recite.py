@@ -245,11 +245,21 @@ def derive_record(payload: Dict[str, Any], reading: Dict[str, Any], old: Dict[st
         reading, title_page_text=profile.get("page_1_text") or "",
         profile=text_layer, zotero_service=zotero_service,
         doi_threshold=doi_threshold, citation_level=level,
-        file_name=_file_name(payload), logger=log, online_chain=online_chain)
+        file_name=_file_name(payload), logger=log, online_chain=online_chain,
+        next_page_text=_page_after_title_page(payload))
 
     carried = {key: value for key, value in old.items() if key not in DERIVED_KEYS}
     record = sanitize_bibliographic_metadata({**carried, **merged})
     return ExtractedMetadata(**record).model_dump(mode="json")
+
+
+def _page_after_title_page(payload: Dict[str, Any]) -> str:
+    """The stored text of the page after the title page (where a shortened
+    author list is printed in full), or '' when there is none."""
+    index = (payload.get("profile") or {}).get("title_page_index") or 0
+    page = next((page for page in payload.get("pages") or []
+                 if page.get("page_number") == index + 2), None)
+    return (page or {}).get("content") or ""
 
 
 def title_page_reading(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -320,8 +330,9 @@ def _write_back(payload: Dict[str, Any], json_path: Path, metadata: Dict[str, An
     """
     Put the new record into the document and write the file.
 
-    Only the metadata, the `citations` block, the review status and the
-    contract stamp change. The file is written beside itself and then
+    Only the metadata, the `citations` and `mentions` blocks, the pages'
+    furniture and outside-body labels and `body`, the review status and the contract stamp
+    change. The file is written beside itself and then
     swapped in, so an interruption cannot leave half a document.
 
     `reference_data` is the finder's answer; None writes the list as "not
@@ -331,6 +342,8 @@ def _write_back(payload: Dict[str, Any], json_path: Path, metadata: Dict[str, An
         The completeness assessment of the new record.
     """
     from ..document_json import CONTRACT_VERSION, page_contents_of
+    from ..utils.page_body import pages_with_body
+    from .object_mentions import build_mentions_block
 
     info = payload.setdefault("document_info", {})
     assessment = assess_metadata_completeness(metadata, info.get("document_type"))
@@ -340,6 +353,8 @@ def _write_back(payload: Dict[str, Any], json_path: Path, metadata: Dict[str, An
         metadata, _file_name(payload), level=level, level_set_by=level_set_by,
         reference_data=reference_data,
         page_contents=page_contents_of(payload.get("pages") or []))
+    payload["mentions"] = build_mentions_block(payload.get("pages") or [])
+    payload["pages"] = pages_with_body(payload.get("pages") or [])
     payload["review_status"] = assessment.review_status
     payload["review_needed_fields"] = list(assessment.missing_fields)
     info["contract_version"] = CONTRACT_VERSION        # the file now carries a block

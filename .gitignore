@@ -42,3 +42,7 @@ eval/citation_levels/s2_cache/
 eval/citation_levels/s3a_cache/
 eval/citation_levels/s3b_cache/
 eval/citation_levels/s2_confirm_pages/
+
+# Benchmark: papers and raw tool outputs are re-fetchable / published as a release asset
+benchmark/corpus/cache/
+benchmark/outputs/

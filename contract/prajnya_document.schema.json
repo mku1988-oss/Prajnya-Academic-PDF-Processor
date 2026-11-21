@@ -3,7 +3,7 @@
   "$id": "urn:prajnya:document-contract:1",
   "title": "Prajnya document JSON",
   "description": "One file per processed PDF: run_outputs/documents/<name>.v6.json. This schema pins the part other programs may rely on. Keys it does not name (for example pages[].metadata.analysis) are internal and may change in any release. Unknown extra keys are always allowed, so adding a key is never a breaking change. See contract/README.md for the version rules.",
-  "x-contract-version": "1.1",
+  "x-contract-version": "1.3",
   "type": "object",
   "required": ["document_info", "metadata_final", "pages", "summary", "profile"],
   "if": {
@@ -56,6 +56,7 @@
       }
     },
     "citations": {"$ref": "#/$defs/citations"},
+    "mentions": {"$ref": "#/$defs/mentions"},
     "pages": {
       "type": "array",
       "description": "One entry per processed page, in page order.",
@@ -164,6 +165,53 @@
         "printed_text": {"type": ["string", "null"], "description": "The entry as printed in the PDF, when Prajnya's splitter read it."}
       }
     },
+    "mentions": {
+      "type": "object",
+      "description": "In-text figure and table mentions ('Fig. 3B', 'Table 2'), linked to the figure and table objects that carry that printed label. Derived from the page text on every write, at every citation level. Since contract 1.2.",
+      "required": ["figures", "tables", "skipped"],
+      "properties": {
+        "figures": {"type": "array", "items": {"$ref": "#/$defs/object_mention"}, "description": "Mentions of main-text figures, in page and reading order."},
+        "tables": {"type": "array", "items": {"$ref": "#/$defs/object_mention"}, "description": "Mentions of tables, in page and reading order."},
+        "skipped": {
+          "type": "object",
+          "description": "How many mentions were found and deliberately NOT linked.",
+          "properties": {
+            "supplementary": {"type": "integer", "minimum": 0, "description": "'Figure S1', 'Supplementary Fig. 3', 'S1 Fig', 'Extended Data Fig. 2', 'Figure 2-figure supplement 1': not printed in the article."},
+            "own_label": {"type": "integer", "minimum": 0, "description": "A legend's own label ('Figure 3.' starting Figure 3's caption)."}
+          }
+        }
+      }
+    },
+    "outside_body_span": {
+      "type": "object",
+      "required": ["kind", "start", "end"],
+      "properties": {
+        "kind": {"enum": ["placeholder", "table", "caption", "reference_list"], "description": "placeholder: Prajnya's [[FIGURE ...]] / [[TABLE ...]] lines and <!-- --> comments. table: a table written as HTML or as a Markdown grid. caption: a figure or table legend, where the page text holds the legend stored on that object. reference_list: from the References heading to the end of the list (a heading that follows reference lists, a legend, or the next book chapter); text after the list, such as Cell Press STAR Methods or eLife appendices, is body."},
+        "start": {"type": "integer", "minimum": 0, "description": "Where the part starts in the page's content."},
+        "end": {"type": "integer", "minimum": 0, "description": "Where it ends in content."}
+      }
+    },
+    "furniture_line": {
+      "type": "object",
+      "required": ["kind", "start", "end", "text"],
+      "properties": {
+        "kind": {"enum": ["running_line", "page_number"], "description": "running_line: a running header or footer (journal line, author short names, a folio line). page_number: a line that is only the printed page number. Header and footer are not told apart: a text-layer page often writes its header at the end."},
+        "start": {"type": "integer", "minimum": 0, "description": "Where the line starts in the page's content."},
+        "end": {"type": "integer", "minimum": 0, "description": "Where the line ends in content, its line break excluded."},
+        "text": {"type": "string", "description": "The line, trimmed."}
+      }
+    },
+    "object_mention": {
+      "type": "object",
+      "required": ["page_number", "content_offset", "text", "number", "targets"],
+      "properties": {
+        "page_number": {"type": "integer", "minimum": 1, "description": "1-BASED, as pages[].page_number."},
+        "content_offset": {"type": "integer", "minimum": 0, "description": "Character offset in that page's content string: where the mention starts, or for a later number in it ('Figures 2 and 3'), where that number stands."},
+        "text": {"type": "string", "description": "The whole mention as printed, whitespace collapsed: 'Figures 3A and 4'."},
+        "number": {"type": "string", "description": "The ONE printed number this record links: '4', '11.1', 'II'. A mention naming two figures gives two records; panels of one figure ('Fig 1A and 1D') give one."},
+        "targets": {"type": "array", "items": {"type": "string"}, "description": "The figure_id / table_id of every object carrying that label (a figure split into several crops has several). Empty when no object with that label was found: the mention is real, the object is missing."}
+      }
+    },
     "citation_marker": {
       "type": "object",
       "required": ["page_number", "text", "kind", "numbers", "context_before", "content_offset"],
@@ -182,6 +230,7 @@
       "properties": {
         "page_number": {"type": "integer", "minimum": 1, "description": "1-BASED."},
         "content": {"type": "string", "description": "The page text, as Markdown. On a model-read page it is the model's reading; on a text-layer page it is the PDF's own text."},
+        "body": {"type": "string", "description": "From contract 1.3. The page's running text: content without its furniture lines (metadata.furniture) and the parts listed in metadata.outside_body (placeholders, tables, legends, the reference list). Whole lines go with their line breaks; every other character is as in content. For splitting text into passages. Every offset in the file (markers' and mentions' content_offset, furniture start/end) indexes content, never body."},
         "quality_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
         "metadata": {
           "type": "object",
@@ -208,7 +257,17 @@
             "headings": {"type": "array", "items": {"$ref": "#/$defs/heading"}},
             "has_reference_heading": {"type": "boolean"},
             "reference_density": {"type": "number"},
-            "page_time": {"type": "number", "minimum": 0}
+            "page_time": {"type": "number", "minimum": 0},
+            "furniture": {
+              "type": "array",
+              "description": "From contract 1.3. The page's running headers, footers and page numbers, LABELLED and left in content (they carry the journal, volume and DOI). Found from the text alone: a line at the start or end of the page text that repeats on many pages, or whose number rises with the page. Empty when none was found; model-read pages mostly leave furniture out already.",
+              "items": {"$ref": "#/$defs/furniture_line"}
+            },
+            "outside_body": {
+              "type": "array",
+              "description": "From contract 1.3. The other parts of content that are not running text and are left out of body, in text order, never overlapping. Each is kept elsewhere in the file (legends and tables on their objects, references under citations) or is Prajnya's own markup. Empty when there is none.",
+              "items": {"$ref": "#/$defs/outside_body_span"}
+            }
           }
         }
       }

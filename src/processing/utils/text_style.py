@@ -105,16 +105,28 @@ class PageTypography:
         Two tests, chosen by whether the caption has its own font:
 
         - caption font differs from the body font: the line is body text
-          when it is set in the body font;
+          when it is set in the body font AND at the body's size;
         - caption shares the body font: the line is body text when its size
           is clearly not the caption's (`SIZE_CHANGE`) and is the body's.
+
+        Why "and at the body's size" (session 40, benchmark pilots): Cell
+        Reports sets a caption's TITLE line in bold and its legend in the
+        body's own font, only smaller (x-height 3.76 against 4.48). The label
+        line gave the caption a font of its own, so the legend's first line
+        read as body text and every caption stopped after its title. The body
+        resuming below the caption is still at the body's size and still
+        stops it. A line whose size is unknown keeps the font test alone.
 
         Never True when a style is unknown: no evidence, no stop.
         """
         if line_style is None or caption_style is None:
             return False
         if caption_style.font != self.body.font:
-            return line_style.font == self.body.font
+            if line_style.font != self.body.font:
+                return False
+            if not (line_style.x_height and self.body.x_height):
+                return True
+            return _near_body_size(line_style, self.body)
         return _sized_like_body(line_style, caption_style, self.body)
 
 
@@ -187,6 +199,15 @@ def _sized_like_body(line: TextStyle, caption: TextStyle, body: TextStyle) -> bo
     away_from_caption = abs(line.x_height - caption.x_height) > SIZE_CHANGE * caption.x_height
     near_body = abs(line.x_height - body.x_height) <= (SIZE_CHANGE / 2) * body.x_height
     return away_from_caption and near_body
+
+
+def _near_body_size(line: TextStyle, body: TextStyle) -> bool:
+    """A body-font line at the body's size: within `SIZE_CHANGE` of it.
+
+    Wider than `_sized_like_body`'s half-tolerance on purpose: here the font
+    already says "body", and the size only has to rule out small print set in
+    the body's font (a legend, 16% smaller in Cell Reports)."""
+    return abs(line.x_height - body.x_height) <= SIZE_CHANGE * body.x_height
 
 
 def _spread(items: Sequence, count: int) -> List:

@@ -167,7 +167,7 @@ def search_author_year_markers(lines: Sequence[Any], reference_list: Optional[Re
     dropped = {"no_candidate": 0, "ambiguous": 0, "letter": 0}
     if reference_list is None or getattr(reference_list, "style", None) != "author_year":
         return AuthorYearSearch([], dropped)
-    stream = body_stream(list(lines[:reference_list.first_line]))
+    stream = body_stream(text_outside_the_list(lines, reference_list))
     index = reference_index(references)
     markers: List[CitationMarker] = []
     for group in find_groups(stream.text):
@@ -178,6 +178,16 @@ def search_author_year_markers(lines: Sequence[Any], reference_list: Optional[Re
 
 
 # --- helpers (after the main function, per CLAUDE.md) --------------------------------------
+
+def text_outside_the_list(lines: Sequence[Any], reference_list: ReferenceList) -> List[Any]:
+    """The lines before the reference list, and those after it when the
+    paper goes on (Cell Press's STAR Methods cite references too)."""
+    body = list(lines[:reference_list.first_line])
+    end_line = getattr(reference_list, "end_line", None)
+    if end_line is not None:
+        body.extend(lines[end_line:])
+    return body
+
 
 def body_stream(body: Sequence[Any]) -> _Stream:
     """The body lines joined into one stream; broken words are mended, pages remembered."""

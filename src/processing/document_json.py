@@ -24,13 +24,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .citations.block import build_citations_block
+from .citations.object_mentions import build_mentions_block
 from .models import DocumentProfile
+from .utils.page_body import pages_with_body
 
 LOG = logging.getLogger(__name__)
 
 #: Stamped into every document's `document_info`, so an output file says which
 #: pipeline produced it.
-PIPELINE_VERSION = "v6.6.4"
+PIPELINE_VERSION = "v6.7.0"
 
 #: The version of the output FORMAT, which moves independently of the release.
 #: Stamped into `document_info.contract_version`, and pinned against
@@ -41,7 +43,9 @@ PIPELINE_VERSION = "v6.6.4"
 #: number for anything purely additive. Rules in `contract/README.md`.
 #:
 #: 1.1 (citation levels, S0a): the top-level `citations` block.
-CONTRACT_VERSION = "1.1"
+#: 1.2 (item 000a, fix 6): the top-level `mentions` block.
+#: 1.3 (item 000a, fix 1): `pages[].body`, `metadata.furniture`, `metadata.outside_body`.
+CONTRACT_VERSION = "1.3"
 
 
 def write_result(profile: DocumentProfile, out_path: Path, elapsed: float,
@@ -87,7 +91,9 @@ def build_document_json(profile: DocumentProfile, elapsed: float,
         document_info   run-level facts — filename, wall time, success, timings
         metadata_final  the merged bibliographic record
         citations       how to cite it: level, source, label (contract 1.1)
-        pages          top-level, one entry per processed page
+        mentions        in-text "Fig. 3B" / "Table 2" linked to objects (1.2)
+        pages          top-level, one entry per processed page; each carries
+                        its running text `body` and what was left out (1.3)
         summary         errors and counts
 
     Args:
@@ -105,7 +111,10 @@ def build_document_json(profile: DocumentProfile, elapsed: float,
     dumped_result = dumped.get("processing_result") or {}
 
     errors = list(result.errors) if result and result.errors else []
-    pages = dumped_result.get("pages") or []
+    # Running headers, footers and page numbers labelled, the other parts
+    # that are not running text marked, and each page's running text
+    # (`body`). Derived from the page text on every write.
+    pages = pages_with_body(dumped_result.get("pages") or [])
 
     info: Dict[str, Any] = {
         "filename": profile.pdf_path.name,
@@ -131,6 +140,9 @@ def build_document_json(profile: DocumentProfile, elapsed: float,
             level_set_by=getattr(result, "citation_level_set_by", None),
             reference_data=getattr(result, "citation_references", None),
             page_contents=page_contents_of(pages)),
+        # In-text figure and table mentions, linked to the objects found.
+        # Derived from the page text on every write, like the markers' offsets.
+        "mentions": build_mentions_block(pages),
         "pages": pages,
         "summary": {
             "errors": errors,

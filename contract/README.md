@@ -7,7 +7,7 @@ This folder says exactly what they may rely on.
 - **`prajnya_document.schema.json`** is the promise, as a JSON Schema
   (draft 2020-12). It is checked by `tests/test_output_contract.py` against
   the writer's output and against every document in `run_outputs/`.
-- **Contract version: 1.1.** Every file written from v6.4.0 on says its
+- **Contract version: 1.3.** Every file written from v6.4.0 on says its
   version in `document_info.contract_version`. A file without that key was
   written by 6.3.0 or earlier and follows contract 1.0 in every respect.
 - **`examples/`** holds two small hand-written documents that follow the
@@ -15,13 +15,15 @@ This folder says exactly what they may rely on.
   `citations_online.json` (a reference list and linked marks) and
   `citations_local_file_name.json` (a document cited by its file name).
   Their bibliographic content is illustrative. The tests validate both.
-  `examples/frontiers_hippo_hydra/` is real, unedited output for one CC BY
+  `examples/frontiers_acidovorax_hrp/` is real, unedited output for one CC BY
   paper (see `examples/README.md`), also validated by the tests.
 
 | version | first release | what changed |
 |---|---|---|
 | 1.0 | v6.4.0 | the contract is written down |
 | 1.1 | v6.6.0 | the top-level `citations` block: how to cite the document, at which level that was established, and (level `online`) its reference list and linked in-text marks. Additive: a 1.0 reader is unaffected. |
+| 1.2 | next release | the top-level `mentions` block: in-text "Fig. 3B" / "Table 2" linked to the figure and table objects, at every level. Additive. |
+| 1.3 | next release | `pages[].body` (the page's running text), `pages[].metadata.furniture` (running headers, footers and page numbers, labelled) and `pages[].metadata.outside_body` (placeholders, tables, legends and the reference list, marked). Additive. |
 
 Anything the schema does not name is internal and may change in any release:
 for example `pages[].metadata.analysis`, `coverage`, and the rest of the
@@ -98,6 +100,23 @@ compares the first two fails if you forget.
     and only when exactly one entry fits).
     `content_offset` indexes that page's `content` string and is null when
     the mark could not be found there exactly once.
+16. **`mentions` links "Fig. 3B" to a figure by its printed label, not by
+    reading the figure** (from contract 1.2). Supplementary mentions ("Figure
+    S1", "S1 Fig", "Figure 2-figure supplement 1") are never linked to a main
+    figure; they are only counted in `skipped`. A mention whose `targets` is
+    empty names a figure or table Prajnya did not find. A mention is found in
+    `content` as written, so a mention inside text Prajnya misread is missed.
+17. **`body` is for passages; `content` is the record** (from contract 1.3).
+    `body` is the page's running text: `content` without the furniture
+    (`metadata.furniture`: running headers, footers, page numbers) and
+    without the parts in `metadata.outside_body` (Prajnya's placeholders,
+    tables, legends, the reference list). Nothing is deleted from
+    `content`, and each part left out is kept elsewhere in the file or is
+    Prajnya's own markup. Every offset in the file indexes `content`, never
+    `body`. All of it is found from the text: a legend merged into a
+    sentence by a model read, or a reference list with no "References"
+    heading in the text, stays in `body`; footnotes, affiliations,
+    acknowledgements and other back matter are not taken out.
 
 ## Checking a file yourself
 

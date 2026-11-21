@@ -32,11 +32,33 @@ import re
 import statistics
 import unicodedata
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
 from ..pdf.base import PrintedChar
+
+# A band of rows with fewer gutters is joined to its neighbour only when its
+# text stays out of the neighbour's extra gutters. When more than this share
+# of its rows put ink in such a gutter, it is full-width text (a Cell Reports
+# SUMMARY above a two-column INTRODUCTION), a different layout.
+FULL_WIDTH_SHARE = 0.25
+
+# ... and never on fewer rows than this. One row across a gutter is weak
+# evidence: in a scan's text layer, the boxes of one column line can run
+# across the gutter (the 1960 Saturated Solutions scan, p6), and taking that
+# row for full-width text cut its column in two.
+MIN_FULL_WIDTH_ROWS = 2
+
+# ... and only when a band WITH those gutters is a real column layout, at
+# least this many rows tall. A few rows of text wrapping round a small inset
+# (Frontiers) show a local extra gutter that the column above runs across.
+MIN_LAYOUT_ROWS = 12
+
+# How far left of a gutter's position (where the next column starts) ink is
+# looked for: inside the empty strip of a real gutter, inside the text of a
+# full-width row.
+GUTTER_PROBE_POINTS = (4.0, 1.0)
 
 # Two characters share a line when their baselines differ by less than this
 # share of the line's character height. Superscript digits rise ~0.3-0.4 of
@@ -200,8 +222,9 @@ class RowLayout:
         tolerance = BAND_SHIFT_SHARE * text_width
         row_gutters = body_rows_gutters(rows, self.keys, page_height)
         first_bands = bands_of(row_gutters, tolerance)
+        spans = FullWidthTest([rows[key] for key in self.keys], first_bands)
         self.bands = merge_compatible_bands(first_bands, band_consensus(first_bands, row_gutters, tolerance),
-                                            tolerance)
+                                            tolerance, spans)
         consensus = band_consensus(self.bands, row_gutters, tolerance)
         self.gutters = [consensus[band] for band in self.bands]
 
@@ -342,27 +365,82 @@ def bands_of(gutters: List[Tuple[float, ...]], tolerance: float) -> List[int]:
 
 
 def merge_compatible_bands(bands: List[int], band_gutters: Dict[int, Tuple[float, ...]],
-                           tolerance: float) -> List[int]:
+                           tolerance: float,
+                           spans: Optional["FullWidthTest"] = None) -> List[int]:
     """Join neighbouring bands when one's gutters are a subset of the other's.
 
     A column that ends early (the right column of a list's last page) leaves
     the rows below it with fewer gutters. That is the same layout, not a new
     one: its lines continue the left column. Only bands whose gutters
     disagree (two columns of prose above three of references) stay apart.
+
+    `spans` (optional, a `FullWidthTest`) says whether a band's text runs
+    across gutters. Such a band is full-width text, not a column that ended
+    early, and is never joined to a band of `MIN_LAYOUT_ROWS` or more rows
+    that has those gutters.
     """
     renumber: Dict[int, int] = {}
     group, group_gutters = 0, None
+    group_bands: List[int] = []
     for band in sorted(band_gutters):
         current = band_gutters[band]
-        if group_gutters is not None and (subset_of(current, group_gutters, tolerance)
-                                          or subset_of(group_gutters, current, tolerance)):
+        if group_gutters is not None and _compatible(band, group_bands, group_gutters,
+                                                     band_gutters, tolerance, spans):
             group_gutters = current if len(current) > len(group_gutters) else group_gutters
+            group_bands.append(band)
         elif group_gutters is not None:
-            group, group_gutters = group + 1, current
+            group, group_gutters, group_bands = group + 1, current, [band]
         else:
-            group_gutters = current
+            group_gutters, group_bands = current, [band]
         renumber[band] = group
     return [renumber[band] for band in bands]
+
+
+def _compatible(band: int, group_bands: List[int], group_gutters: Tuple[float, ...],
+                band_gutters: Dict[int, Tuple[float, ...]], tolerance: float,
+                spans: Optional["FullWidthTest"]) -> bool:
+    """Whether `band` may join the group of bands before it (see `merge_compatible_bands`)."""
+    gutters = band_gutters[band]
+    if subset_of(gutters, group_gutters, tolerance):
+        fewer, more = [band], group_bands
+        extra = tuple(g for g in group_gutters if not subset_of((g,), gutters, tolerance))
+    elif subset_of(group_gutters, gutters, tolerance):
+        fewer, more = group_bands, [band]
+        extra = tuple(g for g in gutters if not subset_of((g,), group_gutters, tolerance))
+    else:
+        return False
+    if not (spans and extra):
+        return True
+    # A layout is ONE band with those gutters, tall enough: three 2-row bands
+    # of text wrapping round an inset are not one.
+    tallest = max((spans.rows([b]) for b in more
+                   if subset_of(extra, band_gutters[b], tolerance)), default=0)
+    return not (tallest >= MIN_LAYOUT_ROWS and spans.crosses(fewer, extra))
+
+
+class FullWidthTest:
+    """Which first-pass bands are full-width text, for `merge_compatible_bands`."""
+
+    def __init__(self, rows: List[List[PrintedChar]], bands: List[int]) -> None:
+        self._rows = rows
+        self._bands = bands
+
+    def rows(self, bands: List[int]) -> int:
+        """How many rows those bands hold."""
+        return sum(1 for b in self._bands if b in bands)
+
+    def crosses(self, bands: List[int], gutters: Tuple[float, ...]) -> bool:
+        """Whether more than `FULL_WIDTH_SHARE` of those bands' rows, and at
+        least `MIN_FULL_WIDTH_ROWS` of them, put ink just left of any of the
+        gutters (where a real gutter is empty)."""
+        band_rows = [row for row, b in zip(self._rows, self._bands) if b in bands]
+        if not band_rows:
+            return False
+        far, near = GUTTER_PROBE_POINTS
+        inked = sum(1 for row in band_rows
+                    if any(c.rect.x0 < g - near and c.rect.x1 > g - far
+                           for c in row for g in gutters))
+        return inked >= MIN_FULL_WIDTH_ROWS and inked > FULL_WIDTH_SHARE * len(band_rows)
 
 
 def subset_of(small: Tuple[float, ...], large: Tuple[float, ...], tolerance: float) -> bool:

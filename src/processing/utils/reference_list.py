@@ -70,9 +70,11 @@ _REFERENCE_HEADING = re.compile(
     r"^\W*(?:\d+\.?\s*)?(references?(?:\s+and\s+notes)?|reference\s+list|bibliography|"
     r"literature\s+cited|works\s+cited)\s*:?\s*$", re.I)
 
-# Headings that follow a reference list and so end it.
+# Headings that follow a reference list and so end it. Cell Press prints its
+# STAR Methods AFTER the list ("STAR★METHODS", read as "STAR+METHODS"),
+# opening with the KEY RESOURCES TABLE.
 _AFTER_LIST_HEADING = re.compile(
-    r"^\W*(acknowledge?ments?|supplementary|supporting information|appendix|figure legends?|"
+    r"^\W*(star\W{0,3}methods|key resources table|acknowledge?ments?|supplementary|supporting information|appendix|figure legends?|"
     r"further (related )?reading|author contributions|competing (financial )?interests?|"
     r"conflicts? of interest|abbreviations|associated content|author information|notes?)\b", re.I)
 
@@ -122,11 +124,15 @@ class ReferenceList:
         entries: the entries in printed order.
         first_line: the position of the list's first line in the document's
             lines, so a caller can tell the body (before it) from the list.
+        end_line: the position just after the list's last line, when text
+            follows the list (Cell Press prints its Methods there); None when
+            the list runs to the end or its end is not known.
     """
 
     style: str
     entries: List[ReferenceEntry]
     first_line: int = 0
+    end_line: Optional[int] = None
 
 
 def find_reference_list(lines: Sequence[LayoutLine]) -> Optional[ReferenceList]:
@@ -298,7 +304,9 @@ def author_year_list(lines: Sequence[LayoutLine]) -> Optional[ReferenceList]:
         entries.append(make_entry(None, region[index].page, text))
     if len(entries) < MIN_ENTRIES:
         return None
-    return ReferenceList(style="author_year", entries=entries, first_line=first_line)
+    end_line = first_line + len(region)
+    return ReferenceList(style="author_year", entries=entries, first_line=first_line,
+                         end_line=end_line if end_line < len(lines) else None)
 
 
 def list_region(lines: Sequence[LayoutLine]) -> List[LayoutLine]:

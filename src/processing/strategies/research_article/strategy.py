@@ -282,7 +282,19 @@ class ResearchArticleStrategy:
             citation_level=self.citation_level,
             file_name=profile.pdf_path.name,
             online_chain=self.online_chain,
+            next_page_text=self._next_page_text(cache, profile),
         )
+
+    def _next_page_text(self, cache: DocumentCache, profile: DocumentProfile) -> str:
+        """
+        The text layer of the page after the title page. A Cell Press summary
+        page shortens the author list ("A, B, ..., Z"); the full byline is
+        printed on the next page. Empty when there is no such page or no text.
+        """
+        try:
+            return cache.page(profile.title_page_index + 1).text() or ""
+        except Exception:
+            return ""
 
     def _run_local(self, cache: DocumentCache, profile: DocumentProfile,
                    test_pages_override: Optional[List[int]]):

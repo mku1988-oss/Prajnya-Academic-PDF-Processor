@@ -1,0 +1,44 @@
+{
+  "seed": 20261119,
+  "scored": 40,
+  "pilot": 10,
+  "quota_counts": {
+    "two_column": 24,
+    "one_column": 16,
+    "has_cell_table": 27,
+    "multi_panel_figure": 28,
+    "numbered": 21,
+    "author_year": 19,
+    "refs_60_plus": 22
+  },
+  "quota_minimums": {
+    "two_column": 15,
+    "one_column": 15,
+    "has_cell_table": 15,
+    "multi_panel_figure": 15,
+    "numbered": 10,
+    "author_year": 10,
+    "refs_60_plus": 10
+  },
+  "shortfalls": {},
+  "skipped_per_stratum": {
+    "Frontiers": {
+      "article-type review-article": 3,
+      "article-type brief-report": 1
+    },
+    "PLOS": {},
+    "eLife": {
+      "article-type review-article": 1,
+      "article-type discussion": 1,
+      "no PDF or no XML": 1
+    },
+    "NatureComms": {
+      "article-type correction": 1
+    },
+    "CellPress": {
+      "article-type brief-report": 4,
+      "no PDF or no XML": 30,
+      "retracted or author manuscript": 44
+    }
+  }
+}

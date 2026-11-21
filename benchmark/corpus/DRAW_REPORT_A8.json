@@ -1,0 +1,43 @@
+{
+  "amendment": "A8",
+  "seed": 20261120,
+  "scored": 40,
+  "quota_counts": {
+    "two_column": 23,
+    "one_column": 17,
+    "has_cell_table": 25,
+    "multi_panel_figure": 26,
+    "numbered": 20,
+    "author_year": 20,
+    "refs_60_plus": 25
+  },
+  "quota_minimums": {
+    "two_column": 15,
+    "one_column": 15,
+    "has_cell_table": 15,
+    "multi_panel_figure": 15,
+    "numbered": 10,
+    "author_year": 10,
+    "refs_60_plus": 10
+  },
+  "shortfalls": {},
+  "skipped_per_stratum": {
+    "Frontiers": {
+      "article-type review-article": 2
+    },
+    "PLOS": {
+      "article-type review-article": 1
+    },
+    "eLife": {},
+    "NatureComms": {
+      "Nat Commun not biology (MeSH)": 14,
+      "article-type brief-report": 1,
+      "article-type letter": 1
+    },
+    "CellPress": {
+      "article-type brief-report": 3,
+      "no PDF or no XML": 40,
+      "retracted or author manuscript": 57
+    }
+  }
+}

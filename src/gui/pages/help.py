@@ -200,7 +200,7 @@ TROUBLESHOOTING_ITEMS: List[Dict[str, str]] = [
     {
         "symptom": "\"The wrong Python is running this file\"",
         "fix": "Something other than the project's environment started the "
-               "app. Activate the 'shastrasaara' conda environment and run "
+               "app. Activate the 'prajnya' conda environment and run "
                "python run_prajnya_studio.py — or, if activation cannot find "
                "it by name, use 'conda env list' to locate it and name its "
                "python.exe in full. The message shows which Python it "

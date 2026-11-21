@@ -52,6 +52,8 @@ from ...layout.base import LABEL_TABLE_CAPTION, Detection
 from ...layout.regions import TableRegion, locate_table_regions
 from ...pdf.base import PdfPage
 from ...utils.figure_extractor import safe_doc_id
+from ...utils.figure_label_pass import build_text_lines, label_words
+from ...utils.table_labels import find_table_title, table_label_of
 from ...utils.text_normalization import normalize_harvested_text
 from ...utils.table_continuation import ContinuationTracker
 from ...utils.table_orientation import table_read_image
@@ -282,7 +284,41 @@ def _caption_for(
     detection sitting inside this region and read just that rectangle —
     giving the manifest the caption as text even though the PNG already
     shows it.
+
+    When that text carries no "Table N" label (the detector boxed the
+    footnote, or found nothing), the printed title is read from the text
+    layer (`utils/table_labels.py`) and put in front of it, so the footnote
+    is kept and the table can be found by its label.
     """
+    detected = _detected_caption(page, page_image, box, detections)
+    if table_label_of(detected):
+        return detected
+    title = _printed_title(page, page_image, box)
+    if not title:
+        return detected
+    if detected and detected not in title:
+        return f"{title} {detected}"
+    return title
+
+
+def _printed_title(page: PdfPage, page_image: "Image.Image",
+                   box: Tuple[int, int, int, int]) -> str:
+    """The table's printed "Table N ..." title from the text layer, or ""."""
+    try:
+        width, _ = page.size
+        scale = width / page_image.width if page_image.width else 1.0
+        lines = build_text_lines(label_words(page), width)
+    except Exception:                                       # pragma: no cover
+        return ""                                           # a scan: no text layer
+    rect = tuple(value * scale for value in box)
+    title = find_table_title(lines, rect)
+    return normalize_harvested_text(title).strip() if title else ""
+
+
+def _detected_caption(page: PdfPage, page_image: "Image.Image",
+                      box: Tuple[int, int, int, int],
+                      detections: Sequence[Detection]) -> str:
+    """The text of the detector's caption box inside this table region."""
     for detection in detections:
         if detection.label != LABEL_TABLE_CAPTION:
             continue

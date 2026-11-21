@@ -41,7 +41,7 @@ from nicegui import run, ui
 from src.processing.paths import DEFAULT_OUTPUT_ROOT
 from src.processing.utils.figure_extractor import safe_doc_id
 
-from .. import theme
+from .. import links, theme
 from ..table_html import prepare_grid_html
 
 
@@ -152,13 +152,16 @@ def _manifest_for(kind: str, stem: str, list_key: str) -> List[Dict[str, Any]]:
 
 def _render_document(container: ui.column, document: Dict[str, Any],
                      figures: List[Dict[str, Any]], tables: List[Dict[str, Any]]) -> None:
+    mentions = links.mentions_by_object(document)
+    names = _object_names(figures, tables)
     with container:
         _render_metadata_card(document)
-        _render_page_viewer(document)
+        _render_page_viewer(document, names)
         if figures:
-            _render_figure_gallery(figures)
+            _render_figure_gallery(figures, mentions)
         if tables:
-            _render_table_gallery(tables)
+            _render_table_gallery(tables, mentions)
+        _render_reference_list(document)
         _render_raw_json_section(document)
 
 
@@ -187,6 +190,10 @@ def _render_metadata_card(document: Dict[str, Any]) -> None:
             _stat("DOI", meta.get("doi") or "—")
             _stat("Validation", f'{meta.get("validation_source", "?")} '
                                 f'({meta.get("validation_confidence", 0):.2f})')
+            counts = links.link_counts(document)
+            _stat("Linked mentions", f'{counts["figures"]} figure · {counts["tables"]} table')
+            has_list = bool((document.get("citations") or {}).get("references"))
+            _stat("Linked citations", counts["citations"] if has_list else "— (online level)")
 
         if review_status == "provisional" or review_fields:
             with ui.row().classes("items-center gap-2 mt-2").style(
@@ -213,7 +220,7 @@ def _stat(label: str, value: Any) -> None:
         ui.label(str(value)).classes("text-sm")
 
 
-def _render_page_viewer(document: Dict[str, Any]) -> None:
+def _render_page_viewer(document: Dict[str, Any], names: Dict[str, str]) -> None:
     pages = document.get("pages") or []
     if not pages:
         return
@@ -240,15 +247,19 @@ def _render_page_viewer(document: Dict[str, Any]) -> None:
                             extras=["fenced-code-blocks", "tables", "latex"]).classes("w-full").style(
                     "max-height: 480px; overflow-y: auto;"
                 )
+                _render_page_links(links.links_on_page(document, number), names)
 
         selector = ui.select(page_numbers, label="Page", value=page_numbers[0],
                              on_change=lambda e: show_page(e.value)).props("outlined dense")
         show_page(page_numbers[0])
 
 
-def _render_figure_gallery(figures: List[Dict[str, Any]]) -> None:
+def _render_figure_gallery(figures: List[Dict[str, Any]],
+                           mentions: Dict[str, List[Dict[str, Any]]]) -> None:
     with ui.expansion(f"Figures ({len(figures)})", icon="image", value=True).classes("w-full"):
-        for label_key, group in _group_by(figures, "label_key").items():
+        groups = _group_by(figures, "label_key")
+        for label_key in sorted(groups, key=_label_order):
+            group = groups[label_key]
             with ui.column().classes("w-full gap-1 mb-3"):
                 heading = group[0].get("printed_label") or label_key or "Figure"
                 ui.label(heading).classes("text-sm font-semibold")
@@ -260,14 +271,18 @@ def _render_figure_gallery(figures: List[Dict[str, Any]]) -> None:
                     ui.label(caption).classes("text-xs").style(
                         f'color: {theme.var("text_muted")}; max-width: 700px;'
                     )
+                _render_mentions(_passages_for_group(group, "figure_id", mentions))
 
 
 def _figure_card(figure: Dict[str, Any]) -> None:
     with ui.column().classes("gap-1"):
-        ui.image(f"/run_outputs/{figure['image_path']}").classes("rounded").style(
-            "max-width: 260px; max-height: 260px; object-fit: contain; "
-            f'border: 1px solid {theme.var("border")};'
-        )
+        # A fixed width: with only a maximum, the image box shrinks to a
+        # thumbnail far smaller than the crop.
+        ui.image(f"/run_outputs/{figure['image_path']}").classes("rounded").props(
+            "fit=contain"
+        ).style("width: 260px; height: 200px; "
+                f'border: 1px solid {theme.var("border")}; '
+                f'background: {theme.var("crop_backing")};')
         ui.label(f"p{figure.get('page')} — {figure.get('figure_id')}").classes("text-xs").style(
             f'color: {theme.var("text_muted")};'
         )
@@ -283,7 +298,8 @@ _GRID_CSS = """
 """
 
 
-def _render_table_gallery(tables: List[Dict[str, Any]]) -> None:
+def _render_table_gallery(tables: List[Dict[str, Any]],
+                          mentions: Dict[str, List[Dict[str, Any]]]) -> None:
     ui.add_css(_GRID_CSS)
     with ui.expansion(f"Tables ({len(tables)})", icon="table_chart").classes("w-full"):
         for table in tables:
@@ -301,6 +317,7 @@ def _render_table_gallery(tables: List[Dict[str, Any]]) -> None:
                         ui.html(prepare_grid_html(grid), sanitize=False).classes(
                             "text-xs prajnya-grid"
                         ).style("max-width: 760px; overflow-x: auto;")
+                _render_mentions(mentions.get(table.get("table_id"), []))
 
 
 def _render_raw_json_section(document: Dict[str, Any]) -> None:
@@ -319,7 +336,103 @@ def _render_raw_json_section(document: Dict[str, Any]) -> None:
     expansion.on_value_change(lambda e: build_once(e.value))
 
 
+# --- links: mentions and citations (src/gui/links.py does the work) --------
+
+def _render_mentions(passages: List[Dict[str, Any]]) -> None:
+    """Under a figure or table: every sentence of the text that mentions it.
+    Following a mention one hop to its figure is how a reader, or a search
+    system, finds the evidence for a claim; this is the same hop backwards."""
+    if not passages:
+        ui.label("Not mentioned in the text").classes("text-xs").style(
+            f'color: {theme.var("text_muted")}; font-style: italic;'
+        )
+        return
+    plural = "" if len(passages) == 1 else "s"
+    title = f"Mentioned in the text: {len(passages)} time{plural}"
+    with ui.expansion(title, icon="link").classes("w-full").props("dense"):
+        _render_passages(passages)
+
+
+def _render_passages(passages: List[Dict[str, Any]]) -> None:
+    """One row per passage: its page, then the sentence."""
+    for passage in passages:
+        with ui.row().classes("w-full gap-2 items-start no-wrap"):
+            ui.label(f"p{passage['page']}").classes("text-xs").style(
+                f'color: {theme.var("gold")}; font-weight: 600; min-width: 2.5rem;'
+            )
+            ui.label(passage["sentence"]).classes("text-xs").style("max-width: 900px;")
+
+
+def _render_page_links(rows: List[Dict[str, Any]], names: Dict[str, str]) -> None:
+    """Under a page's text: every link that starts on the page, and where it goes."""
+    if not rows:
+        return
+    with ui.expansion(f"Links on this page ({len(rows)})", icon="link").classes("w-full"):
+        for row in rows:
+            if row["kind"] == "citation":
+                target = "; ".join(links.reference_label(entry, limit=90) for entry in row["targets"])
+            else:
+                target = ", ".join(names.get(t, t) for t in row["targets"]) or "no object found"
+            with ui.row().classes("w-full gap-2 items-start no-wrap"):
+                ui.label(row["kind"]).classes("text-xs uppercase").style(
+                    f'color: {theme.var("gold")}; font-weight: 600; min-width: 4.5rem;'
+                )
+                ui.label(row["text"]).classes("text-xs font-semibold").style("min-width: 6rem;")
+                ui.label(f"→ {target}").classes("text-xs")
+
+
+def _render_reference_list(document: Dict[str, Any]) -> None:
+    """The reference list (the `online` level), each entry with the
+    sentences that cite it."""
+    rows = links.citations_by_reference(document)
+    if not rows:
+        return
+    cited = sum(1 for row in rows if row["passages"])
+    with ui.expansion(f"References ({len(rows)}, {cited} cited in the text)",
+                      icon="format_quote").classes("w-full"):
+        for row in rows:
+            passages = row["passages"]
+            label = links.reference_label(row["reference"])
+            count = f" · cited {len(passages)}×" if passages else " · not cited"
+            with ui.expansion(label + count).classes("w-full").props("dense"):
+                doi = row["reference"].get("doi")
+                if doi:
+                    ui.link(f"doi:{doi}", f"https://doi.org/{doi}", new_tab=True).classes("text-xs")
+                _render_passages(passages)
+
+
+def _passages_for_group(group: List[Dict[str, Any]], id_key: str,
+                        mentions: Dict[str, List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """The passages mentioning any crop of one printed figure, each once."""
+    seen, passages = set(), []
+    for item in group:
+        for passage in mentions.get(item.get(id_key), []):
+            key = (passage["page"], passage["sentence"])
+            if key not in seen:
+                seen.add(key)
+                passages.append(passage)
+    return passages
+
+
+def _object_names(figures: List[Dict[str, Any]], tables: List[Dict[str, Any]]) -> Dict[str, str]:
+    """figure_id / table_id -> the label a reader would cite ("Fig. 3")."""
+    names = {f.get("figure_id"): f.get("printed_label") or f.get("figure_id") for f in figures}
+    for table in tables:
+        label = (table.get("caption") or "").split(".")[0][:20]
+        names[table.get("table_id")] = label or table.get("table_id")
+    return names
+
 # --- small pure helpers -------------------------------------------------
+
+def _label_order(label_key: str) -> tuple:
+    """Printed order for figure groups: "figure 2" before "figure 10";
+    unlabelled crops ("") last. Crops are detected in page order, which on a
+    page holding two figures is not always the printed order."""
+    import re
+
+    numbers = [int(n) for n in re.findall(r"\d+", label_key or "")]
+    return (not numbers, numbers, label_key or "")
+
 
 def _group_by(items: List[Dict[str, Any]], key: str) -> Dict[str, List[Dict[str, Any]]]:
     groups: Dict[str, List[Dict[str, Any]]] = {}

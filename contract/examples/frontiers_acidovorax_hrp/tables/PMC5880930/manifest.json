@@ -1,0 +1,19 @@
+{
+  "document": "PMC5880930",
+  "table_count": 1,
+  "tables": [
+    {
+      "table_id": "p3_tab1",
+      "image_path": "tables/PMC5880930/p3_tab1.png",
+      "caption": "TABLE 1 | Bacterial strains and plasmids used in this study.",
+      "page": 3,
+      "bbox": [
+        183,
+        270,
+        2527,
+        2129
+      ],
+      "grid": "<table border=\"1\"><tr><td>Strains and plasmids</td><td>Characteristicsa</td><td>Reference</td></tr><tr><td colspan=\"3\">Acidovorax citrulli STRAINS</td></tr><tr><td>Aac5</td><td>Wild-type group II strain; AmpR</td><td>Yan et al.,2013</td></tr><tr><td>ΔhrpG</td><td>hrpG markerless mutation of Aac5; AmpR</td><td>This study</td></tr><tr><td>ΔhrpX</td><td>hrpX markerless mutation of Aac5; AmpR</td><td>This study</td></tr><tr><td>ΔhrpG-comp</td><td>ΔhrpG containing pBBRNolac-4FLAG carrying hrpG with its native promoter; AmpR; KmR</td><td>This study</td></tr><tr><td>ΔhrpX-comp</td><td>ΔhrpX containing pBBRNolac-4FLAG carrying hrpX with its native promoter; AmpR; KmR</td><td>This study</td></tr><tr><td>WT-EV</td><td>Wild-type strain Aac5 transformed with pBBRNolac-4FLAG</td><td>This study</td></tr><tr><td>ΔhrpG-EV</td><td>ΔhrpG transformed with pBBRNolac-4FLAG</td><td>This study</td></tr><tr><td>ΔhrpX-EV</td><td>ΔhrpX transformed with pBBRNolac-4FLAG</td><td>This study</td></tr><tr><td colspan=\"3\">Escherichia coli</td></tr><tr><td>DH5α</td><td>supE44 ΔlacU169(Φ80/lacZΔM15)hsdR17 recA1 endA1 gyrA96thi-1 relA1</td><td>TIANGEN</td></tr><tr><td colspan=\"3\">Pseudomonas syringae STRAIN</td></tr><tr><td>DC3000Plasmids</td><td>Wild-type strain; RifR</td><td>Lab collection</td></tr><tr><td>pK18mobsacB</td><td>Suicide vector with sacB gene; KmR</td><td>Kvitko and Collmer,2011</td></tr><tr><td>pK18hrpG</td><td>Suicide vector containing upstream and downstream fragments of hrpG gene onpK18mobsacB; KmR</td><td>This study</td></tr><tr><td>pK18hrpX</td><td>Suicide vector containing upstream and downstream fragments of hrpX gene onpK18mobsacB; KmR</td><td>This study</td></tr><tr><td>pBBR1MCS-2</td><td>pBBR1MCS-2 containing pBluescript IIKS-lacZα; KmR</td><td>Kovach et al.,1995</td></tr><tr><td>pBBRNolac-4FLAG</td><td>lac promoter was deleted from pBBR1MCS-2 and C-terminal4×FLAG tag was inserted; need native promoter to drive only.</td><td>This study</td></tr><tr><td>pBBR2166</td><td>pBBRNolac-4FLAG containingAac5_2166 gene with its native promoter</td><td>This study</td></tr><tr><td>pBBRNolacGUS</td><td>lac promoter was deleted from pBBR1MCS-2 and GUS reporter gene was inserted</td><td>This study</td></tr><tr><td>pBBRNolac2166GUS</td><td>pBBRNolacGUS containingAac5_2166 gene with its native promoter</td><td>This study</td></tr><tr><td>pBBRHBhrpG</td><td>pBBRNolac-4FLAG containinghrpG gene with its native promoter; KmR</td><td>This study</td></tr><tr><td>pBBRHBhrpX</td><td>pBBRNolac-4FLAG containinghrpX gene with its native promoter; KmR</td><td>This study</td></tr><tr><td>pRK600</td><td>Helper strain in tri-parental mating; CmR</td><td>Lab collection</td></tr><tr><td>pYBA1132</td><td>plant expression vector containing35S promoter,KmR</td><td>Lab collection</td></tr><tr><td>pYBA1132-2166</td><td>pYBA1132 containingAac5_2166 gene</td><td>This study</td></tr><tr><td>PJY-mini-TN7T-GUS</td><td>For cloning the GUS reporter,AmpR</td><td>Zhang et al.,2013</td></tr></table>"
+    }
+  ]
+}
