@@ -6,6 +6,14 @@ it in `document_info.pipeline_version`.
 
 ---
 
+## 6.8.1
+
+- **A fresh install opens Prajnya Studio's table view again.** Studio draws
+  formulas in tables with `latex2mathml`, which older NiceGUI installed as a
+  dependency and NiceGUI 3.x does not. It is now listed in
+  `requirements.txt`. Found by the first run of the release's own tests on
+  GitHub.
+
 ## 6.8.0
 
 Fixes found after 6.7.0 was released, and a reliability pass. The output

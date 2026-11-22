@@ -1,4 +1,4 @@
-# Prajnya v6.8.0 — dependencies
+# Prajnya v6.8.1 — dependencies
 #
 # LICENCE RULE: every line must be OSI-permissive
 # (Apache-2.0 / MIT / BSD). Annotate each entry with its licence.
@@ -55,6 +55,7 @@ jsonschema>=4.17.3         # MIT  (test-only: tests/test_output_contract.py)
 
 # --- GUI (Prajnya Studio) -----------------------------------------------------
 nicegui>=1.4.0              # MIT
+latex2mathml>=3.77.0       # MIT  (formulas in Studio's table view; NiceGUI 3.x no longer installs it)
 
 # =============================================================================
 # NOT DECLARED HERE — deliberate

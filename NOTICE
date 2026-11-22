@@ -1,5 +1,5 @@
 Prajnya — The Reference Architecture for Academic RAG
-Version 6.8.0 (the project began as Shastrasaara)
+Version 6.8.1 (the project began as Shastrasaara)
 Copyright 2026 Prajnya contributors
 
 This product includes software and models developed by third parties.
@@ -78,6 +78,11 @@ NiceGUI
   Copyright (c) Zauberzeug GmbH
   Licensed under the MIT License
   https://github.com/zauberzeug/nicegui
+
+latex2mathml
+  Copyright (c) Ronie Martinez
+  Licensed under the MIT License
+  https://github.com/roniemartinez/latex2mathml
 
 ================================================================================
 Metadata enrichment

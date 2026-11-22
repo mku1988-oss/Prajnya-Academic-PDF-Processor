@@ -16,7 +16,10 @@ import html
 import re
 from typing import Optional
 
-import latex2mathml.converter  # MIT licence; installed as a dependency of NiceGUI
+# MIT licence. Listed in requirements.txt: older NiceGUI installed it as a
+# dependency, NiceGUI 3.x does not, and a fresh install then failed to import
+# this module (found by the first CI run, v6.8.0).
+import latex2mathml.converter
 
 # $$...$$ (display) or $...$ (inline). Non-greedy; no newline inside a formula.
 _MATH_PATTERN = re.compile(r"\$\$(.+?)\$\$|\$([^$\n]+?)\$")
