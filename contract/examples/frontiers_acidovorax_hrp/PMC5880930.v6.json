@@ -2,22 +2,58 @@
   "document_info": {
     "filename": "PMC5880930.pdf",
     "document_type": "research_article",
-    "processing_time": 195.56079769134521,
+    "processing_time": 211.46166276931763,
     "success": true,
-    "pipeline_version": "v6.6.4",
-    "contract_version": "1.3"
+    "status": "success",
+    "failed_pages": [],
+    "pipeline_version": "v6.8.0",
+    "contract_version": "1.5"
   },
   "metadata_final": {
     "title": "Involvement of hrpX and hrpG in the Virulence of Acidovorax citrulli Strain Aac5, Causal Agent of Bacterial Fruit Blotch in Cucurbits",
     "authors": [
       "Xiaoxiao Zhang",
-      "Mei Zhao",
+      "Tingchang Zhao",
       "Jianpei Yan",
       "Linlin Yang",
       "Yuwen Yang",
       "Wei Guan",
       "Ron Walcott",
       "Tingchang Zhao"
+    ],
+    "author_names": [
+      {
+        "given": "Xiaoxiao",
+        "family": "Zhang"
+      },
+      {
+        "given": "Tingchang",
+        "family": "Zhao"
+      },
+      {
+        "given": "Jianpei",
+        "family": "Yan"
+      },
+      {
+        "given": "Linlin",
+        "family": "Yang"
+      },
+      {
+        "given": "Yuwen",
+        "family": "Yang"
+      },
+      {
+        "given": "Wei",
+        "family": "Guan"
+      },
+      {
+        "given": "Ron",
+        "family": "Walcott"
+      },
+      {
+        "given": "Tingchang",
+        "family": "Zhao"
+      }
     ],
     "doi": "10.3389/fmicb.2018.00507",
     "journal": "Frontiers in Microbiology",
@@ -35,9 +71,9 @@
     "editors": [],
     "chapter_number": null,
     "suspicious_authors": [],
-    "source_hash": "d4b1f410c1debd5fcf551939fc9fd9053110a88a8c555287fd0055efa2c33952",
     "doi_source": "pymupdf_text_layer",
-    "doi_confidence": 0.98
+    "doi_confidence": 0.98,
+    "source_hash": "d4b1f410c1debd5fcf551939fc9fd9053110a88a8c555287fd0055efa2c33952"
   },
   "citations": {
     "level": "online",
@@ -904,6 +940,16 @@
       },
       {
         "page_number": 2,
+        "text": "Wang T. et al., 2016",
+        "kind": "author_year",
+        "numbers": [
+          52
+        ],
+        "context_before": "et al., 2011), and quorum sensing (QS) (",
+        "content_offset": 491
+      },
+      {
+        "page_number": 2,
         "text": "Büttner and Bonas, 2002",
         "kind": "author_year",
         "numbers": [
@@ -1274,6 +1320,16 @@
       },
       {
         "page_number": 2,
+        "text": "Wang T. et al., 2016",
+        "kind": "author_year",
+        "numbers": [
+          52
+        ],
+        "context_before": "rulence and may be related to the T3SS (",
+        "content_offset": 5517
+      },
+      {
+        "page_number": 2,
         "text": "Chen, 2016",
         "kind": "author_year",
         "numbers": [
@@ -1443,6 +1499,16 @@
         "content_offset": null
       },
       {
+        "page_number": 5,
+        "text": "Wang T. et al., 2016",
+        "kind": "author_year",
+        "numbers": [
+          52
+        ],
+        "context_before": "inely used in studies on pathogenicity (",
+        "content_offset": 4370
+      },
+      {
         "page_number": 6,
         "text": "Ren et al., 2009",
         "kind": "author_year",
@@ -1471,6 +1537,16 @@
         ],
         "context_before": "analyze promoter activity in bacteria (",
         "content_offset": 2302
+      },
+      {
+        "page_number": 7,
+        "text": "Wang L. et al., 2016",
+        "kind": "author_year",
+        "numbers": [
+          51
+        ],
+        "context_before": "tivity in bacteria (Zhang et al., 2013;",
+        "content_offset": 2322
       },
       {
         "page_number": 8,
@@ -1564,6 +1640,16 @@
       },
       {
         "page_number": 9,
+        "text": "Wang T. et al., 2016",
+        "kind": "author_year",
+        "numbers": [
+          52
+        ],
+        "context_before": "ese genes from A. citrulli strain Aac5 (",
+        "content_offset": 136
+      },
+      {
+        "page_number": 9,
         "text": "Wengelnik et al., 1996b",
         "kind": "author_year",
         "numbers": [
@@ -1601,6 +1687,16 @@
         ],
         "context_before": "se molecules also have other functions.",
         "content_offset": 377
+      },
+      {
+        "page_number": 9,
+        "text": "Wang T. et al. (2016)",
+        "kind": "author_year",
+        "numbers": [
+          52
+        ],
+        "context_before": "g traits involved in biofilm formation.",
+        "content_offset": 558
       },
       {
         "page_number": 9,
@@ -1671,6 +1767,16 @@
         ],
         "context_before": "to the group II strains of A. citrulli (",
         "content_offset": 181
+      },
+      {
+        "page_number": 10,
+        "text": "Wang T. et al., 2016",
+        "kind": "author_year",
+        "numbers": [
+          52
+        ],
+        "context_before": "rains of A. citrulli (Yan et al., 2013;",
+        "content_offset": 199
       },
       {
         "page_number": 10,
@@ -1842,10 +1948,10 @@
         "journal_name": "Frontiers in Microbiology",
         "publication_year": 2018,
         "processing_method": "two_shot_title_page",
-        "shot1_time": 27.69,
-        "shot2_time": 13.55,
+        "shot1_time": 27.08,
+        "shot2_time": 11.76,
         "dedup_time": 0.0,
-        "total_time": 41.28,
+        "total_time": 38.88,
         "raw_text_length": 3010,
         "cleaned_text_length": 3010,
         "dedup_ratio": 1.0,
@@ -1938,7 +2044,7 @@
         "needs_figure_second_opinion": false,
         "tables": [],
         "table_count": 0,
-        "page_time": 20.32,
+        "page_time": 20.7,
         "furniture": [],
         "outside_body": []
       },
@@ -2354,7 +2460,7 @@
           }
         ],
         "table_count": 1,
-        "page_time": 23.68,
+        "page_time": 24.4,
         "furniture": [],
         "outside_body": [
           {
@@ -2465,7 +2571,7 @@
         "needs_figure_second_opinion": false,
         "tables": [],
         "table_count": 0,
-        "page_time": 18.15,
+        "page_time": 18.92,
         "furniture": [],
         "outside_body": []
       },
@@ -2584,7 +2690,7 @@
         ],
         "reference_density": 0.041,
         "has_reference_heading": false,
-        "page_time": 0.11,
+        "page_time": 0.14,
         "furniture": [
           {
             "kind": "running_line",
@@ -2640,7 +2746,7 @@
               224,
               288,
               2323,
-              1388
+              1295
             ],
             "printed_label": "FIGURE 1",
             "label_key": "figure 1",
@@ -2651,7 +2757,7 @@
         "needs_figure_second_opinion": false,
         "tables": [],
         "table_count": 0,
-        "page_time": 13.37,
+        "page_time": 14.21,
         "furniture": [],
         "outside_body": [
           {
@@ -2730,8 +2836,8 @@
             "bbox": [
               1292,
               288,
-              2229,
-              1160
+              2286,
+              1116
             ],
             "printed_label": "FIGURE 3",
             "label_key": "figure 3",
@@ -2757,7 +2863,7 @@
         "needs_figure_second_opinion": false,
         "tables": [],
         "table_count": 0,
-        "page_time": 13.29,
+        "page_time": 13.89,
         "furniture": [],
         "outside_body": [
           {
@@ -2831,7 +2937,7 @@
               1348,
               288,
               2323,
-              1049
+              1261
             ],
             "printed_label": "FIGURE 6",
             "label_key": "figure 6",
@@ -2857,7 +2963,7 @@
         "needs_figure_second_opinion": false,
         "tables": [],
         "table_count": 0,
-        "page_time": 9.58,
+        "page_time": 10.19,
         "furniture": [],
         "outside_body": [
           {
@@ -2904,9 +3010,9 @@
             "caption": "FIGURE 7 | The interaction of hrpG and hrpX in Acidovorax citrulli. (A) Western blotting analysis showed that HrpG activated HrpX. The WT, 1hrpG, and 1hrpX strains were cultured in liquid T3SS-inducing medium up to OD600 = 0.5. Total cell extracts were analyzed by SDS-PAGE and immunoblotting, using specific antibodies. The experiment was performed three times. (B) Represents real-time quantitative RT-PCR to determine hrpX mRNA levels. hrpX expression was analyzed through RT-qPCR in wild-type strains Aac5 and the hrpG mutant strain, using specific primers. Bacteria were grown in liquid T3SS-inducing medium to OD600 = 0.45 and harvested to extract total RNA. (C) Represents real-time quantitative RT-PCR to determine hrpG mRNA levels. hrpX expression was assayed through RT-qPCR in wild-type strain Aac5 and the hrpX mutant, using specific primers. All the data shown are means ± standard deviation of duplicate samples from one representative experiment and are reported as fold induction relative to expression of WT. The rpoB gene was used as a reference gene. Each column shows the mean and standard deviation. The experiment was performed three times, with similar results obtained each time. Asterisks above bars indicate significant differences as determined by t-test, p < 0.05.",
             "page": 9,
             "bbox": [
-              909,
-              805,
-              1612,
+              551,
+              315,
+              1980,
               1324
             ],
             "printed_label": "FIGURE 7",
@@ -2918,7 +3024,7 @@
         "needs_figure_second_opinion": false,
         "tables": [],
         "table_count": 0,
-        "page_time": 11.46,
+        "page_time": 11.73,
         "furniture": [],
         "outside_body": [
           {
@@ -3191,7 +3297,7 @@
         "needs_figure_second_opinion": false,
         "tables": [],
         "table_count": 0,
-        "page_time": 13.3,
+        "page_time": 13.81,
         "furniture": [],
         "outside_body": [
           {
@@ -3243,7 +3349,7 @@
         ],
         "reference_density": 0.496,
         "has_reference_heading": true,
-        "page_time": 0.18,
+        "page_time": 0.19,
         "furniture": [
           {
             "kind": "running_line",
@@ -3289,7 +3395,7 @@
         "headings": [],
         "reference_density": 0.445,
         "has_reference_heading": false,
-        "page_time": 0.16,
+        "page_time": 0.25,
         "furniture": [
           {
             "kind": "running_line",
@@ -3321,7 +3427,7 @@
     "figure_count": 8
   },
   "profile": {
-    "pdf_path": "D:\\LLMs\\Shastrasaara\\wt_bench\\benchmark\\outputs\\run2\\prajnya\\input\\PMC5880930\\PMC5880930.pdf",
+    "pdf_path": "/example/only/PMC5880930.pdf",
     "page_count": 12,
     "file_size": 1794973,
     "pdf_metadata": {},
@@ -3375,13 +3481,47 @@
         "title": "Involvement of hrpX and hrpG in the Virulence of Acidovorax citrulli Strain Aac5, Causal Agent of Bacterial Fruit Blotch in Cucurbits",
         "authors": [
           "Xiaoxiao Zhang",
-          "Mei Zhao",
+          "Tingchang Zhao",
           "Jianpei Yan",
           "Linlin Yang",
           "Yuwen Yang",
           "Wei Guan",
           "Ron Walcott",
           "Tingchang Zhao"
+        ],
+        "author_names": [
+          {
+            "given": "Xiaoxiao",
+            "family": "Zhang"
+          },
+          {
+            "given": "Tingchang",
+            "family": "Zhao"
+          },
+          {
+            "given": "Jianpei",
+            "family": "Yan"
+          },
+          {
+            "given": "Linlin",
+            "family": "Yang"
+          },
+          {
+            "given": "Yuwen",
+            "family": "Yang"
+          },
+          {
+            "given": "Wei",
+            "family": "Guan"
+          },
+          {
+            "given": "Ron",
+            "family": "Walcott"
+          },
+          {
+            "given": "Tingchang",
+            "family": "Zhao"
+          }
         ],
         "doi": "10.3389/fmicb.2018.00507",
         "journal": "Frontiers in Microbiology",
@@ -3399,9 +3539,9 @@
         "editors": [],
         "chapter_number": null,
         "suspicious_authors": [],
-        "source_hash": "d4b1f410c1debd5fcf551939fc9fd9053110a88a8c555287fd0055efa2c33952",
         "doi_source": "pymupdf_text_layer",
-        "doi_confidence": 0.98
+        "doi_confidence": 0.98,
+        "source_hash": "d4b1f410c1debd5fcf551939fc9fd9053110a88a8c555287fd0055efa2c33952"
       },
       "pages": [
         {
@@ -3424,10 +3564,10 @@
             "journal_name": "Frontiers in Microbiology",
             "publication_year": 2018,
             "processing_method": "two_shot_title_page",
-            "shot1_time": 27.69,
-            "shot2_time": 13.55,
+            "shot1_time": 27.08,
+            "shot2_time": 11.76,
             "dedup_time": 0.0,
-            "total_time": 41.28,
+            "total_time": 38.88,
             "raw_text_length": 3010,
             "cleaned_text_length": 3010,
             "dedup_ratio": 1.0
@@ -3517,7 +3657,7 @@
             "needs_figure_second_opinion": false,
             "tables": [],
             "table_count": 0,
-            "page_time": 20.32
+            "page_time": 20.7
           }
         },
         {
@@ -3930,7 +4070,7 @@
               }
             ],
             "table_count": 1,
-            "page_time": 23.68
+            "page_time": 24.4
           }
         },
         {
@@ -4017,7 +4157,7 @@
             "needs_figure_second_opinion": false,
             "tables": [],
             "table_count": 0,
-            "page_time": 18.15
+            "page_time": 18.92
           }
         },
         {
@@ -4133,7 +4273,7 @@
             ],
             "reference_density": 0.041,
             "has_reference_heading": false,
-            "page_time": 0.11
+            "page_time": 0.14
           }
         },
         {
@@ -4173,7 +4313,7 @@
                   224,
                   288,
                   2323,
-                  1388
+                  1295
                 ],
                 "printed_label": "FIGURE 1",
                 "label_key": "figure 1",
@@ -4184,7 +4324,7 @@
             "needs_figure_second_opinion": false,
             "tables": [],
             "table_count": 0,
-            "page_time": 13.37
+            "page_time": 14.21
           }
         },
         {
@@ -4249,8 +4389,8 @@
                 "bbox": [
                   1292,
                   288,
-                  2229,
-                  1160
+                  2286,
+                  1116
                 ],
                 "printed_label": "FIGURE 3",
                 "label_key": "figure 3",
@@ -4276,7 +4416,7 @@
             "needs_figure_second_opinion": false,
             "tables": [],
             "table_count": 0,
-            "page_time": 13.29
+            "page_time": 13.89
           }
         },
         {
@@ -4331,7 +4471,7 @@
                   1348,
                   288,
                   2323,
-                  1049
+                  1261
                 ],
                 "printed_label": "FIGURE 6",
                 "label_key": "figure 6",
@@ -4357,7 +4497,7 @@
             "needs_figure_second_opinion": false,
             "tables": [],
             "table_count": 0,
-            "page_time": 9.58
+            "page_time": 10.19
           }
         },
         {
@@ -4380,9 +4520,9 @@
                 "caption": "FIGURE 7 | The interaction of hrpG and hrpX in Acidovorax citrulli. (A) Western blotting analysis showed that HrpG activated HrpX. The WT, 1hrpG, and 1hrpX strains were cultured in liquid T3SS-inducing medium up to OD600 = 0.5. Total cell extracts were analyzed by SDS-PAGE and immunoblotting, using specific antibodies. The experiment was performed three times. (B) Represents real-time quantitative RT-PCR to determine hrpX mRNA levels. hrpX expression was analyzed through RT-qPCR in wild-type strains Aac5 and the hrpG mutant strain, using specific primers. Bacteria were grown in liquid T3SS-inducing medium to OD600 = 0.45 and harvested to extract total RNA. (C) Represents real-time quantitative RT-PCR to determine hrpG mRNA levels. hrpX expression was assayed through RT-qPCR in wild-type strain Aac5 and the hrpX mutant, using specific primers. All the data shown are means ± standard deviation of duplicate samples from one representative experiment and are reported as fold induction relative to expression of WT. The rpoB gene was used as a reference gene. Each column shows the mean and standard deviation. The experiment was performed three times, with similar results obtained each time. Asterisks above bars indicate significant differences as determined by t-test, p < 0.05.",
                 "page": 9,
                 "bbox": [
-                  909,
-                  805,
-                  1612,
+                  551,
+                  315,
+                  1980,
                   1324
                 ],
                 "printed_label": "FIGURE 7",
@@ -4394,7 +4534,7 @@
             "needs_figure_second_opinion": false,
             "tables": [],
             "table_count": 0,
-            "page_time": 11.46
+            "page_time": 11.73
           }
         },
         {
@@ -4653,7 +4793,7 @@
             "needs_figure_second_opinion": false,
             "tables": [],
             "table_count": 0,
-            "page_time": 13.3
+            "page_time": 13.81
           }
         },
         {
@@ -4691,7 +4831,7 @@
             ],
             "reference_density": 0.496,
             "has_reference_heading": true,
-            "page_time": 0.18
+            "page_time": 0.19
           }
         },
         {
@@ -4715,7 +4855,7 @@
             "headings": [],
             "reference_density": 0.445,
             "has_reference_heading": false,
-            "page_time": 0.16
+            "page_time": 0.25
           }
         }
       ],

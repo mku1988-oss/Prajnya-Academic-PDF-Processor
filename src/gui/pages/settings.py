@@ -108,7 +108,7 @@ def _section_paths(fields: Dict[str, Any], settings: Dict[str, Any]) -> None:
 
         fields["ledger_path"] = ui.input(
             "Ledger File", value=settings.get("ledger_path", ""),
-            placeholder="blank = persistence/semantic_ledger.csv (or SARA_LEDGER_PATH)",
+            placeholder="blank = persistence/semantic_ledger.csv (or PRAJNYA_LEDGER_PATH)",
         ).classes("w-full").props("outlined dense")
 
 

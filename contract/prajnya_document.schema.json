@@ -3,7 +3,7 @@
   "$id": "urn:prajnya:document-contract:1",
   "title": "Prajnya document JSON",
   "description": "One file per processed PDF: run_outputs/documents/<name>.v6.json. This schema pins the part other programs may rely on. Keys it does not name (for example pages[].metadata.analysis) are internal and may change in any release. Unknown extra keys are always allowed, so adding a key is never a breaking change. See contract/README.md for the version rules.",
-  "x-contract-version": "1.3",
+  "x-contract-version": "1.5",
   "type": "object",
   "required": ["document_info", "metadata_final", "pages", "summary", "profile"],
   "if": {
@@ -17,6 +17,29 @@
     }
   },
   "then": {"required": ["citations"]},
+  "allOf": [
+    {"$comment": "Each rule below: a file that says it follows contract 1.N or later must carry what 1.N added. The if/then above does the same for 1.1 (citations). A file older than the rule, or with no version stamp, is not held to it."},
+    {
+      "$comment": "Contract 1.2 added the mentions block.",
+      "if": {"required": ["document_info"], "properties": {"document_info": {"required": ["contract_version"], "properties": {"contract_version": {"pattern": "^(1\\.([2-9]|[1-9]\\d+)|([2-9]|[1-9]\\d+)\\.\\d+)$"}}}}},
+      "then": {"required": ["mentions"]}
+    },
+    {
+      "$comment": "Contract 1.3 added each page's body, furniture and outside_body.",
+      "if": {"required": ["document_info"], "properties": {"document_info": {"required": ["contract_version"], "properties": {"contract_version": {"pattern": "^(1\\.([3-9]|[1-9]\\d+)|([2-9]|[1-9]\\d+)\\.\\d+)$"}}}}},
+      "then": {"properties": {"pages": {"items": {"required": ["body"], "properties": {"metadata": {"required": ["furniture", "outside_body"]}}}}}}
+    },
+    {
+      "$comment": "Contract 1.4 added metadata_final.author_names.",
+      "if": {"required": ["document_info"], "properties": {"document_info": {"required": ["contract_version"], "properties": {"contract_version": {"pattern": "^(1\\.([4-9]|[1-9]\\d+)|([2-9]|[1-9]\\d+)\\.\\d+)$"}}}}},
+      "then": {"properties": {"metadata_final": {"required": ["author_names"]}}}
+    },
+    {
+      "$comment": "Contract 1.5 added document_info.status and failed_pages.",
+      "if": {"required": ["document_info"], "properties": {"document_info": {"required": ["contract_version"], "properties": {"contract_version": {"pattern": "^(1\\.([5-9]|[1-9]\\d+)|([2-9]|[1-9]\\d+)\\.\\d+)$"}}}}},
+      "then": {"properties": {"document_info": {"required": ["status", "failed_pages"]}}}
+    }
+  ],
   "properties": {
     "document_info": {
       "type": "object",
@@ -26,6 +49,15 @@
         "document_type": {"enum": ["research_article", "book_chapter", "book"]},
         "processing_time": {"type": "number", "minimum": 0},
         "success": {"type": "boolean"},
+        "status": {
+          "enum": ["success", "partial", "failed"],
+          "description": "Contract 1.5. Whether the document really finished. \"success\": every page was read. \"partial\": written, but the pages in `failed_pages` failed (a failed page keeps its text layer when it has one; its figures and tables are lost); such a document is not recorded as processed and is tried again on the next run. \"failed\": the strategy stopped with an error (see `summary.errors`), or no page came out. `success` keeps its old meaning (no strategy error), so a partial document can say `success: true`. Absent in files older than 1.5."
+        },
+        "failed_pages": {
+          "type": "array",
+          "items": {"type": "integer", "minimum": 1},
+          "description": "Contract 1.5. The 1-based numbers of the pages whose reading failed; [] when none did. Absent in files older than 1.5."
+        },
         "pipeline_version": {
           "type": "string",
           "pattern": "^v\\d+\\.\\d+\\.\\d+$",
@@ -45,6 +77,18 @@
       "properties": {
         "title": {"type": ["string", "null"]},
         "authors": {"type": "array", "items": {"type": "string"}},
+        "author_names": {
+          "type": "array",
+          "description": "Contract 1.4. The same authors with the surname apart, one entry per name in `authors`, in the same order; each `family` ends its author's string in `authors`. [] when no registry record gave surnames (levels local and zotero, an OpenAlex record, a hand-corrected list). Absent in files older than 1.4.",
+          "items": {
+            "type": "object",
+            "required": ["given", "family"],
+            "properties": {
+              "given": {"type": "string"},
+              "family": {"type": "string", "minLength": 1}
+            }
+          }
+        },
         "year": {"type": ["integer", "null"]},
         "doi": {"type": ["string", "null"], "description": "Bare DOI, '10.xxxx/...', with no URL prefix."},
         "journal": {"type": ["string", "null"]},
@@ -231,7 +275,7 @@
         "page_number": {"type": "integer", "minimum": 1, "description": "1-BASED."},
         "content": {"type": "string", "description": "The page text, as Markdown. On a model-read page it is the model's reading; on a text-layer page it is the PDF's own text."},
         "body": {"type": "string", "description": "From contract 1.3. The page's running text: content without its furniture lines (metadata.furniture) and the parts listed in metadata.outside_body (placeholders, tables, legends, the reference list). Whole lines go with their line breaks; every other character is as in content. For splitting text into passages. Every offset in the file (markers' and mentions' content_offset, furniture start/end) indexes content, never body."},
-        "quality_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "quality_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "A rough guess from simple checks (text length, Markdown structure, odd characters, expected fields present), or a fixed value on some routes. Not a measured accuracy, and nothing in Prajnya acts on it; see contract/README.md rule 20."},
         "metadata": {
           "type": "object",
           "properties": {

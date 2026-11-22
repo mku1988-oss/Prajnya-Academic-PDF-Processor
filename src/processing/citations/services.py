@@ -20,6 +20,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from ..env_settings import env_setting
 from ..paths import DEFAULT_CITATION_CACHE_PATH, DEFAULT_ZOTERO_CACHE_PATH
 from ..utils.zotero_service import ZoteroService
 from .chain import OnlineChain
@@ -59,7 +60,7 @@ def zotero_service_for(level: str, config: Optional[Dict[str, Any]],
     log.info("Citation level zotero: initializing the Zotero service.")
     zotero_config = (config or {}).get("zotero") or {}
     try:
-        cache_dir = Path(os.getenv("SARA_CACHE_PATH", DEFAULT_ZOTERO_CACHE_PATH))
+        cache_dir = Path(env_setting("CACHE_PATH", DEFAULT_ZOTERO_CACHE_PATH))
         return ZoteroService(config=zotero_config, cache_dir=str(cache_dir.resolve()))
     except (ImportError, ValueError) as error:
         # ValueError: an unset ZOTERO_LIBRARY_ID reaches the service as None
@@ -126,7 +127,7 @@ def _crossref_and_openalex(settings: Dict[str, Any], log: logging.Logger):
     Returns:
         `([CrossrefService, OpenAlexService], cache_dir)`.
     """
-    cache_dir = Path(os.getenv("SARA_CITATION_CACHE_PATH", DEFAULT_CITATION_CACHE_PATH))
+    cache_dir = Path(env_setting("CITATION_CACHE_PATH", DEFAULT_CITATION_CACHE_PATH))
     http = CitationHttp(
         cache_dir.resolve(), pacing_seconds=settings.get("pacing_seconds", 1.2),
         timeout_seconds=settings.get("timeout_seconds", 20.0),

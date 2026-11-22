@@ -18,13 +18,13 @@ file — that starts in S6, once `controller.py` exists.
 from __future__ import annotations
 
 import logging
-import os
 import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 from nicegui import app, ui
 
+from src.processing.env_settings import env_setting
 from src.processing.paths import DEFAULT_OUTPUT_ROOT, REPO_ROOT
 
 load_dotenv(REPO_ROOT / ".env")
@@ -44,12 +44,12 @@ logger = logging.getLogger("prajnya_studio")
 #: nicegui's app.storage.user needs a stable key to encrypt its cookie. A
 #: fresh random one every process start would silently drop a user's active
 #: run id on the next server restart, so this comes from .env (see the
-#: comment beside SARA_GUI_STORAGE_SECRET there) rather than being generated
+#: comment beside PRAJNYA_GUI_STORAGE_SECRET there) rather than being generated
 #: here.
-_STORAGE_SECRET = os.getenv("SARA_GUI_STORAGE_SECRET")
+_STORAGE_SECRET = env_setting("GUI_STORAGE_SECRET")
 if not _STORAGE_SECRET:
     logger.warning(
-        "SARA_GUI_STORAGE_SECRET is not set — app.storage.user will use a "
+        "PRAJNYA_GUI_STORAGE_SECRET is not set — app.storage.user will use a "
         "secret generated fresh each run, so it will not survive a restart. "
         "Set it in .env for a real session."
     )

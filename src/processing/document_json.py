@@ -18,21 +18,22 @@ archived V5 known-good run, and a byte that shifts here is a false alarm there.
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .citations.block import build_citations_block
 from .citations.object_mentions import build_mentions_block
+from .document_status import document_status, failed_page_numbers
 from .models import DocumentProfile
+from .utils.atomic_write import write_json_atomically
 from .utils.page_body import pages_with_body
 
 LOG = logging.getLogger(__name__)
 
 #: Stamped into every document's `document_info`, so an output file says which
 #: pipeline produced it.
-PIPELINE_VERSION = "v6.7.0"
+PIPELINE_VERSION = "v6.8.0"
 
 #: The version of the output FORMAT, which moves independently of the release.
 #: Stamped into `document_info.contract_version`, and pinned against
@@ -45,7 +46,9 @@ PIPELINE_VERSION = "v6.7.0"
 #: 1.1 (citation levels, S0a): the top-level `citations` block.
 #: 1.2 (item 000a, fix 6): the top-level `mentions` block.
 #: 1.3 (item 000a, fix 1): `pages[].body`, `metadata.furniture`, `metadata.outside_body`.
-CONTRACT_VERSION = "1.3"
+#: 1.4 (post-release fix cycle): `metadata_final.author_names`.
+#: 1.5 (v6.8, audit D1): `document_info.status` and `document_info.failed_pages`.
+CONTRACT_VERSION = "1.5"
 
 
 def write_result(profile: DocumentProfile, out_path: Path, elapsed: float,
@@ -69,9 +72,8 @@ def write_result(profile: DocumentProfile, out_path: Path, elapsed: float,
     out_path.parent.mkdir(parents=True, exist_ok=True)
     payload = build_document_json(profile, elapsed, timings)
 
-    with open(out_path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, ensure_ascii=False,
-                  default=last_resort_encoder)
+    # All or nothing (D4): a crash mid-write keeps the previous file whole.
+    write_json_atomically(out_path, payload, default=last_resort_encoder)
 
 
 def build_document_json(profile: DocumentProfile, elapsed: float,
@@ -115,19 +117,19 @@ def build_document_json(profile: DocumentProfile, elapsed: float,
     # that are not running text marked, and each page's running text
     # (`body`). Derived from the page text on every write.
     pages = pages_with_body(dumped_result.get("pages") or [])
-
     info: Dict[str, Any] = {
         "filename": profile.pdf_path.name,
         "document_type": enum_value(profile.document_type),
         "processing_time": elapsed,
         "success": not errors,
+        **status_fields(errors, pages),
         "pipeline_version": PIPELINE_VERSION,
         "contract_version": CONTRACT_VERSION,
     }
     if timings:
         info["timings"] = dict(timings)
 
-    metadata_final = dumped_result.get("metadata") or {}
+    metadata_final = with_author_names(dumped_result.get("metadata") or {})
 
     return {
         "document_info": info,
@@ -157,6 +159,20 @@ def build_document_json(profile: DocumentProfile, elapsed: float,
 
 
 # --- helpers (after the main functions, per CLAUDE.md) ----------------------
+
+def status_fields(errors: List[str], pages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    `status` and `failed_pages` (contract 1.5) for a document's pages.
+
+    Pages whose reading failed (D1) make a document "partial"; `success`
+    keeps its old meaning (no strategy error) and is not set here. Shared
+    with `recite`, which re-stamps older files with the current version and
+    so must fill in what that version requires (D6).
+    """
+    failed_pages = failed_page_numbers(pages)
+    return {"status": document_status(errors, len(pages), failed_pages),
+            "failed_pages": failed_pages}
+
 
 def page_contents_of(pages: List[Dict[str, Any]]) -> Dict[int, str]:
     """`{page_number: content}` of the pages being written, for the markers' offsets."""
@@ -192,3 +208,23 @@ def last_resort_encoder(value: Any) -> Any:
 def enum_value(value: Any) -> Any:
     """DocumentType may arrive as an enum or an already-dumped string."""
     return getattr(value, "value", value)
+
+
+def with_author_names(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    The metadata with `author_names` kept only when it matches `authors`.
+
+    For biology researchers: `author_names` (contract 1.4) gives each author's
+    surname apart from the given names, so a reader never has to guess where
+    "Diego García Martínez de Artola" splits. A reader may pair it with
+    `authors` position by position, so it is written only when the two lists
+    are the same length and each surname ends its author's name; otherwise it
+    is [] (for example after the author list was corrected by hand).
+    """
+    authors = metadata.get("authors") or []
+    parts = metadata.get("author_names") or []
+    paired = (isinstance(parts, list) and len(parts) == len(authors) and all(
+        isinstance(part, dict) and (part.get("family") or "").strip()
+        and str(name).lower().endswith(part["family"].strip().lower())
+        for part, name in zip(parts, authors)))
+    return {**metadata, "author_names": [dict(part) for part in parts] if paired else []}

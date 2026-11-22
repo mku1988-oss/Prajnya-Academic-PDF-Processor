@@ -68,7 +68,8 @@ to models in configuration; see [Configuration](#configuration).
 |---|---|
 | **OS** | Windows 10/11 or Linux. |
 | **Python** | **3.10**. Both entrypoints refuse to start on anything else. |
-| **GPU** *(local mode only)* | An **8 GB** NVIDIA card is enough, and is what every number here was measured on. |
+| **RAM** | **16 GB** minimum. Prajnya with its model server uses up to about 9 GB. |
+| **VRAM** *(local mode only)* | **8 GB** (NVIDIA). With the shipped model presets, use peaks at about 7.9 GB (olmocr-2-7b on the title page) and about 3.4 GB for the rest of the document (glm-ocr). Other models use different amounts. |
 | **[llama.cpp](https://github.com/ggml-org/llama.cpp)** *(local mode only)* | `llama-server`, built with your GPU backend. Not bundled. |
 | **Disk** | **~13 GB** of model weights for local mode, plus your output. In cloud mode, only the 131 MB layout model. |
 
@@ -96,7 +97,7 @@ GGUF pairs (12.7 GB) into `models/<vendor>/`.
 
 ```bash
 # in .env, or your environment
-SARA_LLAMA_SERVER=/path/to/llama.cpp/build/bin/llama-server
+PRAJNYA_LLAMA_SERVER=/path/to/llama.cpp/build/bin/llama-server
 ```
 
 **4. Check:** `python run_llama_server.py --check` resolves every model path in
@@ -110,6 +111,12 @@ and continues.
 [Local or cloud](#local-or-cloud)). A CPU-only machine with no cloud key still
 runs the folder scan, the ledger, the review queue and every screen of the
 interface.
+
+**Optional: run the tests.** `python -m pytest tests -q -rs` runs the
+self-contained tests. They need no model, no GPU and no sample PDFs; the few
+that would need one skip and say why. The same tests run on every push
+(`.github/workflows/tests.yml`, Windows). The checks that need the models and
+a sample corpus are run before each release on the maintainer's machine.
 
 ---
 
@@ -288,7 +295,7 @@ once at the end; `--noninteractive` defers everything to
 ledger and back into the document's output JSON.
 
 The **ledger** (`persistence/semantic_ledger.csv` by default, or
-`SARA_LEDGER_PATH`) is keyed by each file's SHA-256, so renaming a PDF does not
+`PRAJNYA_LEDGER_PATH`) is keyed by each file's SHA-256, so renaming a PDF does not
 create a duplicate and an interrupted batch loses nothing.
 
 ---
@@ -370,8 +377,8 @@ run_outputs/
 
 Results go to `run_outputs/` in this repository whatever directory you launch
 from (`--out` overrides it). Every path inside is relative to the run root, so
-the whole tree can be moved and every crop still resolves. A real, unedited
-example is in
+the whole tree can be moved and every crop still resolves. A real example
+(only the PDF's local path replaced) is in
 [`contract/examples/frontiers_acidovorax_hrp/`](contract/examples/frontiers_acidovorax_hrp/).
 
 ### The document JSON
@@ -385,7 +392,7 @@ example is in
   "pages": [ { "page_number",
                "content",          // the page text as read
                "body",             // the running text: content without furniture and outside_body
-               "quality_score",
+               "quality_score",    // a rough guess, not a measured accuracy
                "metadata": { "processing_method", "page_type",
                              "figures", "tables",
                              "headings",             // typography of candidate heading lines
@@ -522,14 +529,16 @@ configuration; every **Restore Defaults** button reads from it.
 
 | environment variable | effect |
 |---|---|
-| `SARA_LLAMA_SERVER` | where the `llama-server` binary is |
-| `SARA_LEDGER_PATH` | keep the ledger elsewhere |
-| `SARA_CACHE_PATH` | move the Zotero cache |
-| `SARA_CITATION_CACHE_PATH` | move the Crossref / OpenAlex answer cache |
-| `SARA_GUI_STORAGE_SECRET` | keep interface sessions across a restart |
+| `PRAJNYA_LLAMA_SERVER` | where the `llama-server` binary is |
+| `PRAJNYA_LEDGER_PATH` | keep the ledger elsewhere |
+| `PRAJNYA_CACHE_PATH` | move the Zotero cache |
+| `PRAJNYA_CITATION_CACHE_PATH` | move the Crossref / OpenAlex answer cache |
+| `PRAJNYA_GUI_STORAGE_SECRET` | keep interface sessions across a restart |
 | `ZOTERO_API_KEY`, `ZOTERO_LIBRARY_ID` | enable Zotero enrichment |
 
 All are read from `.env` if present.
+
+Releases up to 6.7.0 named them `SARA_*`; those names still work, and a warning names the one to use. <!-- release-rename: keep -->
 
 ---
 

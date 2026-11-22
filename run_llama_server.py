@@ -37,7 +37,7 @@ this repository (on the development machine, in a llama.cpp build tree) and will
 be somewhere else for everyone else. In order:
 
   1. `--llama-server <path>`
-  2. the `SARA_LLAMA_SERVER` environment variable (put it in `.env`)
+  2. the `PRAJNYA_LLAMA_SERVER` environment variable (put it in `.env`)
   3. `llama-server` / `llama-server.exe` on PATH
 """
 
@@ -45,7 +45,6 @@ from __future__ import annotations
 
 import argparse
 import configparser
-import os
 import shutil
 import subprocess
 import sys
@@ -58,6 +57,7 @@ from typing import List, Optional, Sequence, Tuple
 #: it asks that module rather than computing its own answer.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from src.processing.env_settings import env_setting  # noqa: E402
 from src.processing.paths import CONFIG_ROOT, REPO_ROOT  # noqa: E402
 
 #: The preset file llama-server is pointed at, relative to the repository root.
@@ -165,11 +165,11 @@ def resolve_llama_server(explicit: Optional[str] = None) -> Optional[Path]:
     """
     Find the llama-server binary, or return None.
 
-    Order: the explicit argument, then `SARA_LLAMA_SERVER`, then PATH. Never a
+    Order: the explicit argument, then `PRAJNYA_LLAMA_SERVER`, then PATH. Never a
     hardcoded location — the binary lives outside this repository and is in a
     different place on every machine.
     """
-    candidates = [explicit, os.environ.get("SARA_LLAMA_SERVER")]
+    candidates = [explicit, env_setting("LLAMA_SERVER")]
     for candidate in candidates:
         if candidate:
             path = Path(candidate)
@@ -244,7 +244,7 @@ def _not_found_message() -> str:
         "repository. Tell this launcher where it is, in any of these ways:\n"
         "\n"
         "  run_llama_server.py --llama-server <path to llama-server.exe>\n"
-        "  set SARA_LLAMA_SERVER=<path>   (or add it to .env)\n"
+        "  set PRAJNYA_LLAMA_SERVER=<path>   (or add it to .env)\n"
         "  put its folder on PATH\n"
     )
 

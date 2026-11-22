@@ -1,0 +1,36 @@
+# Runs Prajnya's self-contained tests on every push and pull request.
+#
+# These tests need no model, no GPU, no sample PDFs and no earlier outputs;
+# tests that would need them skip with a reason. The model, GPU and corpus
+# checks (the parity gate on the 8-page NMR paper, the corpus comparison)
+# are release gates run on the maintainer's machine before each release.
+#
+# Windows only: Prajnya is developed and released on Windows. Linux and
+# macOS are not tested yet.
+
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install the requirements
+        run: python -m pip install -r requirements.txt
+
+      - name: Run the tests
+        run: python -m pytest tests -q -rs

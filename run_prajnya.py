@@ -119,6 +119,7 @@ from typing import Any, Dict, Optional
 from src.processing.batch import PreflightEntry, find_pdfs, write_batch_summary
 from src.processing.book_prompt import ask_about_book, show_preflight
 from src.processing.citations.level import CITATION_LEVELS, require_built, resolve_level
+from src.processing.env_settings import env_setting
 from src.processing.citations.recite import SKIPPED as RECITE_SKIPPED, recite_documents
 from src.processing.cli_support import parse_chapters, parse_pages
 from src.processing.config.loader import ConfigLoader
@@ -209,7 +210,7 @@ def run_review(log: logging.Logger) -> int:
     ledger = _open_ledger(log, create=False)
     if ledger is None:
         log.error("No ledger to review (looked for %s).",
-                  os.getenv("SARA_LEDGER_PATH", DEFAULT_LEDGER_PATH))
+                  env_setting("LEDGER_PATH", DEFAULT_LEDGER_PATH))
         return 1
 
     review_ledger(ledger, logger=log)

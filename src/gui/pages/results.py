@@ -203,6 +203,19 @@ def _render_metadata_card(document: Dict[str, Any]) -> None:
                 fields = ", ".join(review_fields) if review_fields else "metadata"
                 ui.label(f"Needs review: {fields}").classes("text-sm")
 
+        failed_pages = info.get("failed_pages") or []
+        if info.get("status") == "partial" and failed_pages:
+            # D1: the file was written, but these pages were not read. They
+            # keep their text layer; their figures and tables are missing.
+            with ui.row().classes("items-center gap-2 mt-2").style(
+                f'background: {theme.var("warning_tint")}; padding: 8px 12px; border-radius: 6px;'
+            ):
+                ui.icon("warning", color=theme.var("warning"))
+                pages = ", ".join(str(number) for number in failed_pages)
+                ui.label(f"Incomplete: page(s) {pages} could not be read. Their text is "
+                         "kept; their figures and tables are missing. The next run "
+                         "tries this document again.").classes("text-sm")
+
         errors = summary.get("errors") or []
         if errors:
             with ui.row().classes("items-center gap-2 mt-1"):
@@ -239,9 +252,12 @@ def _render_page_viewer(document: Dict[str, Any], names: Dict[str, str]) -> None
             with content_area:
                 score = page.get("quality_score")
                 if score is not None:
-                    ui.label(f"Quality score: {score:.2f}").classes("text-xs").style(
+                    # Audit L3: a heuristic from simple checks, never a
+                    # measured accuracy, so it is labelled as one.
+                    ui.label(f"Quality estimate (rough): {score:.2f}").classes("text-xs").style(
                         f'color: {theme.var("text_muted")};'
-                    )
+                    ).tooltip("From simple checks on the text (length, structure, odd "
+                              "characters), not a measured accuracy. Nothing acts on it.")
                 # 'latex' extra: draws $...$ formulas (needs no internet)
                 ui.markdown(page.get("content") or "*(no text)*",
                             extras=["fenced-code-blocks", "tables", "latex"]).classes("w-full").style(

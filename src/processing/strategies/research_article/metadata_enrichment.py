@@ -31,12 +31,16 @@ from typing import Any, Dict, Optional
 from ....processing.ledger.semantic_ledger import SemanticLedger, generate_hash
 from ...citations.block import SOURCE_FILE_NAME, source_label
 from ...citations.acceptance import (clean_author_list, complete_truncated_authors,
-                                      is_truncated_author_list)
+                                      is_truncated_author_list, surname_of)
 from ...citations.level import LEVEL_LOCAL, LEVEL_ONLINE
 from ...citations.local_confidence import CONFIDENCE_UNCONFIRMED, local_confidence
 from ...models import ContentPage, DocumentProfile
 from ...utils.metadata_merger import merge_metadata
 from ...utils.zotero_service import ZoteroService, normalize_doi_for_compare
+
+# Source labels the online chain gives a registry record it accepted
+# (`citations/chain.py`: f"{service.name}_doi" / f"{service.name}_title").
+REGISTRY_SOURCE_ENDINGS = ("_doi", "_title")
 
 
 def extract_metadata_from_page1(page1_content: ContentPage, pdf_path: Path | str,
@@ -261,6 +265,8 @@ def establish_metadata(
                     "authors": completed or clean_author_list(vlm_metadata.get("authors"))}
 
     merged =merge_metadata(vlm_metadata, zotero_record, title_page_text)
+    if citation_level == LEVEL_ONLINE:
+        prefer_registry_authors(merged, zotero_record, zotero_source, logger=log)
     merged["validation_confidence"] = zotero_confidence
     merged["validation_source"] = zotero_source
     apply_citation_level(merged, citation_level, title_page_text, file_name,
@@ -346,6 +352,77 @@ def apply_citation_level(merged: Dict[str, Any], citation_level: Optional[str],
         log.warning("No author, editor or title could be established: %s is "
                     "cited by its file name and flagged for review.", file_name)
     return merged
+
+
+def prefer_registry_authors(merged: Dict[str, Any], record: Dict[str, Any], source: str,
+                            logger: Optional[logging.Logger] = None) -> Dict[str, Any]:
+    """
+    At level `online`, the accepted registry record's author list is the one kept.
+
+    For biology researchers: the three-way merge (`merge_author_lists`) takes
+    the vision model's reading of the byline as its reference and lets the
+    registry only confirm or add names, so a misread surname ("Hümer" for
+    Crossref's "Hümmer"), a glued affiliation mark or a dropped name survived
+    even when Crossref held the exact list. A registry record accepted by
+    the chain (`crossref_doi`, `openalex_title`, ...) already lists every
+    author in published order, with the title page's fuller spelling of a
+    name the page also prints (`chain.respell_authors`); it is used as is.
+    Measured on the benchmark's 50 non-scored papers (run 1): the registry
+    list was exact on all 43 it covered, the merged list on 28 of 50.
+
+    A Zotero record (level `zotero`, or `online` with Zotero preferred) is
+    left to the merge, so those levels give the same record as before.
+
+    **A registry list that is a cut-off copy of the byline is not used.**
+    Crossref's record for Myllyharju and Kivirikko 2004 (Trends Genet.,
+    10.1016/j.tig.2003.11.004) names only "J Myllyharju"; taken as is, it
+    dropped Kivirikko (v6.8 release check, 2026-11-22). When the registry's
+    surnames are the byline's first surnames, in order, and fewer, the
+    registry list is truncated, and the merged reading is kept. Never seen on
+    the benchmark's 50 papers, so their result is unchanged.
+
+    The record's separate surnames come with it (`author_names`, contract
+    1.4), one per author, so "Rosendahl Huber" stays one surname; [] when the
+    registry gives none (OpenAlex names are single strings).
+
+    Args:
+        merged: the merged metadata; its `authors` and `author_names`
+            changed in place.
+        record: the record the online chain accepted ({} when none).
+        source: the chain's source label for that record.
+        logger: optional logger.
+
+    Returns:
+        `merged`.
+    """
+    authors = [a for a in (record or {}).get("authors") or [] if isinstance(a, str) and a.strip()]
+    if not authors or not source.endswith(REGISTRY_SOURCE_ENDINGS) or source.startswith("zotero"):
+        return merged
+    if _cut_off_copy(authors, merged.get("authors") or []):
+        (logger or logging.getLogger("MetadataEnrichment")).warning(
+            "The %s author list (%d) is the byline's first %d names only: kept "
+            "the merged reading (%d).", source, len(authors), len(authors),
+            len(merged.get("authors") or []))
+        return merged
+    if authors != merged.get("authors"):
+        (logger or logging.getLogger("MetadataEnrichment")).info(
+            "Authors taken from the %s record (%d) instead of the merged reading (%d).",
+            source, len(authors), len(merged.get("authors") or []))
+    merged["authors"] = list(authors)
+    parts = (record or {}).get("author_names")
+    merged["author_names"] = ([dict(part) for part in parts]
+                              if isinstance(parts, list) and len(parts) == len(authors)
+                              else [])
+    return merged
+
+
+def _cut_off_copy(registry: list, reading: list) -> bool:
+    """True when the registry names fewer authors, and they are the first
+    names of the reading, in order (compared by surname)."""
+    if not registry or len(registry) >= len(reading):
+        return False
+    first = [surname_of(name).casefold() for name in reading[:len(registry)]]
+    return first == [surname_of(name).casefold() for name in registry]
 
 
 def _online_lookup(chain: Any, vlm_metadata: Dict[str, Any], title_page_text: str,

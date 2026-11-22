@@ -42,8 +42,9 @@ import os
 import subprocess
 import sys
 import threading
+from collections import deque
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Deque, Dict, List, Optional
 
 from .batch import BookDecision, PreflightEntry
 from .events import EVENT_ATTRIBUTE, EventHandler, RunEvent, emit
@@ -56,6 +57,10 @@ LOG = logging.getLogger(__name__)
 #: child writes, produced once at the end of the work — never stored, never
 #: replayed. See `runner.record_outcome` on why that distinction matters.
 OUTCOME_EVENT = "worker_outcome"
+
+#: How many of the child's last stderr lines are kept for the error message.
+#: Bounded on purpose: a child can print warnings without end (audit D2).
+STDERR_TAIL_LINES = 200
 
 
 def run_in_subprocess(entry: PreflightEntry, request: RunRequest,
@@ -106,6 +111,13 @@ def run_in_subprocess(entry: PreflightEntry, request: RunRequest,
         target=_drain, args=(process.stdout, outcome_holder, on_event, log),
         daemon=True)
     reader.start()
+    # stderr gets its own reader too (audit D2). Read only after the child
+    # exited, a full pipe (~64 KB on Windows) blocked the child's next write
+    # while this process blocked in wait(): with no timeout, forever.
+    stderr_tail: Deque[str] = deque(maxlen=STDERR_TAIL_LINES)
+    stderr_reader = threading.Thread(
+        target=_drain_stderr, args=(process.stderr, stderr_tail), daemon=True)
+    stderr_reader.start()
 
     try:
         process.wait(timeout=timeout)
@@ -116,13 +128,14 @@ def run_in_subprocess(entry: PreflightEntry, request: RunRequest,
                                error=f"TimeoutExpired: exceeded {timeout}s")
     finally:
         reader.join(timeout=5)
+        stderr_reader.join(timeout=5)
 
-    stderr = (process.stderr.read() or "").strip() if process.stderr else ""
     if outcome_holder.get("outcome") is not None:
         return outcome_holder["outcome"]
 
     # No result and no exception: the child died before it could report.
-    detail = stderr.splitlines()[-1] if stderr else f"exit code {process.returncode}"
+    lines = [line for line in stderr_tail if line.strip()]
+    detail = lines[-1].strip() if lines else f"exit code {process.returncode}"
     return DocumentOutcome(path=entry.path,
                            error=f"WorkerFailed: {detail}")
 
@@ -149,7 +162,7 @@ def child_environment(request: RunRequest) -> Optional[Dict[str, str]]:
     """
     The child's environment: this one, plus the run's ledger file if it set one.
 
-    The pipeline inside the child finds its ledger through `SARA_LEDGER_PATH`
+    The pipeline inside the child finds its ledger through `PRAJNYA_LEDGER_PATH`
     (strategy.py). A ledger chosen in the GUI's Settings travels on the request,
     so it has to be handed over here or the child reads the default ledger.
 
@@ -158,7 +171,7 @@ def child_environment(request: RunRequest) -> Optional[Dict[str, str]]:
     """
     if not request.ledger_path:
         return None
-    return {**os.environ, "SARA_LEDGER_PATH": str(Path(request.ledger_path).resolve())}
+    return {**os.environ, "PRAJNYA_LEDGER_PATH": str(Path(request.ledger_path).resolve())}
 
 
 def write_job_file(entry: PreflightEntry, request: RunRequest,
@@ -275,6 +288,8 @@ def _outcome_to_dict(outcome: DocumentOutcome) -> Dict[str, Any]:
         "errors": list(outcome.errors),
         "error": outcome.error,
         "skipped": outcome.skipped,
+        "failed_pages": list(outcome.failed_pages),
+        "page_count": outcome.page_count,
     }
 
 
@@ -289,7 +304,24 @@ def _outcome_from_dict(raw: Dict[str, Any]) -> DocumentOutcome:
         errors=list(raw.get("errors") or []),
         error=raw.get("error"),
         skipped=raw.get("skipped"),
+        failed_pages=[int(n) for n in raw.get("failed_pages") or []],
+        page_count=int(raw.get("page_count") or 0),
     )
+
+
+def _drain_stderr(stream, tail: Deque[str]) -> None:
+    """
+    Read the child's stderr as it is written, keeping only the last lines.
+
+    Nothing is logged from here: the child's own log reaches the parent on
+    stdout as events. stderr is what a native library or an interpreter crash
+    prints, and its last line is the best reason we can give when the child
+    dies without reporting.
+    """
+    if stream is None:                                       # pragma: no cover
+        return
+    for line in stream:
+        tail.append(line.rstrip("\n"))
 
 
 def _drain(stream, holder: Dict[str, Any],

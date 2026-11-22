@@ -4,12 +4,15 @@
     "document_type": "research_article",
     "processing_time": 95.0,
     "success": true,
+    "status": "success",
+    "failed_pages": [],
     "pipeline_version": "v6.6.0",
-    "contract_version": "1.3"
+    "contract_version": "1.5"
   },
   "metadata_final": {
     "title": null,
     "authors": [],
+    "author_names": [],
     "year": null,
     "doi": null,
     "journal": null,
@@ -34,13 +37,16 @@
     {
       "page_number": 1,
       "content": "A scanned page whose title page could not be read.",
+      "body": "A scanned page whose title page could not be read.",
       "quality_score": 0.6,
       "metadata": {
         "processing_method": "glm_fullpage",
         "page_type": "complex_visual",
         "figures": [],
         "tables": [],
-        "headings": []
+        "headings": [],
+        "furniture": [],
+        "outside_body": []
       }
     }
   ],

@@ -10,14 +10,15 @@ Two kinds of example live here. Both follow `../prajnya_document.schema.json`.
 
 ## `frontiers_acidovorax_hrp/`: a real document
 
-Prajnya's output for one 12-page research article, exactly as the run wrote it.
-Nothing was edited by hand. The paper is one of the 40 scored papers of the
-benchmark ([`../../BENCHMARK.md`](../../BENCHMARK.md)), and this is the output
-that was scored.
+Prajnya's output for one 12-page research article, exactly as the run wrote it,
+except one value: `profile.pdf_path` (the PDF's location on the machine that
+ran it) is replaced by a placeholder. The paper is one of the 40 scored papers
+of the benchmark ([`../../BENCHMARK.md`](../../BENCHMARK.md)); the benchmark
+scored the v6.7.0 output, and this is the v6.8.0 output.
 
 ```
 frontiers_acidovorax_hrp/
-├── PMC5880930.v6.json                   the document JSON (contract 1.3)
+├── PMC5880930.v6.json                   the document JSON (contract 1.5)
 ├── figures/PMC5880930/manifest.json     all 8 figures (captions, boxes, labels)
 ├── figures/PMC5880930/p*_fig*.png       their 8 crops
 ├── tables/PMC5880930/manifest.json      the table, with its rebuilt grid
@@ -28,30 +29,31 @@ The folder keeps the layout of a run directory, so every `image_path` in the
 manifests is relative to this folder, and every crop is included. The PDF
 itself is not: get it from the link below.
 
-Processed by the code released as v6.7.0 (its JSON still reads `v6.6.4`, the
-number before the release raised it) at citation level `online`. In it:
+Processed by v6.8.0 at citation level `online`, with the shipped model
+presets. In it:
 
 - **pages:** the title page read by a vision model (`two_shot_title_page`),
   3 pages from the text layer (`pymupdf`), 7 full-page vision reads
   (`glm_fullpage`), and 1 page repaired from its table's own crop
   (`glm_repair`);
-- **metadata:** title, all 8 authors in order, journal, year and DOI, confirmed
-  by Crossref;
+- **status:** `success`, no failed pages;
+- **metadata:** title, all 8 authors in order (each with its surname apart in
+  `author_names`), journal, year and DOI, confirmed by Crossref;
 - **figures and tables:** all 8 figures under their printed labels, and
   Table 1 with its grid;
 - **mentions:** 12 figure mentions and 1 table mention, every one linked;
   6 mentions of supplementary figures are counted and left unlinked, as the
   contract specifies;
 - **citations:** a reference list of 65 entries (Crossref, checked against the
-  65 printed in the PDF), and 92 author–year citations, each linked to its
+  65 printed in the PDF), and 99 author–year citations, each linked to its
   entries; 8 of them carry `content_offset: null` (allowed by the contract: the
   citation was not found exactly once in its page's text).
 
-**What is not perfect, left as written.** Four of the eight crops are flawed:
-Figure 1's crop includes its caption, Figure 3's cuts off the right-hand labels
-of its leaf photograph, Figure 6's cuts panel B in half, and Figure 7's holds
-only panel C (panels A and B are missing). Figure and table *labels* and
-*captions* are all right; crop quality is not yet scored by the benchmark.
+**Crops.** All eight crops hold their whole figure and no caption text. In the
+v6.7.0 output four did not (Figure 1 included its caption, Figure 3 cut off
+the labels of its leaf photograph, Figure 6 cut panel B in half, Figure 7 held
+only panel C); the crop fit of v6.8.0 corrected them. Crop quality is not yet
+scored by the benchmark.
 
 ### Attribution
 

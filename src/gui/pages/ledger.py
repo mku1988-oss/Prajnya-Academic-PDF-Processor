@@ -9,7 +9,7 @@ screen is where that permanent record book becomes browsable instead of a
 CSV file on disk.
 
 **Reuses the CLI's own ledger-path resolution.** `runner.open_ledger` is
-the one function that already knows the `SARA_LEDGER_PATH` override and
+the one function that already knows the `PRAJNYA_LEDGER_PATH` override and
 the default location (`docs/gui_plan.md` section 9's open issue #1 — the
 `SemanticLedger` ABC lacked `get_all_records`/`delete_record` until this
 session promoted both). Importing it here, rather than re-deriving the

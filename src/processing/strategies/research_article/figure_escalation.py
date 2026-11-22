@@ -133,6 +133,8 @@ def _is_whole_page(regions: Sequence[Dict[str, Any]],
         return False
 
     for region in regions:
+        if region.get("type") == "dense_drawings":
+            continue          # thousands of vector strokes: a figure, never a scan (D9)
         bbox = region.get("bbox") or region.get("rect")
         if bbox is None:
             continue

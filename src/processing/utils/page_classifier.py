@@ -53,6 +53,15 @@ from src.processing.utils.visual_clusterer import VisualRegionClusterer
 #: carries at least an operand, an operator, and a result.
 MIN_EQUATION_LINE_CHARS = 5
 
+#: A page that draws more vector strokes than this is not clustered (D9).
+#: Clustering keeps every stroke's neighbour list: PMC10904388 p4, a network
+#: graph of 580,957 strokes, needed ~850 GB and wrote the page empty. Such a
+#: page plainly holds a large figure, so it is marked visual whole. Chosen on
+#: 2,219 corpus and benchmark pages (eval/d9_dense_drawings): 18 pages exceed
+#: it, every one already a figure page; the busiest text-only page holds 3,146
+#: objects. Below it, clustering needs well under 1 GB in the worst case.
+DENSE_DRAWING_LIMIT = 10_000
+
 
 class PageType(str, Enum):
     """
@@ -426,8 +435,13 @@ class PageClassifier:
             })
 
         # --- Step 2: clustered vector drawings ----------------------------
-        drawing_rects = [d.rect for d in page.drawings()]
-        clusters = self.visual_clusterer.cluster_drawings(drawing_rects)
+        # A page with too many strokes to cluster is one dense figure (D9).
+        drawing_rects = self._drawing_rects(page)
+        if drawing_rects is None:
+            visuals.append(self._dense_drawing_region(page, header_zone, footer_zone))
+            clusters = []
+        else:
+            clusters = self.visual_clusterer.cluster_drawings(drawing_rects)
 
         drawing_filtered_count = 0
         for cluster in clusters:
@@ -457,6 +471,45 @@ class PageClassifier:
             f"{len(visuals)} valid visual regions"
         )
         return visuals, discarded_as_text
+
+    def _drawing_rects(self, page: PdfPage) -> Optional[List[Rect]]:
+        """
+        The page's drawing boxes, or None when there are too many to cluster.
+
+        The walk stops at DENSE_DRAWING_LIMIT + 1 drawings, so it costs at
+        most ~0.1 s on any page (PMC10904388 p4 took 5.5 s to list in full).
+        An ordinary page is listed in full, exactly as before.
+
+        PDFium's object count was tried as a free first check and dropped: it
+        counts top-level objects only (a figure inside one embedded form is
+        ONE object, so a low count can hide a dense figure), and it counts
+        text too (PMC10904388 p5: 14,112 objects, 7,963 drawings). It cannot
+        decide either way; only the walk can.
+        """
+        rects = [d.rect for d in page.drawings(limit=DENSE_DRAWING_LIMIT)]
+        if len(rects) > DENSE_DRAWING_LIMIT:
+            return None
+        return rects
+
+    def _dense_drawing_region(self, page: PdfPage, header_zone: float,
+                              footer_zone: float) -> Dict[str, Any]:
+        """
+        One visual region for a page that draws too many strokes to cluster.
+
+        It spans the page between the header and footer zones: where the
+        figure sits is the layout detector's job on the rendered page, and the
+        region only has to say "this page holds a figure". Its type tells
+        `figure_escalation` that this is a vector figure, never a scan.
+        """
+        page_width, _ = page.size
+        self.logger.info(
+            "Visual detection: more than %d vector drawings; one dense figure "
+            "region (not clustered)", DENSE_DRAWING_LIMIT)
+        return {
+            'bbox': (0.0, header_zone, page_width, footer_zone),
+            'type': 'dense_drawings',
+            'component_count': DENSE_DRAWING_LIMIT + 1,
+        }
 
     def _is_text_dense(self, page: PdfPage, rect: Rect) -> bool:
         """

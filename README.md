@@ -2,7 +2,7 @@
 
 ### Scientific PDF Processing Engine for RAG
 
-![Status](https://img.shields.io/badge/Status-Active%20development-orange?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.7.0-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Active%20development-orange?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.8.0-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge)
 
 <p align="center">
   <img src="assets/readme/prajnya_overview.png" alt="Prajnya: scientific PDFs into RAG-ready JSON, fully offline on one 8 GB GPU. Figures and panel groups, tables rebuilt as grids, figure and table mentions linked to their objects, citations linked to references, metadata verified" width="100%">
@@ -181,7 +181,7 @@ pip install -r requirements.txt
 
 Then download the models ([`models/README.md`](models/README.md) lists each
 file, its licence and where it goes), tell the launcher where `llama-server` is
-(`SARA_LLAMA_SERVER=/path/to/llama-server` in `.env`), and check the install:
+(`PRAJNYA_LLAMA_SERVER=/path/to/llama-server` in `.env`), and check the install:
 
 ```bash
 python run_llama_server.py --check
@@ -196,8 +196,7 @@ python run_llama_server.py --check
 
 > **A note on names.** **Prajnya** is this engine and **Prajnya Studio** its
 > interface. **Shastrasaara** is the larger scientific RAG system it feeds; the
-> project began under that name, which is why it remains in the source tree
-> and the `SARA_*` variables.
+> project began under that name, which is why it remains in the source tree.
 
 ---
 
@@ -267,7 +266,7 @@ If you use Prajnya in your research, please cite:
   title   = {Prajnya: A Scientific PDF Processing Engine},
   author  = {Manu Unni},
   year    = {2026},
-  version = {6.7.0},
+  version = {6.8.0},
   url     = {https://github.com/mku1988-oss/Prajnya-Academic-PDF-Processor}
 }
 ```

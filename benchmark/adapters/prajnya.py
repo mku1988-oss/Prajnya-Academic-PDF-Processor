@@ -59,10 +59,20 @@ def convert(json_path: Path, paper_id: str, track: str = "offline") -> dict:
 # ---------------------------------------------------------------------------
 
 def metadata_of(meta: dict) -> dict:
-    authors = [split_name(name) for name in meta.get("authors") or []]
+    authors = registry_names(meta) or [split_name(name) for name in meta.get("authors") or []]
     return {"title": meta.get("title"), "authors": authors,
             "doi": clean_doi(meta.get("doi")), "year": year_of(meta.get("year")),
             "journal": meta.get("journal")}
+
+
+def registry_names(meta: dict) -> list:
+    """Contract 1.4 (amendment A10): the surnames Prajnya kept apart, when it
+    wrote them, one per author ([] for an older file or an unknown list)."""
+    parts = meta.get("author_names") or []
+    if not parts or len(parts) != len(meta.get("authors") or []):
+        return []
+    return [{"surname": (p.get("family") or "").strip(), "given": (p.get("given") or "").strip()}
+            for p in parts]
 
 
 def split_name(name: str) -> dict:

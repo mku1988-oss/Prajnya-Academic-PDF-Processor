@@ -241,8 +241,12 @@ class PyPdfiumPage:
         return ((left.value + right.value) / 2,
                 height - (bottom.value + top.value) / 2)
 
-    def _object_rects(self, object_type: int) -> List[Rect]:
-        """Bounding boxes of every page object of the given PDFium type."""
+    def _object_rects(self, object_type: int, limit: Optional[int] = None) -> List[Rect]:
+        """Bounding boxes of the page objects of the given PDFium type.
+
+        With `limit`, the walk stops once it holds `limit + 1` boxes, so its
+        cost is bounded however much the page draws (see `drawings`).
+        """
         height = self.size[1]
         rects: List[Rect] = []
         for obj in self._page.get_objects():
@@ -250,13 +254,15 @@ class PyPdfiumPage:
                 continue
             left, bottom, right, top = _object_bounds(obj)
             rects.append(flip_y(Rect(left, bottom, right, top), height).normalized())
+            if limit is not None and len(rects) > limit:
+                break
         return rects
 
     def images(self) -> List[ImageBlock]:
         return [ImageBlock(rect=r) for r in self._object_rects(_OBJ_IMAGE)]
 
-    def drawings(self) -> List[DrawingBlock]:
-        return [DrawingBlock(rect=r) for r in self._object_rects(_OBJ_PATH)]
+    def drawings(self, limit: Optional[int] = None) -> List[DrawingBlock]:
+        return [DrawingBlock(rect=r) for r in self._object_rects(_OBJ_PATH, limit)]
 
     def glyph_styles(self) -> List[GlyphStyle]:
         """

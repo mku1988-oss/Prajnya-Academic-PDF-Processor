@@ -148,10 +148,15 @@ class BatchController:
         closing the CLI with Ctrl-C mid-document — but any document already
         finished keeps its result. See `_execute` for why the killed
         document is reported as stopped rather than as a generic failure.
+
+        A book question waiting for an answer is closed too (audit D5). While
+        the batch waits on it there is no child process to kill, so before
+        v6.8 a Stop click did nothing until someone answered the dialog.
         """
         self._stop_requested = True
         if self.state not in (BatchState.DONE, BatchState.STOPPED, BatchState.FAILED):
             self.state = BatchState.STOPPING
+        self._cancel_pending_question()
         with self._process_lock:
             process = self._current_process
         if process is not None:
@@ -282,6 +287,10 @@ class BatchController:
         """
         ready = threading.Event()
         with self._question_lock:
+            # Checked under the lock `stop()` takes to cancel a question, so a
+            # Stop click can never slip in between and leave this waiting.
+            if self._stop_requested:
+                return BookDecision.safe_default()
             self._pending_question = entry
             self._answer_ready = ready
             self._decision_answer = None
@@ -292,3 +301,19 @@ class BatchController:
             decision = self._decision_answer
             self._pending_question = None
         return decision or BookDecision.safe_default()
+
+    def _cancel_pending_question(self) -> None:
+        """
+        Wakes a waiting book question with no answer, as if it were cancelled.
+
+        `_threaded_prompt` then returns the safe default (read nothing more of
+        the book), and `_run` sees the stop request and ends as STOPPED
+        before any document is processed.
+        """
+        with self._question_lock:
+            ready = self._answer_ready
+            self._answer_ready = None
+            self._decision_answer = None
+            self._pending_question = None
+        if ready is not None:
+            ready.set()

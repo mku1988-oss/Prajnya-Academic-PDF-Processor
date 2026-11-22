@@ -40,12 +40,15 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Sequence
 
+# Page readings that failed (their metadata is not a reading of anything)
+# are defined once, in `document_status`, which also decides a document's status.
+from ..document_status import FAILED_METHODS
+from ..utils.atomic_write import write_json_atomically
 from ..review import (assess_metadata_completeness, build_ledger_record,
                       save_record)
 from .block import build_citations_block
@@ -69,9 +72,6 @@ DERIVED_KEYS = ("title", "authors", "year", "doi", "journal", "publisher",
 
 #: The fields a person reads to see what a re-cite changed.
 REPORTED_FIELDS = ("title", "authors", "year", "doi", "journal", "publisher")
-
-#: Page readings that failed: their metadata is not a reading of anything.
-FAILED_METHODS = ("two_shot_title_failed", "glm_failed")
 
 
 @dataclass
@@ -341,13 +341,17 @@ def _write_back(payload: Dict[str, Any], json_path: Path, metadata: Dict[str, An
     Returns:
         The completeness assessment of the new record.
     """
-    from ..document_json import CONTRACT_VERSION, page_contents_of
+    from ..document_json import (CONTRACT_VERSION, page_contents_of, status_fields,
+                                 with_author_names)
     from ..utils.page_body import pages_with_body
     from .object_mentions import build_mentions_block
 
     info = payload.setdefault("document_info", {})
     assessment = assess_metadata_completeness(metadata, info.get("document_type"))
 
+    # A file from an older contract gets every field the current one requires
+    # (D6), since it is stamped with the current version below.
+    metadata = with_author_names(metadata)
     payload["metadata_final"] = metadata
     payload["citations"] = build_citations_block(
         metadata, _file_name(payload), level=level, level_set_by=level_set_by,
@@ -357,6 +361,8 @@ def _write_back(payload: Dict[str, Any], json_path: Path, metadata: Dict[str, An
     payload["pages"] = pages_with_body(payload.get("pages") or [])
     payload["review_status"] = assessment.review_status
     payload["review_needed_fields"] = list(assessment.missing_fields)
+    info.update(status_fields((payload.get("summary") or {}).get("errors") or [],
+                              payload["pages"]))
     info["contract_version"] = CONTRACT_VERSION        # the file now carries a block
 
     result = (payload.get("profile") or {}).get("processing_result")
@@ -365,10 +371,7 @@ def _write_back(payload: Dict[str, Any], json_path: Path, metadata: Dict[str, An
         result["citation_level"] = level
         result["citation_level_set_by"] = level_set_by
 
-    temporary = json_path.with_name(json_path.name + ".recite-tmp")
-    with open(temporary, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, ensure_ascii=False)
-    os.replace(temporary, json_path)
+    write_json_atomically(json_path, payload)   # never half a file (D4)
     return assessment
 
 

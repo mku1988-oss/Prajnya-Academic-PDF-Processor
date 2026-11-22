@@ -265,12 +265,16 @@ class PyMuPdfPage:
         return [rect for rect in runs.values()
                 if rect.height > 0 and rect.width >= LEADER_MIN_ASPECT * rect.height]
 
-    def drawings(self) -> List[DrawingBlock]:
+    def drawings(self, limit: Optional[int] = None) -> List[DrawingBlock]:
+        # PyMuPDF builds its whole drawing list in one call, so `limit` caps
+        # what we keep, not what it reads. Local development only (AGPL).
         blocks: List[DrawingBlock] = []
         for drawing in self._page.get_drawings():
             bbox = drawing.get("rect")
             if bbox is not None:
                 blocks.append(DrawingBlock(rect=Rect(bbox.x0, bbox.y0, bbox.x1, bbox.y1).normalized()))
+                if limit is not None and len(blocks) > limit:
+                    break
         return blocks
 
     def render(self, *, dpi: Optional[int] = None, max_edge: Optional[int] = None) -> Image.Image:

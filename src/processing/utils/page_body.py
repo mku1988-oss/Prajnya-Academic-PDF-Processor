@@ -171,7 +171,10 @@ def _caption_spans(content: str, metadata: Mapping[str, Any],
     text, origin = _normalised(content)
     spans: List[Dict[str, Any]] = []
     objects = list(metadata.get("figures") or []) + list(metadata.get("tables") or [])
-    for caption in {(item.get("caption") or "").strip() for item in objects}:
+    # Longest legend first (ties alphabetical), never a bare set: when two
+    # legends overlap on the page, the first one placed wins, so set order
+    # (string hash, which changes per process) made the result vary run to run.
+    for caption in _captions_longest_first(objects):
         if len(caption) < MIN_CAPTION_CHARACTERS:
             continue
         words = _normalised(caption)[0].split()
@@ -194,6 +197,16 @@ def _caption_spans(content: str, metadata: Mapping[str, Any],
                     break
             position = text.find(head, position + 1)
     return spans
+
+
+def _captions_longest_first(objects: Sequence[Mapping[str, Any]]) -> List[str]:
+    """The distinct stored legends, longest first, ties in alphabetical order.
+
+    A longer legend that overlaps a shorter one covers more of the page, so it
+    is placed first; the fixed order makes the body the same on every run.
+    """
+    captions = {(item.get("caption") or "").strip() for item in objects}
+    return sorted(captions, key=lambda caption: (-len(caption), caption))
 
 
 def _normalised(text: str) -> Tuple[str, List[int]]:

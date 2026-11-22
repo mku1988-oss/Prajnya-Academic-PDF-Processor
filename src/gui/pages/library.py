@@ -75,6 +75,7 @@ def mount() -> None:
         "entries": [],
         "cursor": 0,
         "question_open": False,
+        "dialog": None,
     }
     transcript: Deque[str] = deque(maxlen=TRANSCRIPT_LIMIT)
 
@@ -201,7 +202,14 @@ def mount() -> None:
         question: Optional[BookQuestion] = snapshot["question"]
         if question is not None and not ui_state["question_open"]:
             ui_state["question_open"] = True
-            _show_book_dialog(question, controller, lambda: ui_state.update(question_open=False))
+            ui_state["dialog"] = _show_book_dialog(
+                question, controller, lambda: ui_state.update(question_open=False))
+        elif question is None and ui_state["question_open"]:
+            # Stop closed the question (D5): close its dialog too, so no one
+            # answers a question the batch is no longer asking.
+            if ui_state["dialog"] is not None:
+                ui_state["dialog"].close()
+            ui_state.update(question_open=False, dialog=None)
 
     scan_button.on_click(handle_scan)
     start_button.on_click(handle_start)
@@ -283,7 +291,8 @@ def _preflight_sync(paths: List[Path], recursive: bool) -> List[PreflightEntry]:
 def _summarize(entries: List[PreflightEntry]) -> str:
     if not entries:
         return "No PDFs."
-    errors = sum(1 for entry in entries if entry.error)
+    held_back = sum(1 for entry in entries if entry.held_back)
+    errors = sum(1 for entry in entries if entry.error) - held_back
     kinds: Dict[str, int] = {}
     for entry in entries:
         if entry.error:
@@ -294,6 +303,9 @@ def _summarize(entries: List[PreflightEntry]) -> str:
     summary = f"{len(entries)} PDF(s): " + ", ".join(parts) if parts else f"{len(entries)} PDF(s)"
     if errors:
         summary += f" — {errors} could not be read"
+    if held_back:
+        # Audit D3: another PDF in the batch has the same name.
+        summary += f" — {held_back} not run (same name as another PDF)"
     return summary
 
 
@@ -382,7 +394,7 @@ def _format_event(event) -> Optional[str]:
 
 
 def _show_book_dialog(question: BookQuestion, controller: BatchController,
-                      on_close) -> None:
+                      on_close) -> ui.dialog:
     entry = question.entry
     title = _display_name(entry)
 
@@ -428,3 +440,4 @@ def _show_book_dialog(question: BookQuestion, controller: BatchController,
                 )
 
     dialog.open()
+    return dialog

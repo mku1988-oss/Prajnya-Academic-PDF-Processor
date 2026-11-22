@@ -43,7 +43,7 @@ PRAJNYA_ROOT = V6_ROOT
 #   BENCH_ENV_ROOT     the folder holding one environment per tool
 #                      (bench_docling, bench_marker, bench_mineru, and Prajnya's)
 #   BENCH_PRAJNYA_ENV  the name of Prajnya's environment in it (default prajnya)
-#   BENCH_LLAMA_SERVER the llama-server binary (else SARA_LLAMA_SERVER,
+#   BENCH_LLAMA_SERVER the llama-server binary (else PRAJNYA_LLAMA_SERVER,
 #                      Prajnya's own setting, else llama-server on the PATH)
 #   BENCH_DOCKER       the docker binary (default: docker on the PATH)
 # Environment folders use the Windows layout (python.exe, Scripts/*.exe): the
@@ -52,7 +52,7 @@ load_dotenv(V6_ROOT / ".env")
 ENV = Path(os.environ.get("BENCH_ENV_ROOT", "envs"))
 PRAJNYA_ENV = os.environ.get("BENCH_PRAJNYA_ENV", "prajnya")
 LLAMA_SERVER = Path(os.environ.get("BENCH_LLAMA_SERVER")
-                    or os.environ.get("SARA_LLAMA_SERVER")
+                    or os.environ.get("PRAJNYA_LLAMA_SERVER")
                     or shutil.which("llama-server") or "llama-server")
 DOCKER = Path(os.environ.get("BENCH_DOCKER") or shutil.which("docker") or "docker")
 GROBID_URL = "http://localhost:8070"
@@ -147,7 +147,7 @@ def run_prajnya(paper: dict, pdf: Path, out_dir: Path) -> str:
     paper_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(pdf, paper_dir / f"{paper['pmcid']}.pdf")
     env = {**os.environ, "PYTHONUTF8": "1",
-           "SARA_LEDGER_PATH": str(out_dir / "ledger.csv")}
+           "PRAJNYA_LEDGER_PATH": str(out_dir / "ledger.csv")}
     server = start_llama_server(out_dir)
     try:
         result = run_process(
@@ -242,8 +242,8 @@ def recite_online(run_dir: Path) -> None:
          "--recite", "--citations", "online", "--out", str(target / "rundir"),
          "--noninteractive"],
         cwd=PRAJNYA_ROOT, env={**os.environ, "PYTHONUTF8": "1",
-                          "SARA_LEDGER_PATH": str(target / "ledger.csv"),
-                          "SARA_CITATION_CACHE_PATH": str(target / "citation_cache")},
+                          "PRAJNYA_LEDGER_PATH": str(target / "ledger.csv"),
+                          "PRAJNYA_CITATION_CACHE_PATH": str(target / "citation_cache")},
         log_path=target / "recite.log", timeout=7200)
     log(run_dir, {"tool": "prajnya_online", "event": "recite", "exit": code,
                   "seconds": round(time.perf_counter() - started, 2)})

@@ -54,10 +54,33 @@ LAST_ENTRY_MAX_LINES = 6
 INDENT_POINTS = 2.0
 # ...and a column is in that style when at least this share of its lines are.
 INDENTED_SHARE = 0.2
+# A column's left edge is measured on lines of at least this many words.
+# Shorter lines can be fragments of the NEIGHBOURING column that the layout
+# put in this one: on PMC8333197 (Cell Reports) p12, "their", "s. We",
+# "red in" sit 29 points left of the right column's real edge, and taking
+# the edge from them made every real line look indented.
+EDGE_MIN_WORDS = 3
 
 # Block style (no indent): a gap above a line this many times the usual line
 # pitch starts an entry.
 BLOCK_GAP_SHARE = 1.15
+
+# Text size of an author-year list (Frontiers sets back-matter notes inside
+# it, in a larger size). The size is the median line height of the first
+# SIZE_SAMPLE_LINES author-like lines within SIZE_SEARCH_LINES of the
+# heading; a line within SIZE_TOLERANCE of it (share) is list-sized.
+# Measured on PMC10977656: entries 9.44, notes 12.14 (+29%), headings 14.88.
+# A scanned list's heights wobble: lib10's "Sternfeld" entry reads 10.98
+# against 9.91 (+11%), so 10% dropped it; 20% keeps it and still parts
+# Frontiers' notes from its entries.
+SIZE_SAMPLE_LINES = 10
+SIZE_SEARCH_LINES = 60
+SIZE_TOLERANCE = 0.2
+# A heading opens a note inside the list (not the list's end) when, of the
+# next RESUME_LOOKAHEAD_LINES list-sized lines on its page, at least
+# RESUME_MIN_ENTRIES start like an author, with as many "(YYYY)" years.
+RESUME_LOOKAHEAD_LINES = 12
+RESUME_MIN_ENTRIES = 2
 
 # "245 Doi", "[12] Smith", "(16) Lee", "40. Maki", "38. ten Cate".
 _NUMBER_START = re.compile(r"^[\[(]?(\d{1,4})[\]).]?\s+(?=[^\W\d_]|[\"“‘'(])")
@@ -292,7 +315,7 @@ def last_entry_end(lines: Sequence[LayoutLine], start: int) -> int:
 
 def author_year_list(lines: Sequence[LayoutLine]) -> Optional[ReferenceList]:
     """The list after the last "References" heading, split by hanging indent or by gaps."""
-    region = list_region(lines)
+    region, end_line = list_region(lines)
     if not region:
         return None
     first_line = list(lines).index(region[0])
@@ -304,21 +327,88 @@ def author_year_list(lines: Sequence[LayoutLine]) -> Optional[ReferenceList]:
         entries.append(make_entry(None, region[index].page, text))
     if len(entries) < MIN_ENTRIES:
         return None
-    end_line = first_line + len(region)
     return ReferenceList(style="author_year", entries=entries, first_line=first_line,
-                         end_line=end_line if end_line < len(lines) else None)
+                         end_line=end_line)
 
 
-def list_region(lines: Sequence[LayoutLine]) -> List[LayoutLine]:
-    """The lines between the last reference heading and the heading that follows the list."""
+def list_region(lines: Sequence[LayoutLine]) -> Tuple[List[LayoutLine], Optional[int]]:
+    """The list's lines after the last reference heading, and where the list ends.
+
+    The list ends at a heading that follows lists ("Conflict of interest"),
+    unless that heading only opens a back-matter note set inside the list:
+    Frontiers (2023 on) starts its list in the left column while the right
+    column first finishes the back matter ("Funding", "Conflict of
+    interest", "Publisher's note") and then carries on with the list. Such a
+    note is printed in a different text size from the entries, so lines of
+    another size are left out of the list, and the list goes on after them.
+
+    Returns:
+        (the list's lines, the position just after the list in `lines`, or
+        None when the list runs to the end of the document).
+    """
     headings = [index for index, line in enumerate(lines) if _REFERENCE_HEADING.match(line.text)]
     if not headings:
-        return []
+        return [], None
     start = headings[-1] + 1
+    size = list_text_size(lines, start)
+    region: List[LayoutLine] = []
     for index in range(start, len(lines)):
-        if _AFTER_LIST_HEADING.match(lines[index].text):
-            return list(lines[start:index])
-    return list(lines[start:])
+        line = lines[index]
+        if _AFTER_LIST_HEADING.match(line.text) and not list_resumes_after(lines, index, size):
+            return region, index
+        if is_list_sized(line, size):
+            region.append(line)
+    return region, None
+
+
+def list_text_size(lines: Sequence[LayoutLine], start: int) -> Optional[float]:
+    """The text size (line height) of the list's entries, or None if it cannot be told.
+
+    Taken as the median height of the first `SIZE_SAMPLE_LINES` lines after
+    the heading that start like an author ("Abbas, Y., Yun, S., ...").
+    """
+    sample: List[float] = []
+    for line in lines[start:start + SIZE_SEARCH_LINES]:
+        if _AUTHOR_START.match(line.text) and line.height > 0:
+            sample.append(line.height)
+            if len(sample) == SIZE_SAMPLE_LINES:
+                break
+    return statistics.median(sample) if sample else None
+
+
+def is_list_sized(line: LayoutLine, size: Optional[float]) -> bool:
+    """Whether a line is printed in the list's text size (always True when the size is unknown)."""
+    if size is None:
+        return True
+    return abs(line.height - size) <= SIZE_TOLERANCE * size
+
+
+def list_resumes_after(lines: Sequence[LayoutLine], heading: int, size: Optional[float]) -> bool:
+    """Whether the list carries on after the back-matter note that opens at line `heading`.
+
+    It does when the heading is NOT in the list's text size (so the note can
+    be told from the list at all), nor is the line under it (the note's
+    text; its lines are skipped), and the list-sized lines that follow on the same
+    page read as reference entries: at least `RESUME_MIN_ENTRIES` of the next
+    `RESUME_LOOKAHEAD_LINES` start like an author, with as many years in
+    parentheses. A Methods section or a table after the list (Cell Press)
+    does not read like that, so it still ends the list.
+    """
+    if size is None or is_list_sized(lines[heading], size):
+        return False
+    # The note itself: its first line must be in another size too. A box
+    # set in the list's size right under its heading ("Further Related
+    # Reading" in Int. J. Dev. Biol., lib02) is not a note; it ends the list.
+    if heading + 1 >= len(lines) or is_list_sized(lines[heading + 1], size):
+        return False
+    page = lines[heading].page
+    following = [line for line in lines[heading + 1:]
+                 if line.page == page and is_list_sized(line, size)][:RESUME_LOOKAHEAD_LINES]
+    if any(_AFTER_LIST_HEADING.match(line.text) for line in following):
+        return False
+    authors = sum(1 for line in following if _AUTHOR_START.match(line.text))
+    years = len(_YEAR_IN_PARENTHESES.findall(" ".join(line.text for line in following)))
+    return authors >= RESUME_MIN_ENTRIES and years >= RESUME_MIN_ENTRIES
 
 
 def starts_author_entry(region: Sequence[LayoutLine], index: int) -> bool:
@@ -328,16 +418,46 @@ def starts_author_entry(region: Sequence[LayoutLine], index: int) -> bool:
         return False
     column = [other for other in region if (other.page, other.band, other.column)
               == (line.page, line.band, line.column)]
-    left = min(other.x0 for other in column)
+    left = column_left_edge(column)
     indented = sum(1 for other in column if other.x0 > left + INDENT_POINTS)
     if indented >= INDENTED_SHARE * len(column):
-        return line.x0 <= left + INDENT_POINTS          # hanging indent: at the left edge
+        at_edge = line.x0 <= left + INDENT_POINTS
+        if starts_are_indented(column, left):
+            return not at_edge                          # first-line indent (Frontiers 2023 on)
+        return at_edge                                  # hanging indent: at the left edge
     position = column.index(line)
     if position == 0:
         return True                                     # block style: top of a column
     pitches = [b.baseline - a.baseline for a, b in zip(column, column[1:])]
     usual = statistics.median(pitches) if pitches else 0.0
     return line.baseline - column[position - 1].baseline > BLOCK_GAP_SHARE * usual
+
+
+def column_left_edge(column: Sequence[LayoutLine]) -> float:
+    """Where a column's lines start: the leftmost line of EDGE_MIN_WORDS words or more.
+
+    A one- or two-word line can be a fragment of the neighbouring column
+    (see EDGE_MIN_WORDS), so it is not trusted to set the edge. A column
+    with no line that long (a short tail on the last page) falls back to
+    its leftmost line, which is what this used to be for every column.
+    """
+    full_lines = [line.x0 for line in column if len(line.text.split()) >= EDGE_MIN_WORDS]
+    return min(full_lines) if full_lines else min(line.x0 for line in column)
+
+
+def starts_are_indented(column: Sequence[LayoutLine], left: float) -> bool:
+    """Whether a column indents each entry's FIRST line instead of the others.
+
+    Most lists hang their entries (first line at the left edge, the rest
+    indented). Frontiers (2023 on) does the reverse: "Abbas, Y., Yun, S.
+    ... (2021). Recent" sits 6 points in, its next lines at the edge. Told
+    apart by where the author-like lines sit: in a first-line-indent list
+    most of them are indented, in a hanging list almost none are (a
+    continuation line rarely starts like an author).
+    """
+    authors = [line for line in column if _AUTHOR_START.match(line.text)]
+    indented = sum(1 for line in authors if line.x0 > left + INDENT_POINTS)
+    return bool(authors) and indented > len(authors) / 2
 
 
 def make_entry(number: Optional[int], page: int, text: str) -> ReferenceEntry:

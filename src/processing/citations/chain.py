@@ -156,6 +156,8 @@ def respell_authors(record: Dict[str, Any], extracted: Dict[str, Any]) -> Dict[s
     "Gary D. Fullerton". When the surnames agree, the fuller spelling wins.
     The registry's order and its authors the page did not name are kept.
     A DOI the registry spells in lower case keeps the paper's printed case.
+    The registry's separate surnames (`author_names`, contract 1.4) follow:
+    the given names take the page's spelling, the surname stays the registry's.
     """
     read = [a for a in (extracted.get("authors") or []) if isinstance(a, str) and a.strip()]
     by_surname = {surname_of(a): clean_name(a) for a in read}
@@ -168,10 +170,30 @@ def respell_authors(record: Dict[str, Any], extracted: Dict[str, Any]) -> Dict[s
     doi = record.get("doi")
     if printed_doi and doi and printed_doi.lower() == doi.lower():
         doi = printed_doi       # DOIs are case-blind; keep the form the paper prints
-    return {**record, "authors": spelled, "doi": doi}
+    respelled = {**record, "authors": spelled, "doi": doi}
+    parts = record.get("author_names")
+    if isinstance(parts, list) and len(parts) == len(spelled):
+        respelled["author_names"] = [respelled_parts(part, name)
+                                     for part, name in zip(parts, spelled)]
+    return respelled
 
 
 # --- helpers ----------------------------------------------------------------
+
+def respelled_parts(parts: Dict[str, str], spelling: str) -> Dict[str, str]:
+    """
+    {"given", "family"} for an author now spelled `spelling`.
+
+    When the spelling ends with the registry's surname, everything before it
+    is the given names ("Sietske K." + "Rosendahl Huber"). Otherwise the
+    registry's parts are kept as they are.
+    """
+    family = (parts.get("family") or "").strip()
+    if family and spelling.lower().endswith(family.lower()):
+        return {"given": spelling[:len(spelling) - len(family)].strip(),
+                "family": spelling[len(spelling) - len(family):]}
+    return {"given": parts.get("given") or "", "family": family}
+
 
 def _answer(record: Dict[str, Any], source: str, confidence: float,
             drop_doi: bool = False) -> Dict[str, Any]:

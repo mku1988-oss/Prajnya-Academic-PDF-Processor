@@ -112,6 +112,7 @@ except ModuleNotFoundError:
 load_dotenv()
 
 import argparse
+import ipaddress
 import logging
 import socket
 
@@ -154,6 +155,8 @@ def main() -> int:
     # pipeline just to print usage text.
     from src.gui import app as studio_app
 
+    if not _is_loopback(args.host):
+        logger.warning(network_warning(args.host, args.port))
     logger.info("Prajnya Studio starting on http://%s:%d", args.host, args.port)
     try:
         studio_app.main(host=args.host, port=args.port, show=not args.no_browser)
@@ -163,6 +166,32 @@ def main() -> int:
 
 
 # --- helpers (after the main function, per CLAUDE.md) -----------------------
+
+def network_warning(host: str, port: int) -> str:
+    """
+    What Studio prints when it is opened to other computers (audit L2).
+
+    Studio has no login. On loopback only this computer can reach it; on any
+    other address, anyone who can reach the address can open every output
+    file (they are served under /run_outputs), start runs, and read or write
+    files wherever Studio can.
+    """
+    return (f"Prajnya Studio is listening on {host}:{port}, which other computers "
+            f"may reach. Studio has NO login: anyone who can reach this address can "
+            f"read every processed document and figure, start runs, and read or "
+            f"write files on this computer. Use it only on a network you trust, or "
+            f"start Studio without --host to keep it on this computer only.")
+
+
+def _is_loopback(host: str) -> bool:
+    """True when only this computer can connect (127.0.0.1, ::1, localhost)."""
+    if host.strip().lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return False    # a host name: it may resolve to a network address
+
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(

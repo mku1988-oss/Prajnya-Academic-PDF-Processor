@@ -43,6 +43,7 @@ from ...utils.figure_label_pass import (
     find_label_lines,
 )
 from ...utils.figure_labels import parse_printed_label
+from ...utils.figure_crop_fit import fit_crops_to_captions
 from .rendering import RENDER_PADDING_PX
 
 #: Extra clip slop in PDF points, so a caption line that merely touches the
@@ -65,6 +66,7 @@ def extract_page_figures(
     path_root: Optional[Path] = None,
     logger: Optional[logging.Logger] = None,
     body_style: Optional[TextStyle] = None,
+    fit_crops: bool = True,
 ) -> List[FigureAsset]:
     """
     Crop and save every figure on this page, tagging each with its caption.
@@ -86,6 +88,9 @@ def extract_page_figures(
         body_style: the document's running-text style
             (`DocumentCache.body_style`), so a caption read from the text
             layer ends where the body text resumes. None: geometry only.
+        fit_crops: fit each crop to the band its printed caption labels
+            (ledger T25, `utils/figure_crop_fit.py`). False only in replays
+            that compare with and without.
 
     Returns:
         One `FigureAsset` per saved figure; [] when the page has none.
@@ -105,8 +110,39 @@ def extract_page_figures(
         path_root=path_root,
         logger=log,
     )
-    return attach_printed_labels(page, page_image, assets, logger=log,
-                                 body_style=body_style)
+    assets = attach_printed_labels(page, page_image, assets, logger=log,
+                                   body_style=body_style)
+    if fit_crops:
+        fit_and_resave_crops(page, page_image, assets, detections, out_dir, logger=log)
+    return assets
+
+
+def fit_and_resave_crops(
+    page: PdfPage,
+    page_image: Image.Image,
+    assets: List[FigureAsset],
+    detections: Sequence[Detection],
+    out_dir: Path,
+    logger: Optional[logging.Logger] = None,
+) -> None:
+    """
+    Fit each crop to its caption's band, and save the image again where it changed.
+
+    For biology researchers: the detector's box can hold the first lines of the
+    figure's own legend, or miss a panel; the printed caption says where the
+    figure really is (`utils/figure_crop_fit.py`). Runs after the label pass,
+    because it needs to know which caption belongs to which crop. Any failure
+    keeps the crops exactly as the detector gave them.
+    """
+    log = logger or logging.getLogger("Figures")
+    try:
+        changed = fit_crops_to_captions(page, page_image, assets, detections, logger=log)
+        for asset, new_box in changed:
+            page_image.crop(new_box).save(out_dir / f"{asset.figure_id}.png", format="PNG")
+            asset.bbox = new_box
+    except Exception as error:                              # pragma: no cover
+        log.warning("Crop fit failed on page %d (%s); crops kept as detected.",
+                    page.number + 1, error)
 
 
 def attach_printed_labels(

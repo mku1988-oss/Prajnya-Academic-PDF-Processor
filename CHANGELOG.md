@@ -6,6 +6,102 @@ it in `document_info.pipeline_version`.
 
 ---
 
+## 6.8.0
+
+Fixes found after 6.7.0 was released, and a reliability pass. The output
+contract goes from 1.3 to 1.5 by adding fields; every existing field keeps its
+meaning.
+
+- **A page with a huge vector figure no longer exhausts memory.** A network
+  graph drawn as half a million strokes made the page check run out of memory
+  (over 40 GB) and the page was written empty. A page with more than 10,000
+  drawn strokes is now treated as one figure without grouping its strokes;
+  every other page is checked exactly as before. Such pages are also faster
+  to check (12.5 s to 0.35 s on the slowest).
+- **A page that cannot be read keeps its text.** Its words come from the PDF's
+  text layer instead of being lost; its figures and tables are missing.
+- **A document that lost pages says so, and is tried again** (contract 1.5).
+  `document_info.status` is `success`, `partial` or `failed`, and
+  `document_info.failed_pages` lists the pages that failed. A partial or
+  failed document is not recorded as processed, so the next run retries it;
+  the batch summary and Prajnya Studio show it. `success` keeps its meaning.
+- **Prajnya Studio no longer hangs on a document whose libraries print many
+  warnings.** The background process's error output is now read while it
+  runs, so it can never fill up and stop the run.
+- **A run stopped while writing never leaves a cut-off output file.** The
+  document JSON, a hand correction, a citation refresh and the batch summary
+  are written whole under a temporary name and then swapped in, so the file
+  from the previous run stays intact until the new one is complete.
+- **Stop works while Prajnya Studio waits on a book question.** It used to do
+  nothing until the question was answered; now it closes the question and
+  ends the batch at once, before any document is processed.
+- **Two PDFs with the same file name no longer overwrite each other.** Outputs
+  are named after the PDF, so `a/paper.pdf` and `b/paper.pdf` in one batch
+  used to write the same files. The first now runs as usual; the second is
+  not run, and the pre-flight table and batch summary say why. Rename it and
+  run again. A file listed twice runs once.
+- **The contract schema requires what each version added.** A file that says
+  it follows contract 1.2 or later must now carry the fields that version
+  introduced (`mentions`; each page's `body`, `furniture`, `outside_body`;
+  `author_names`; `status` and `failed_pages`). Before, only 1.1's
+  `citations` was enforced. Older files stay valid. `--recite`, which
+  stamps a file with the current version, now fills in `status`,
+  `failed_pages` and `author_names` too.
+- **The release now includes its tests and runs them on every push.** The
+  74 test files that need no model, GPU or sample PDFs ship, with a GitHub
+  Actions job (Windows, Python 3.10). The checks that need the models or a
+  sample corpus stay release gates on the maintainer's machine. MANUAL.md
+  says how to run them.
+- **A registry's cut-off author list no longer drops authors.** At the
+  `online` level, a Crossref record that names only the paper's first
+  author(s) is no longer taken over the full byline (found in the release
+  check: one corpus paper lost its second author).
+- **Long reads no longer fill system memory.** The model server kept up to
+  8 GB of earlier requests in RAM (its prompt cache, on by default) and
+  split each model into 4 slots; on a whole book the reading model grew to
+  10 GB. Every model in `config/vlm_profiles/model.ini` now runs with one
+  slot and no prompt cache. Reading a 345-page book now peaks at 7.5 GB for
+  all of Prajnya (was 13.7), with identical output.
+- **The page quality score is labelled as the rough guess it is.** The
+  contract, the manual and Prajnya Studio ("Quality estimate (rough)") now
+  say it comes from simple checks and is not a measured accuracy; nothing
+  acts on it.
+- **Prajnya Studio warns when it is opened to other computers.** Started with
+  `--host` on any address other than this computer's own, it says at
+  start-up that it has no login and that anyone who can reach the address
+  can read every processed document.
+- **Reference lists with stray words in the column gap are read correctly.**
+  A few words of the neighbouring column printed in the gap no longer make
+  the next column look indented, which split some entries in two.
+
+- **Figure crops fit their figure.** A crop no longer carries the first lines
+  of its own legend (Frontiers frames a figure together with its legend), and
+  panels or side labels the layout model missed are brought back from the
+  space the printed caption labels. Logos, header rules, edge tabs and download
+  stamps around the text are left out.
+- **Each author's surname is kept apart** (contract 1.4). At the `online`
+  level, `metadata_final.author_names` lists every author as given names and
+  surname, from Crossref, so a compound surname such as "Rosendahl Huber" or
+  "Garcia Martinez de Artola" is no longer split at its last word.
+- **Author lists at `online` follow the registry.** When Crossref or OpenAlex
+  holds the paper's record, its author list is kept as it is, instead of a
+  merge that could keep a misread name from the title page.
+- **Frontiers reference lists are read.** Frontiers' newer layout prints
+  "Conflict of interest" and "Publisher's note" inside the list's columns and
+  indents each entry's first line; the list is now read in full, so in-text
+  citations are linked on those papers.
+- **Settings are named `PRAJNYA_*`.** The environment settings in `.env`
+  (`PRAJNYA_LLAMA_SERVER`, `PRAJNYA_LEDGER_PATH`, `PRAJNYA_CACHE_PATH`,
+  `PRAJNYA_CITATION_CACHE_PATH`, `PRAJNYA_GUI_STORAGE_SECRET`) replace the
+  old names, which still work; a warning names the one to write instead.
+  The old names are `SARA_*`. <!-- release-rename: keep -->
+- **Citations with initials are linked.** "Gong S et al., 2015" and "Gong Z
+  et al., 2015" (printed when two first authors share a surname and a year)
+  now link to the entry whose first author has those initials; before, they
+  were not linked at all.
+- **Figure legends leave the page `body` the same way on every run** (the
+  longest legend is taken first when two overlap).
+
 ## 6.7.0
 
 **Links to figures and tables, a cleaner page text, and a published benchmark.**

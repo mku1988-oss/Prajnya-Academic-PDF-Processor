@@ -4,12 +4,15 @@
     "document_type": "research_article",
     "processing_time": 150.0,
     "success": true,
+    "status": "success",
+    "failed_pages": [],
     "pipeline_version": "v6.6.0",
-    "contract_version": "1.3"
+    "contract_version": "1.5"
   },
   "metadata_final": {
     "title": "Collagen structure: new tricks from a very old dog",
     "authors": ["Jordi Bella"],
+    "author_names": [{"given": "Jordi", "family": "Bella"}],
     "year": 2016,
     "doi": "10.1042/BJ20151169",
     "journal": "Biochemical Journal",
@@ -93,6 +96,7 @@
     {
       "page_number": 1,
       "content": "Replacing hydroxyproline in this position gives a dramatic decrease in thermal stability [2], as reviewed elsewhere [1,3].",
+      "body": "Replacing hydroxyproline in this position gives a dramatic decrease in thermal stability [2], as reviewed elsewhere [1,3].",
       "quality_score": 1.0,
       "metadata": {
         "processing_method": "pymupdf",
@@ -101,7 +105,9 @@
         "tables": [],
         "headings": [],
         "has_reference_heading": false,
-        "reference_density": 0.0
+        "reference_density": 0.0,
+        "furniture": [],
+        "outside_body": []
       }
     }
   ],

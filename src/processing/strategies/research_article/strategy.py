@@ -21,13 +21,13 @@ profile's `model_type` for cloud, `local_server.enabled` +
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ...citations.level import require_built, resolve_level
 from ...citations.services import online_chain_for, zotero_service_for
 from ...config.loader import ConfigLoader, resolve_reference
+from ...env_settings import env_setting
 from ...ledger.csv_backend import CsvLedgerBackend
 from ...ledger.semantic_ledger import SemanticLedger
 from ...models import ContentPage, DocumentProfile, ExtractedMetadata, ProcessingResult
@@ -174,7 +174,7 @@ class ResearchArticleStrategy:
         # ledger and forgot everything the first one knew.
         # It is only READ here (the runner owns every write), so a ledger
         # that does not exist yet is not created as a side effect.
-        ledger_path = Path(os.getenv("SARA_LEDGER_PATH", DEFAULT_LEDGER_PATH))
+        ledger_path = Path(env_setting("LEDGER_PATH", DEFAULT_LEDGER_PATH))
         self.ledger: Optional[SemanticLedger] = (
             CsvLedgerBackend(file_path=str(ledger_path.resolve()))
             if ledger_path.is_file() else None)

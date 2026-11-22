@@ -39,6 +39,7 @@ from pydantic import BaseModel, Field
 
 from .citations.block import build_citations_block
 from .ledger.semantic_ledger import LedgerRecord, SemanticLedger, generate_hash
+from .utils.atomic_write import write_json_atomically
 
 LOG = logging.getLogger(__name__)
 
@@ -357,6 +358,10 @@ def apply_record_to_metadata(record: LedgerRecord,
     someone has edited says so.
     """
     patched = dict(metadata) if isinstance(metadata, dict) else {}
+    if list(record.authors) != list(patched.get("authors") or []):
+        # The registry's separate surnames (contract 1.4) describe the list
+        # as it was; a corrected list has none until a registry gives them.
+        patched["author_names"] = []
     patched.update({
         "title": record.title,
         "authors": list(record.authors),
@@ -418,8 +423,7 @@ def regenerate_document_json(json_path: Path, record: LedgerRecord,
     _refresh_citations_block(payload, record)
 
     try:
-        with open(json_path, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2, ensure_ascii=False)
+        write_json_atomically(json_path, payload)   # never half a file (D4)
     except Exception as error:
         log.error("Could not write %s: %s", json_path, error)
         return False

@@ -31,7 +31,6 @@ rewrites it on commit, so two writers is a lost-update race.
 from __future__ import annotations
 
 import logging
-import os
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Sequence
@@ -39,9 +38,11 @@ from typing import Any, Callable, Dict, Optional, Sequence
 from .batch import BookDecision, PreflightEntry
 from .citations.level import resolve_level
 from .citations.services import reference_finder_for
+from .env_settings import env_setting
 from .cli_support import already_processed
 from .config.loader import ConfigLoader
 from .document_json import enum_value, write_result
+from .document_status import FAILED, SUCCESS, failed_page_numbers
 from .events import emit
 from .ledger.semantic_ledger import LedgerRecord
 from .models import DocumentProfile
@@ -291,7 +292,7 @@ def open_ledger(log: logging.Logger, create: bool = True,
         create: when False, an absent ledger is reported as None rather than
             created — what `--review` wants, since reviewing a ledger we just
             invented is meaningless.
-        ledger_path: an explicit path, or None for `SARA_LEDGER_PATH` and then
+        ledger_path: an explicit path, or None for `PRAJNYA_LEDGER_PATH` and then
             the default.
 
     Returns:
@@ -301,8 +302,7 @@ def open_ledger(log: logging.Logger, create: bool = True,
     try:
         from .ledger.csv_backend import CsvLedgerBackend
 
-        path = Path(ledger_path or os.getenv("SARA_LEDGER_PATH",
-                                             DEFAULT_LEDGER_PATH))
+        path = Path(ledger_path or env_setting("LEDGER_PATH", DEFAULT_LEDGER_PATH))
         if not create and not path.is_file():
             return None
         return CsvLedgerBackend(file_path=str(path.resolve()))
@@ -456,6 +456,7 @@ def _outcome_from(pdf_path: Path, profile: DocumentProfile, out_path: Path,
     """The finished document as plain data — see `DocumentOutcome`."""
     result = profile.processing_result
     metadata = result.metadata.model_dump() if result and result.metadata else {}
+    pages = list(result.pages) if result and result.pages else []
     return DocumentOutcome(
         path=pdf_path,
         output=out_path,
@@ -463,6 +464,8 @@ def _outcome_from(pdf_path: Path, profile: DocumentProfile, out_path: Path,
         metadata=metadata,
         document_type=profile.document_type,
         errors=list(result.errors) if result and result.errors else [],
+        failed_pages=failed_page_numbers(pages),
+        page_count=len(pages),
     )
 
 
@@ -473,13 +476,19 @@ def _result_for(outcome: DocumentOutcome, ledger,
 
     A failed document gets no ledger record, deliberately: a half-processed
     document must not be marked "already processed" and skipped next run.
+    That includes a document that was written but is not a "success" (audit
+    D1): one whose strategy recorded an error, or that lost pages. Its line
+    says so ("status", "failed_pages") and the next run tries it again.
 
     The bookkeeping is inside the same error isolation as the work. A ledger
     that cannot be written is worth one failed line in the summary, never the
     remaining documents of a batch.
     """
     if outcome.error:
-        return {"error": outcome.error, "elapsed": round(outcome.elapsed, 1)}
+        return {"error": outcome.error, "elapsed": round(outcome.elapsed, 1),
+                "status": FAILED}
+    if outcome.status != SUCCESS:
+        return _unfinished_result(outcome, log)
 
     try:
         record = record_outcome(outcome.path, outcome.metadata,
@@ -492,5 +501,29 @@ def _result_for(outcome: DocumentOutcome, ledger,
 
     return {"elapsed": round(outcome.elapsed, 1),
             "output": str(outcome.output),
+            "status": SUCCESS,
             "review_status": record.review_status,
             "requires_review": record.requires_review}
+
+
+def _unfinished_result(outcome: DocumentOutcome, log: logging.Logger) -> Dict[str, Any]:
+    """
+    The batch line of a document that was written but did not fully succeed.
+
+    No ledger record is written (see `_result_for`), and the log says why, so
+    the retry on the next run is never a surprise. The output file is kept:
+    it is the best reading there is, and its `document_info.status` says it
+    is incomplete.
+    """
+    if outcome.failed_pages:
+        pages = ", ".join(str(number) for number in outcome.failed_pages)
+        reason = f"page(s) {pages} failed"
+    else:
+        reason = "; ".join(outcome.errors) or "no page came out"
+    log.warning("  %s is %s (%s): not recorded in the ledger, so the next run "
+                "tries it again.", outcome.path.name, outcome.status, reason)
+    return {"elapsed": round(outcome.elapsed, 1),
+            "output": str(outcome.output) if outcome.output else None,
+            "status": outcome.status,
+            "failed_pages": list(outcome.failed_pages),
+            "errors": list(outcome.errors)}

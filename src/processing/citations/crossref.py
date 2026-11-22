@@ -80,6 +80,10 @@ def canonical_record(item: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "title": _first(item.get("title")),
         "authors": [n for n in (_person(a) for a in item.get("author") or []) if n],
+        # The same people with the surname kept apart (contract 1.4): a
+        # compound surname ("Rosendahl Huber", "García Martínez de Artola")
+        # cannot be recovered from the joined string by any rule.
+        "author_names": [_name_parts(a) for a in item.get("author") or [] if _person(a)],
         "doi": item.get("DOI"),
         "journal": _first(item.get("container-title")),
         "year": _year(item),
@@ -161,6 +165,13 @@ def _year(item: Dict[str, Any]) -> Optional[int]:
         if parts and isinstance(parts[0], int):
             return parts[0]
     return None
+
+
+def _name_parts(author: Dict[str, Any]) -> Dict[str, str]:
+    """{"given", "family"} of one Crossref author, spelled as `_person` spells them."""
+    person = _person(author)
+    given = (author.get("given") or "").strip()
+    return {"given": given, "family": person[len(given):].strip()}
 
 
 def _person(author: Dict[str, Any]) -> str:

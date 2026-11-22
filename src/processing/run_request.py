@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .document_status import FAILED, document_status
 from .extractors.front_matter import DEFAULT_FRONT_MATTER_PAGES
 from .paths import (
     CONFIG_ROOT,
@@ -231,6 +232,8 @@ class DocumentOutcome:
         errors: non-fatal errors the pipeline recorded and continued past.
         error: the fatal error that stopped this document, or None.
         skipped: why the document was skipped, or None.
+        failed_pages: 1-based numbers of the pages whose reading failed.
+        page_count: how many pages came out (0 when nothing was written).
     """
 
     path: Path
@@ -241,11 +244,26 @@ class DocumentOutcome:
     errors: List[str] = field(default_factory=list)
     error: Optional[str] = None
     skipped: Optional[str] = None
+    failed_pages: List[int] = field(default_factory=list)
+    page_count: int = 0
 
     @property
     def succeeded(self) -> bool:
         """True when the document was processed and written."""
         return self.error is None and self.skipped is None
+
+    @property
+    def status(self) -> str:
+        """
+        "success", "partial" or "failed" (see `document_status`).
+
+        Only a "success" earns a ledger record: a partial or failed document
+        must be tried again next run, not skipped as "already processed".
+        A document that stopped with a fatal `error` is "failed".
+        """
+        if self.error:
+            return FAILED
+        return document_status(self.errors, self.page_count, self.failed_pages)
 
 
 # --- helpers (after the main classes, per CLAUDE.md) ------------------------

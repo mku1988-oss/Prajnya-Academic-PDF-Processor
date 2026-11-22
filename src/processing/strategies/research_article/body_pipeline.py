@@ -290,12 +290,9 @@ class BodyPipeline:
             try:
                 results[page_idx] = self.read_body_page(cache, page_idx)
             except Exception as error:
-                self.logger.error("Body page %d failed: %s", page_idx + 1, error,
-                                  exc_info=True)
-                results[page_idx] = ContentPage(
-                    page_number=page_idx + 1, content="", quality_score=0.0,
-                    metadata={"error": str(error), "processing_method": "glm_failed"},
-                )
+                self.logger.error("Body page %d failed: %s", page_idx + 1,
+                                  _describe(error), exc_info=True)
+                results[page_idx] = self._failed_page(cache, page_idx, error)
             _record_page_time(results[page_idx], time.perf_counter() - page_started)
         self._table_continuation = None
 
@@ -517,6 +514,33 @@ class BodyPipeline:
         log.info("Figure second opinion ENABLED via '%s' — used only on pages "
                  "where the fast detector and the classifier disagree.", model_name)
         return detector, [model_name]
+
+    def _failed_page(self, cache: DocumentCache, page_idx: int,
+                     error: BaseException) -> ContentPage:
+        """
+        A page whose reading raised: its text layer, still marked as failed.
+
+        It used to be written EMPTY (PMC10904388 p4 lost both text columns in
+        every benchmark run, D9). The text layer is free and usually intact,
+        so the words survive; the figures and tables of that page do not.
+        `processing_method` stays "glm_failed", so the document's status is
+        "partial" and it is not recorded as processed (D1).
+        """
+        text = ""
+        try:
+            text = normalize_harvested_text(cache.page(page_idx).text())
+        except Exception as text_error:                    # pragma: no cover
+            self.logger.warning("Page %d: its text layer could not be read "
+                                "either (%s); the page is written empty.",
+                                page_idx + 1, _describe(text_error))
+        if text:
+            self.logger.warning("Page %d: kept its text layer (%d characters); its "
+                                "figures and tables are lost.", page_idx + 1, len(text))
+        return ContentPage(
+            page_number=page_idx + 1, content=text, quality_score=0.0,
+            metadata={"error": _describe(error), "processing_method": "glm_failed",
+                      "fallback": "text_layer" if text else None},
+        )
 
     def _process_with_text_layer(self, page: PdfPage, page_idx: int,
                                  analysis: Dict[str, Any],
@@ -875,3 +899,10 @@ def _record_page_time(page: ContentPage, seconds: float) -> None:
     total minus the per-page times.
     """
     page.metadata["page_time"] = round(seconds, 2)
+
+
+def _describe(error: BaseException) -> str:
+    """An error as "Type: message". A MemoryError has no message at all, and
+    the log once read "Body page 4 failed: " with nothing after it (D9)."""
+    message = str(error)
+    return f"{type(error).__name__}: {message}" if message else type(error).__name__

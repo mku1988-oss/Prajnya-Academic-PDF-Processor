@@ -85,6 +85,11 @@ class ExtractedMetadata(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=500,
                                  description="Document title")
     authors: List[str] = Field(default_factory=list, description="List of author names")
+    author_names: List[Dict[str, str]] = Field(
+        default_factory=list,
+        description="The same authors as {'given', 'family'}, one per name in "
+                    "`authors`, when a registry record gave the surname apart "
+                    "(contract 1.4); [] when unknown")
 
     # Identifiers
     doi: Optional[str] = Field(
@@ -156,7 +161,7 @@ class ContentPage(BaseModel):
     page_number: int = Field(..., ge=1, description="1-based page number")
     content: str = Field(..., description="Extracted text content (markdown)")
     quality_score: Optional[float] = Field(None, ge=0.0, le=1.0,
-                                           description="Quality score (0.0-1.0)")
+                                           description="A rough 0.0-1.0 guess from simple checks; not a measured accuracy (contract rule 20)")
     metadata: Dict = Field(default_factory=dict,
                            description="Page-specific metadata (tables, figures, method…)")
 

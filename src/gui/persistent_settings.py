@@ -51,7 +51,7 @@ class SettingsManager:
         "terminal_font_size": 13,
         # --- S11: the path-and-policy surface, gui_plan.md section 6 -------
         "output_root": "",          # "" = the pipeline's own default (run_outputs/)
-        "ledger_path": "",          # "" = SARA_LEDGER_PATH, then the default CSV
+        "ledger_path": "",          # "" = PRAJNYA_LEDGER_PATH, then the default CSV
         "book_policy": "",          # "" = inherit processing_policy.yaml's "ask"
         "book_chapters": "",        # used only when book_policy == "chapters"
         "book_max_pages": "",       # "" = no ceiling

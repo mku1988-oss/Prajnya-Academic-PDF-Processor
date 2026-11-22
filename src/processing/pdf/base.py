@@ -329,8 +329,16 @@ class PdfPage(Protocol):
         """Embedded raster images."""
         ...
 
-    def drawings(self) -> List[DrawingBlock]:
-        """Vector drawing regions."""
+    def drawings(self, limit: Optional[int] = None) -> List[DrawingBlock]:
+        """
+        Vector drawing regions.
+
+        Args:
+            limit: stop after `limit + 1` drawings. A caller that only needs to
+                know "more than `limit`" then never lists a page that draws a
+                network graph as half a million strokes (D9: PMC10904388 p4,
+                580,957 drawings, 5.5 s to list). None lists them all.
+        """
         ...
 
     def glyph_styles(self) -> List[GlyphStyle]:

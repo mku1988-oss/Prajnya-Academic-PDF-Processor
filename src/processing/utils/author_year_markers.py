@@ -30,6 +30,9 @@ WHAT IS A CITATION
 - An author group may be "A", "A and B", "A & B", "A et al.", or an APA list
   ("A, B, & C"). It may carry several years ("Bella et al., 1994, 1995"). A
   year with no author in the stream (a bare "2014;") is no citation.
+- The first surname may carry its author's initials ("Gong S et al., 2015",
+  "Li X. H. et al., 2022"): Frontiers and others print them when two first
+  authors share a surname and a year.
 
 HOW A CITATION LINKS
 
@@ -37,12 +40,15 @@ HOW A CITATION LINKS
    and year equal the citation's.
 2. A year with a letter ("2001a") keeps only an entry whose printed text
    carries that very year and letter.
-3. With more than one candidate left, the second author ("A and B") narrows
+3. Initials printed after the first surname keep only the entries whose
+   first author has those initials ("Gong S" keeps "Gong, S., He, B., ..."
+   and drops "Gong, Z., ..."); an entry whose initials cannot be read stays.
+4. With more than one candidate left, the second author ("A and B") narrows
    them (the second surname must stand in the entry's author part, the text
    before its year); "et al." keeps entries with three or more authors and a
    single-author citation keeps entries with one author, each only when the
    printed text lets that be told.
-4. Exactly one left: linked (to its `position`). None: "no_candidate".
+5. Exactly one left: linked (to its `position`). None: "no_candidate".
    Letter not printed: "letter". Two or more: "ambiguous".
 
 One marker is made per author group; `numbers` holds the linked positions in
@@ -77,9 +83,12 @@ _PARTICLE = r"(?:" + "|".join(sorted(_PARTICLES)) + r")"
 # A surname with its particles: "van der Flier".
 _SURNAME = r"(?:" + _PARTICLE + r"\s+)*" + _NAME
 _SURNAME_RE = re.compile(_SURNAME)
-# The authors of one citation: the first surname, then nothing, "et al.", or
-# "and B" / "& B" / ", B, & C" (an APA list).
+# Initials after a surname: "S", "XH", "X. H.", "J-P." (at most three letters).
+_INITIALS = r"(?:[A-Z]\.?-?\s?){0,2}[A-Z]\.?"
+# The authors of one citation: the first surname, its initials when printed,
+# then nothing, "et al.", or "and B" / "& B" / ", B, & C" (an APA list).
 _AUTHORS = (r"(?P<first>" + _SURNAME + r")"
+            r"(?:\s+(?P<initials>" + _INITIALS + r")(?=[\s,(]))?"
             r"(?P<rest>\s+et\s+al\.?|(?:\s*,\s*" + _SURNAME + r")*\s*,?\s*(?:and|&)\s+" + _SURNAME + r")?")
 # A year 1800-2099 with an optional lower-case letter, not part of a longer number or word.
 _YEAR = r"(?<!\d)(?:1[89]|20)\d\d[a-z]?(?![A-Za-z0-9])"
@@ -90,6 +99,10 @@ _NOT_NAME_BEFORE = r"(?<![\w'’\-])"
 _PAREN_GROUP_RE = re.compile(_NOT_NAME_BEFORE + _AUTHORS + r"\s*,?\s*(?P<years>" + _YEARS + r")")
 _NARRATIVE_RE = re.compile(_NOT_NAME_BEFORE + _AUTHORS + r"\s*\(\s*(?P<years>" + _YEARS + r")\s*\)")
 _PAREN_RE = re.compile(r"\(([^()]{1,%d})\)" % MAX_PAREN_CHARS)
+
+# The initials an entry prints after its first surname: "Gong, S., He, B." -> "S.",
+# "Li, X. H., ..." -> "X. H.", "Doi M, Nishi Y" -> "M".
+_ENTRY_INITIALS_RE = re.compile(r"\s*" + _SURNAME + r"\s*,?\s*(?P<initials>(?:[A-Z]\.?-?\s?){1,4})(?=[,;.\s]|$)")
 
 # A token that is a run of initials: "J.", "J.A.,", "JA", "J-P.".
 _INITIALS_RE = re.compile(r"^(?:[A-Z]\.?-?){1,3}[,;.]*$")
@@ -135,6 +148,7 @@ class _Group:
     second: Optional[str]
     et_al: bool
     years: List[Tuple[str, int]]       # (year as printed, its position in the stream)
+    initials: Optional[str] = None     # the first author's initials as letters ("XH"), when printed
 
 
 @dataclass
@@ -146,6 +160,7 @@ class _Reference:
     printed: str
     author_part: Optional[str]
     authors: Optional[int] = field(default=None)
+    initials: Optional[str] = None     # the first author's initials as letters ("XH"), when readable
 
 
 def search_author_year_markers(lines: Sequence[Any], reference_list: Optional[ReferenceList],
@@ -243,7 +258,8 @@ def _group_of(match: "re.Match", stream: str) -> _Group:
         second = names[0] if names else None
     years = [(y.group(0), y.start()) for y in
              _YEAR_RE.finditer(stream, match.start("years"), match.end("years"))]
-    return _Group(match.start(), match.end(), match.group("first"), second, et_al, years)
+    return _Group(match.start(), match.end(), match.group("first"), second, et_al, years,
+                  initials=initial_letters(match.group("initials")))
 
 
 def link_group(group: _Group, stream: _Stream, index: Dict[int, List[_Reference]],
@@ -279,6 +295,8 @@ def link_year(group: _Group, year_text: str, index: Dict[int, List[_Reference]],
         if not candidates:
             dropped["letter"] += 1
             return None
+    if group.initials:
+        candidates = [r for r in candidates if _has_initials(r, group.initials)]
     if len(candidates) > 1:
         candidates = narrow_candidates(candidates, group)
     if len(candidates) == 1:
@@ -296,6 +314,23 @@ def narrow_candidates(candidates: List[_Reference], group: _Group) -> List[_Refe
     elif not group.second:
         candidates = [r for r in candidates if r.authors is None or r.authors == 1]
     return candidates
+
+
+def _has_initials(reference: _Reference, initials: str) -> bool:
+    """Whether the entry's first author has the cited initials ("X" fits "XH"; unreadable: yes)."""
+    return reference.initials is None or reference.initials.startswith(initials)
+
+
+def initial_letters(initials: Optional[str]) -> Optional[str]:
+    """ "X. H." -> "XH"; None or no letter -> None."""
+    letters = "".join(c for c in initials or "" if c.isalpha())
+    return letters or None
+
+
+def _entry_initials(printed: str) -> Optional[str]:
+    """The initials an entry prints after its first surname, as letters, or None."""
+    match = _ENTRY_INITIALS_RE.match(printed)
+    return initial_letters(match.group("initials")) if match else None
 
 
 def _names_second_author(reference: _Reference, second: str) -> bool:
@@ -327,7 +362,8 @@ def reference_index(references: Sequence[Mapping[str, Any]]) -> Dict[int, List[_
         author_part = _author_part(printed, year)
         index.setdefault(year, []).append(_Reference(
             position=position, keys=keys, printed=printed, author_part=author_part,
-            authors=count_authors(author_part) if author_part is not None else None))
+            authors=count_authors(author_part) if author_part is not None else None,
+            initials=_entry_initials(printed)))
     return index
 
 

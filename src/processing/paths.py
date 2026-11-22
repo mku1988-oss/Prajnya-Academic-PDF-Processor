@@ -49,7 +49,7 @@ DEFAULT_OUTPUT_ROOT = REPO_ROOT / "run_outputs"
 #: created a SECOND ledger there — so "have I already processed this?" silently
 #: answered no, every document was re-processed, and the review queue split in
 #: two with neither half knowing about the other. Nothing failed; the run just
-#: quietly stopped remembering. `SARA_LEDGER_PATH` and `SARA_CACHE_PATH` still
+#: quietly stopped remembering. `PRAJNYA_LEDGER_PATH` and `PRAJNYA_CACHE_PATH` still
 #: override, which is the supported way to keep a library elsewhere.
 PERSISTENCE_ROOT = REPO_ROOT / "persistence"
 DEFAULT_LEDGER_PATH = str(PERSISTENCE_ROOT / "semantic_ledger.csv")

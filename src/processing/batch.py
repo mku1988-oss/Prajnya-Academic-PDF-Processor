@@ -25,7 +25,6 @@ good results to one bad PDF.
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -34,9 +33,14 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from .models import DocumentProfile, DocumentType
+from .utils.atomic_write import write_json_atomically
+from .utils.figure_extractor import safe_doc_id
 from .policy import BookSettings
 
 LOG = logging.getLogger(__name__)
+
+#: `_name_clash`'s answer for one file named twice (dropped, not an error).
+LISTED_TWICE = "listed twice"
 
 #: A "chapter" longer than this is almost certainly a misclassified book. See
 #: `BookDecision.for_profile` — the guard exists because the book path's
@@ -76,6 +80,8 @@ class PreflightEntry:
     chapter_count: int = 0
     decision: Optional[BookDecision] = None
     error: Optional[str] = None
+    # Not run because another PDF in the batch has the same name (audit D3).
+    held_back: bool = False
 
     @property
     def is_book_like(self) -> bool:
@@ -93,7 +99,7 @@ class PreflightEntry:
 
     def describe(self) -> str:
         """One line for the pre-flight table."""
-        kind = self.document_type.value if self.document_type else "unreadable"
+        kind = _kind_label(self)
         detail = f"{self.page_count}p"
         if self.chapter_count:
             detail += f", {self.chapter_count} chapters"
@@ -123,13 +129,27 @@ def preflight(paths: Sequence[Path], profile_builder: Callable[[Path], DocumentP
 
     Returns:
         One `PreflightEntry` per path, in order. A PDF that cannot be opened
-        gets an entry with `error` set rather than aborting the pass.
+        gets an entry with `error` set rather than aborting the pass. So does
+        a PDF whose name another PDF in the batch already uses (audit D3):
+        both would write the same output files. A file listed twice gets one
+        entry (results are keyed by path, so a second entry would overwrite
+        the first one's result).
     """
     log = logger or LOG
     entries: List[PreflightEntry] = []
+    first_with_name: Dict[str, Path] = {}
 
     for path in paths:
         entry = PreflightEntry(path=path)
+        clash = _name_clash(path, first_with_name)
+        if clash == LISTED_TWICE:
+            log.info("Pre-flight: %s is listed twice; it runs once.", path.name)
+            continue
+        if clash:
+            entry.error, entry.held_back = clash, True
+            log.error("Pre-flight: %s", clash)
+            entries.append(entry)
+            continue
         try:
             profile = profile_builder(path)
             entry.document_type = profile.document_type
@@ -254,23 +274,74 @@ def write_batch_summary(entries: Sequence[PreflightEntry], results: Dict[str, An
         "documents": [_entry_summary(entry, results) for entry in entries],
         "failed": [entry.path.name for entry in entries
                    if results.get(str(entry.path), {}).get("error") or entry.error],
+        # Written, but with pages lost (D1): not in the ledger, retried next run.
+        "partial": [entry.path.name for entry in entries
+                    if results.get(str(entry.path), {}).get("status") == "partial"],
     }
 
     stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
     for name in (f"batch_summary_{stamp}.json", "batch_summary.json"):
-        with open(output_dir / name, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2, ensure_ascii=False)
+        write_json_atomically(output_dir / name, payload)   # never half a file (D4)
 
     return output_dir / "batch_summary.json"
 
 
 # --- helpers (after the main functions, per CLAUDE.md) ----------------------
 
+def output_name_key(path: Path) -> str:
+    """
+    The part of a PDF's path that names its outputs, as the disk compares it.
+
+    The document JSON, the figure and table folders and the worker's job file
+    are all named after the PDF's file name (its stem). The figure folder
+    also replaces unusual characters (`safe_doc_id`), and Windows ignores
+    letter case, so "My paper.pdf" and "my_paper.pdf" in two folders would
+    write the same files. Both steps are applied here.
+    """
+    return safe_doc_id(path.stem).casefold()
+
+
+def _kind_label(entry: PreflightEntry) -> str:
+    """What the pre-flight table and headline call an entry."""
+    if entry.held_back:
+        return "same name"
+    return entry.document_type.value if entry.document_type else "unreadable"
+
+
+def _name_clash(path: Path, first_with_name: Dict[str, Path]) -> Optional[str]:
+    """
+    Why this PDF must not run, or None. Records the first PDF of each name.
+
+    The first PDF with a name is processed as usual; a later one would
+    overwrite its document JSON, figures and tables, so it is held back with
+    a message saying which file it clashes with. It gets no ledger record, so
+    once renamed it runs on the next pass. (Unique output keys are v7.)
+    """
+    key = output_name_key(path)
+    first = first_with_name.get(key)
+    if first is None:
+        first_with_name[key] = path
+        return None
+    if _same_file(first, path):
+        return LISTED_TWICE
+    return (f"{path} has the same output name as {first}, which this batch "
+            f"processes first. Its results would overwrite that PDF's, so it "
+            f"was not processed. Rename one of the two and run again.")
+
+
+def _same_file(first: Path, second: Path) -> bool:
+    """True when two paths point at one file (listed twice, or via a link)."""
+    try:
+        return first.resolve() == second.resolve()
+    except OSError:
+        return False
+
+
 def _type_summary(entries: Sequence[PreflightEntry]) -> str:
     """"3 research_article, 1 book" — the headline of the pre-flight pass."""
     counts: Dict[str, int] = {}
     for entry in entries:
-        key = entry.document_type.value if entry.document_type else "unreadable"
+        key = _kind_label(entry)
         counts[key] = counts.get(key, 0) + 1
     return ", ".join(f"{count} {kind}" for kind, count in sorted(counts.items()))
 
@@ -287,6 +358,8 @@ def _entry_summary(entry: PreflightEntry, results: Dict[str, Any]) -> Dict[str, 
         "processing_time": result.get("elapsed"),
         "output": result.get("output"),
         "error": result.get("error") or entry.error,
+        "status": result.get("status"),
+        "failed_pages": result.get("failed_pages") or [],
     }
     if entry.decision is not None:
         summary["book_decision"] = {

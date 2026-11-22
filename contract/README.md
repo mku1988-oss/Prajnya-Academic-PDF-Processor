@@ -7,7 +7,7 @@ This folder says exactly what they may rely on.
 - **`prajnya_document.schema.json`** is the promise, as a JSON Schema
   (draft 2020-12). It is checked by `tests/test_output_contract.py` against
   the writer's output and against every document in `run_outputs/`.
-- **Contract version: 1.3.** Every file written from v6.4.0 on says its
+- **Contract version: 1.5.** Every file written from v6.4.0 on says its
   version in `document_info.contract_version`. A file without that key was
   written by 6.3.0 or earlier and follows contract 1.0 in every respect.
 - **`examples/`** holds two small hand-written documents that follow the
@@ -22,8 +22,10 @@ This folder says exactly what they may rely on.
 |---|---|---|
 | 1.0 | v6.4.0 | the contract is written down |
 | 1.1 | v6.6.0 | the top-level `citations` block: how to cite the document, at which level that was established, and (level `online`) its reference list and linked in-text marks. Additive: a 1.0 reader is unaffected. |
-| 1.2 | next release | the top-level `mentions` block: in-text "Fig. 3B" / "Table 2" linked to the figure and table objects, at every level. Additive. |
-| 1.3 | next release | `pages[].body` (the page's running text), `pages[].metadata.furniture` (running headers, footers and page numbers, labelled) and `pages[].metadata.outside_body` (placeholders, tables, legends and the reference list, marked). Additive. |
+| 1.2 | v6.7.0 | the top-level `mentions` block: in-text "Fig. 3B" / "Table 2" linked to the figure and table objects, at every level. Additive. |
+| 1.3 | v6.7.0 | `pages[].body` (the page's running text), `pages[].metadata.furniture` (running headers, footers and page numbers, labelled) and `pages[].metadata.outside_body` (placeholders, tables, legends and the reference list, marked). Additive. |
+| 1.4 | v6.8.0 | `metadata_final.author_names`: each author as `{given, family}`, in the order of `authors`, when a registry record gave the surname apart (Crossref at level `online`); `[]` otherwise. A compound surname ("Rosendahl Huber", "García Martínez de Artola") cannot be told from the joined string by any rule. Additive. |
+| 1.5 | v6.8.0 | `document_info.status` (`success`, `partial`, `failed`) and `document_info.failed_pages`: whether every page was read. Before 1.5 a page whose reading failed was written empty and the file still said `success: true`. Additive; `success` keeps its meaning. |
 
 Anything the schema does not name is internal and may change in any release:
 for example `pages[].metadata.analysis`, `coverage`, and the rest of the
@@ -40,6 +42,14 @@ Readers must ignore keys they do not know. A new route or page type is listed
 as MAJOR on purpose: a reader that maps routes to behaviour would otherwise
 meet the new value silently. The tests refuse to let the code emit a value the
 schema does not list.
+
+A file is held to what its own `contract_version` promises: from 1.1 it
+must carry `citations`, from 1.2 `mentions`, from 1.3 each page's `body`,
+`furniture` and `outside_body`, from 1.4 `metadata_final.author_names`, from
+1.5 `document_info.status` and `failed_pages`. An older file, or one with no
+version stamp, is not held to the later rules. A new key added in a MINOR
+version goes into the schema's `allOf` list the same way, so a file that
+claims the new version cannot leave it out.
 
 When the contract changes, change the schema, `CONTRACT_VERSION` in
 `src/processing/document_json.py`, and this file together. The test that
@@ -117,6 +127,25 @@ compares the first two fails if you forget.
     sentence by a model read, or a reference list with no "References"
     heading in the text, stays in `body`; footnotes, affiliations,
     acknowledgements and other back matter are not taken out.
+18. **Use `author_names` for surnames when it is not empty** (from contract
+    1.4). `authors` holds each name as one string ("Sietske K. Rosendahl
+    Huber"), and no rule can find where a compound surname begins.
+    `author_names[i]` is the same person as `authors[i]`, with `family`
+    exactly as it ends that string. It is filled only from a registry record
+    that keeps the surname apart (Crossref, at level `online`); otherwise it
+    is `[]`, and splitting `authors` is a guess.
+19. **Check `status`, not only `success`** (from contract 1.5). A document
+    can say `success: true` and still have lost pages: `success` only means
+    the strategy raised no error. `status` is `"partial"` when some pages
+    failed; `failed_pages` lists them. A failed page keeps its text layer
+    when it has one, but its figures and tables are missing, so a reader
+    building an index should flag or skip those pages.
+20. **`quality_score` is a rough guess, not a measured accuracy.** On a
+    model-read page it combines text length, Markdown structure, odd
+    characters and whether the expected fields came back; some routes set a
+    fixed value (0.95 for a text-layer page, 0.0 for a failed one). Nothing
+    in Prajnya acts on it. Do not filter or rank pages by it: use
+    `processing_method` and `status` to tell a failed read from a good one.
 
 ## Checking a file yourself
 

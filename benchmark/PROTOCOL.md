@@ -311,6 +311,25 @@ How §7 is carried out, settled while writing the corpus script:
    read from the PDF (page 2: share of text lines starting right of the page
    centre ≥ 0.25 → two-column).
 
+### A10 (2026-11-22) ⚠️ made AFTER runs 2 and 3 had been seen: Prajnya's separate surnames read when present
+
+**What changed in the tool.** Prajnya's output contract 1.4 adds
+`metadata_final.author_names`: each author as `{given, family}`, taken from a
+Crossref record at level `online`. Before it, a compound surname could not be
+recovered from the joined string by any rule (A9's particle rule still cuts
+"Sietske K. Rosendahl Huber" to "Huber", "Diego García Martínez de Artola" to
+"de Artola"). Found on the 50 non-scored papers: 6 of the 7 author lists
+still wrong at `online` after the registry-list fix were compound surnames.
+
+**What changes in the harness.** `adapters/prajnya.py` reads
+`author_names` when it is present and one-to-one with `authors`
+(`registry_names`), and falls back to A9's `split_name` otherwise. The other
+tools' adapters already read their own surname fields.
+
+**Effect on published results: none.** Runs 2 and 3 were written before
+contract 1.4, carry no `author_names`, and score exactly as before. The
+change matters only for runs made with a Prajnya that writes the field.
+
 ### A9 (2026-11-21) ⚠️ made AFTER run 2's scores had been seen: Prajnya's surnames split wrongly by the adapter
 
 **What was wrong (harness, not tool).** Prajnya writes each author as one
