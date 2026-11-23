@@ -37,6 +37,10 @@ _DASHES = "–—‒-−"
 #: How many letters and digits before a marker must agree with its context.
 CONTEXT_CHARS = 12
 
+# A page the vision model read writes a raised marker as superscript
+# characters ("years.¹⁻³"); they are compared as the plain ones (ledger T31).
+_PLAIN_SUPERSCRIPTS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺", "0123456789-+")
+
 #: The marker kind that needs a check that no digit touches its text.
 KIND_SUPERSCRIPT = "superscript"
 
@@ -215,6 +219,7 @@ def _offset_of(marker: Mapping[str, Any], page_contents: Mapping[int, str]) -> O
     text = marker.get("text")
     if not isinstance(content, str) or not isinstance(text, str) or not text:
         return None
+    content = content.translate(_PLAIN_SUPERSCRIPTS)    # one character for one: offsets hold
     wanted = _folded(marker.get("context_before") or "")[-CONTEXT_CHARS:]
     agreeing = [i for i in _candidates(content, text, marker.get("kind"))
                 if _folded(content[:i]).endswith(wanted)]

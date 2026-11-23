@@ -14,8 +14,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .common import (collapse_figures, empty_document, figure_entry, html_to_text,
-                     table_entry)
+from .common import (collapse_figures, crop, empty_document, figure_entry,
+                     formulas_of_pieces, html_to_text, math_pieces, table_entry)
 
 
 def convert(content_list_path: Path, paper_id: str) -> dict:
@@ -27,13 +27,16 @@ def convert(content_list_path: Path, paper_id: str) -> dict:
     for i, block in enumerate(blocks):
         if block.get("type") in ("image", "chart"):
             caption = join(block.get("image_caption") or block.get("chart_caption"))
-            entry = figure_entry(f"b{i}", caption)
+            # A11: content-list boxes are on a 0-1000 scale of the page.
+            box = [crop(block.get("page_idx", 0), [v / 1000 for v in block["bbox"]], "fraction")]                 if block.get("bbox") else None
+            entry = figure_entry(f"b{i}", caption, crops=box)
             if entry is None:
                 unlabelled.append(caption)
             else:
                 figures.append(entry)
     document["figures"] = collapse_figures(figures)
     document["unlabelled_figure_objects"] = unlabelled
+    document["formulas"] = formulas_of_pieces(formula_pieces(blocks))     # A11
     document["tables"] = [table_entry(f"b{i}", join(b.get("table_caption")),
                                       b.get("table_body") or None)
                           for i, b in enumerate(blocks) if b.get("type") == "table"]
@@ -58,6 +61,22 @@ def join(value) -> str:
     if isinstance(value, str):
         return html_to_text(value)
     return " ".join(html_to_text(v) for v in value)
+
+
+def formula_pieces(blocks: list[dict]) -> list[tuple[str, str]]:
+    """Reading order as (kind, text) pieces: equation blocks are display
+    formulas; inline $...$ is split out of the running text (A11)."""
+    pieces = []
+    for block in blocks:
+        kind = block.get("type")
+        if kind == "equation":
+            pieces.append(("display", (block.get("text") or "").strip().strip("$").strip()))
+        elif kind == "text" and not int(block.get("text_level") or 0):
+            pieces.extend(math_pieces(block.get("text") or ""))
+        elif kind == "list" and block.get("sub_type") != "ref_text":
+            for item in block.get("list_items") or []:
+                pieces.extend(math_pieces(item))
+    return pieces
 
 
 def body_of(blocks: list[dict]) -> list[str]:

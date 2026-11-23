@@ -311,6 +311,154 @@ How §7 is carried out, settled while writing the corpus script:
    read from the PDF (page 2: share of text lines starting right of the page
    centre ≥ 0.25 → two-column).
 
+### A12 (2026-11-23, 20:10) ⚠️ made AFTER the A11 round's scores had been seen: Docling's formula reader
+
+**What happened.** A11 added formulas as a measure, but Docling ran with
+the run-2 settings (default `DocumentConverter`), in which the formula
+reader is OFF (`--no-enrich-formula` is the default). Its formula items
+therefore carry no text, and it scored 0.000 on display and inline
+formulas. That measures a setting, not what Docling can do: Marker and
+MinerU read formulas by default, Docling needs one switch. The researcher
+asked for Docling to be run with formulas on.
+
+**What changes.** Docling is run a second time on the same 50 papers with
+`--enrich-formula`, everything else unchanged, as its own column
+**`docling_formula`**. The default run stays as recorded (`docling`), so
+both are reported; the formula scores, the time and every other measure
+of `docling_formula` are reported with this amendment named. No other
+tool, key, measure or threshold changes.
+
+No candidate of this round has been listed, and no tool has run on any. The
+only papers looked at are the 235 probed for their format (below), which
+are excluded.
+
+**Why.** v6.9 changes Prajnya in ways run 2 cannot show (figures split and
+labelled, citation fixes, contract 1.6), and the researcher asked for
+physics and chemistry papers and for figure crops and formulas to be
+scored. Run 2 stays frozen as the blind result of its day; this round is a
+new, separate blind set, never pooled with runs 1-3.
+
+**1. The set.** 40 scored papers, **20 biology (5 biochemistry, 5
+biophysics, 5 developmental biology, 5 computational biology), 10 physics,
+10 chemistry**, plus **10 pilots** drawn at random from the same eligible
+pool (development only; never published as results). Research articles
+only (`article-type="research-article"`), CC BY only (the bucket's
+`license_code` exactly `CC BY`), published 2018-2025, not retracted, with a
+JATS `body`.
+
+**2. Journals and quotas** (researcher, 2026-11-23):
+
+| field | journals (papers) |
+|---|---|
+| biochemistry 5 | PNAS 2, Nature Communications 2, Nature 1 |
+| biophysics 5 | Science Advances 2, Nature Communications 2, Scientific Reports 1 |
+| developmental biology 5 | PNAS 2, Nature Communications 1, Scientific Reports 1, Nature 1 |
+| computational biology 5 | PLOS Computational Biology 5 |
+| physics 10 | PNAS 3, Science Advances 3, Nature Communications 2, Scientific Reports 2 |
+| chemistry 10 | Frontiers in Chemistry 3, Nature Communications 2, Scientific Reports 2, PNAS 2, Science Advances 1 |
+
+Where a journal runs short of eligible papers, its place goes to the next
+journal of the same row, in table order; the shortfall is reported.
+
+**3. A paper's field comes from the publisher's own labels**, never from
+any tool's output:
+
+- **PNAS**, `subj-group[@subj-group-type="heading"]`: "Biological Sciences"
+  + "Biochemistry" -> biochemistry; "Biological Sciences" + "Developmental
+  Biology" -> developmental biology; "Physical Sciences" + "Chemistry" ->
+  chemistry; "Physical Sciences" + "Physics" or "Applied Physical
+  Sciences" -> physics. Anything else, including the combined "Biophysics
+  and Computational Biology", is not eligible.
+- **Science Advances**, `heading` and `field` groups: field "Biophysics" ->
+  biophysics; heading "Physical and Materials Sciences" with a field naming
+  physics ("Physics", "Condensed Matter Physics", "Applied Physics") ->
+  physics, naming chemistry ("Chemistry", "Chemical Physics" counts as
+  both and is not eligible) -> chemistry.
+- **Frontiers in Chemistry**: chemistry.
+- **PLOS Computational Biology**: computational biology (by journal; PNAS
+  prints one label for biophysics and computational biology together).
+- **Nature, Nature Communications, Scientific Reports** print no field
+  label; their JATS keywords are terms of Springer Nature's subject
+  taxonomy (SciGraph subjects 2017-02-15, CC BY 4.0,
+  `corpus_tools/subject_tree.py`). Each keyword is followed up the tree to
+  the branches Biochemistry, Biophysics, Developmental biology,
+  Computational biology and bioinformatics, Physics, Chemistry; a keyword
+  reaching a biology sub-field counts for it and not for its parent
+  (biochemistry before chemistry, biophysics before physics). A paper is
+  eligible only when its keywords reach exactly one of the six fields.
+  Most Nature papers in PMC carry no keywords and so cannot be placed
+  (2 of 10 placed in a probe; recorded, not corrected).
+- A paper whose labels name two of the six fields is not eligible.
+
+Measured before this amendment (labels and keywords only, never text; all
+probed papers excluded below): `corpus/HEADING_SURVEY.json` (200 PNAS and
+Science Advances papers), `corpus/PROBED.json` (235 distinct papers in all).
+
+**4. Exclusions:** every DOI in any earlier manifest (both draws, pilots
+included), in any `eval/` key, in `contract/examples/`, in Prajnya's
+ledger and `run_outputs/`, and every paper in `corpus/PROBED.json`.
+
+**5. Draw.** Candidates per journal and year from E-utilities as A1; each
+(field, journal) candidate list is shuffled once with seed **`20261123`**;
+eligible papers are taken in that order to fill the quotas; then the 10
+pilots are the next eligible papers, taken in turn across the rows. The
+manifest (PMCID, DOI, journal, field, licence, pages) is committed before
+any tool runs.
+
+**6. Two new scored measures** (§9 said neither was scored):
+
+- **Figure crops.** The bucket holds each figure's publisher image (jpg;
+  webp for Scientific Reports). Each key figure's true box on its page is
+  found by matching the publisher image against the rendered page
+  (multi-scale template matching with OpenCV, the same for every tool); a
+  tool's crop scores its overlap with that box (IoU), "crop right" = IoU
+  >= 0.8. The locator is checked by eye on the 10 pilots before any tool is
+  scored; the match-score threshold below which a figure counts as "not
+  located" is fixed on the pilots, and unlocated figures are left out and
+  counted.
+- **Formulas, display and inline** (researcher, 2026-11-23). The key is the
+  JATS MathML (`mml:math`) of each `disp-formula` and `inline-formula`. A
+  tool's formula is matched to the key's by position in the body text; both
+  are reduced to a token sequence (identifiers, numbers, operators), a tool
+  writing LaTeX being converted with latex2mathml first; the score is the
+  token-sequence similarity. Display and inline formulas are reported
+  separately, per paper with at least one of each.
+
+**7. Tools.** Every tool of run 2, with the settings in `tools.lock.md`
+(researcher, 2026-11-23), each run ONCE on the 50 papers. Prajnya frozen at
+the merged v6.9 commit, tagged before the run, at `local` and `online`;
+every output carries `document_info.provenance` (contract 1.6), which the
+run log records too.
+
+**8. Determinism (replaces the every-round rule of §6.8; researcher,
+2026-11-23).**
+
+1. A full determinism run (every tool, the whole scored set, twice) at
+   every MAJOR version of Prajnya (v7, v8, ...).
+2. Between major versions, Prajnya's determinism is checked on the
+   pre-release corpus: the first run is the full 9-PDF corpus run made for
+   the release; the second run repeats only its 8 research articles (not
+   the book), same code, llama-server restarted between; the 8 articles'
+   `local` outputs are compared (the `online` re-cite depends on Crossref
+   and OpenAlex answers, which can change). Required whenever Prajnya's
+   inference stack changed since the last determinism measurement (model
+   file, quantisation, llama.cpp build, llama-server flags, ONNX Runtime or
+   pypdfium2 version; compared through `document_info.provenance`), and
+   reported with the release either way.
+3. Other tools are re-checked only when their pinned version changes.
+
+This round no benchmark paper is run twice. The llama-server flags changed
+after run 3 (v6.8: no prompt cache, no RAM cache, one slot), so the v6.9
+pre-release corpus is run twice under rule 2 and its result is reported
+with this round.
+
+**9. Built before the draw** (no candidate is read): the `--a11` mode of
+`corpus_tools/build_manifest.py` (journals, field rules, exclusions, seed);
+in `ground_truth/`, each figure's image file name kept with its label and
+each formula's MathML kept in the common format; in `harness/`, the figure
+locator and crop IoU and the formula tokeniser and score, with unit tests
+on synthetic pages and formulas.
+
 ### A10 (2026-11-22) ⚠️ made AFTER runs 2 and 3 had been seen: Prajnya's separate surnames read when present
 
 **What changed in the tool.** Prajnya's output contract 1.4 adds

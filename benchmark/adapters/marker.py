@@ -13,8 +13,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .common import (collapse_figures, empty_document, figure_entry, html_to_text,
-                     table_entry)
+from .common import (collapse_figures, crop, empty_document, figure_entry,
+                     formulas_of_pieces, html_to_text, math_pieces, table_entry)
 
 BODY_TYPES = {"Text", "TextInlineMath", "ListItem"}
 FIGURE_TYPES = {"Figure", "Picture"}
@@ -32,6 +32,10 @@ def convert(json_path: Path, paper_id: str) -> dict:
     figures, unlabelled = figures_of(data)
     document["figures"] = collapse_figures(figures)
     document["unlabelled_figure_objects"] = unlabelled
+    # A11: Equation blocks hold <math display="block">, running text inline <math>.
+    document["formulas"] = formulas_of_pieces(
+        [piece for b in blocks if b.get("block_type") in BODY_TYPES | {"Equation"}
+         for piece in math_pieces(b.get("html") or "")])
     document["tables"] = tables_of(data)
     return document
 
@@ -65,10 +69,15 @@ def figures_of(data: dict) -> tuple[list[dict], int]:
     group is one figure without a caption (so it carries no label)."""
     figures, unlabelled = [], []
     grouped_ids = set()
+    for page_index, page in enumerate(data.get("children") or []):
+        for block in all_blocks(page):
+            if block.get("block_type") in GROUP_TYPES:
+                block["_page_index"] = page_index
     for block in all_blocks(data):
         if block.get("block_type") in GROUP_TYPES:
             grouped_ids.update(c.get("id") for c in block.get("children") or [])
-            entry = figure_entry(block.get("id"), captions_in(block))
+            entry = figure_entry(block.get("id"), captions_in(block),
+                                 crops=figure_crops(block))
             if entry is None:
                 unlabelled.append(captions_in(block))
             else:
@@ -77,6 +86,15 @@ def figures_of(data: dict) -> tuple[list[dict], int]:
         if block.get("block_type") in FIGURE_TYPES and block.get("id") not in grouped_ids:
             unlabelled.append("")
     return figures, unlabelled
+
+
+def figure_crops(group: dict) -> list | None:
+    """A11: the boxes (PDF points, origin top-left) of the group's figure
+    blocks; Marker's bbox is in points of its page."""
+    boxes = [crop(group["_page_index"], child["bbox"])
+             for child in group.get("children") or []
+             if child.get("block_type") in FIGURE_TYPES and child.get("bbox")]
+    return boxes or None
 
 
 def tables_of(data: dict) -> list[dict]:

@@ -24,8 +24,8 @@ import json
 import re
 from pathlib import Path
 
-from .common import (clean_doi, collapse_figures, empty_document, figure_entry,
-                     table_entry, year_of)
+from .common import (clean_doi, collapse_figures, crop, empty_document, figure_entry,
+                     formulas_of_pieces, math_pieces, table_entry, year_of)
 
 
 def convert(json_path: Path, paper_id: str, track: str = "offline") -> dict:
@@ -40,6 +40,9 @@ def convert(json_path: Path, paper_id: str, track: str = "offline") -> dict:
     figures, unlabelled = figures_of(pages)
     document["figures"] = collapse_figures(figures)
     document["unlabelled_figure_objects"] = unlabelled
+    # A11: formulas as written in the page text ($$..$$ display, $..$ inline).
+    document["formulas"] = formulas_of_pieces(
+        [piece for text in document["body_paragraphs"] for piece in math_pieces(text)])
     document["tables"] = [table_entry(t.get("table_id"), t.get("caption") or "",
                                       t.get("grid"))
                           for p in pages for t in (p.get("metadata") or {}).get("tables") or []]
@@ -141,20 +144,39 @@ def blank(text: str, pattern: str, flags: int = 0, count: int = 0) -> str:
 
 def figures_of(pages: list[dict]) -> tuple[list[dict], int]:
     """One object per label group (crops sharing a label_key count once)."""
-    figures, seen_groups, unlabelled = [], set(), []
-    for page in pages:
+    figures, groups, unlabelled = [], {}, []
+    for index, page in enumerate(pages):
         for figure in (page.get("metadata") or {}).get("figures") or []:
             key = figure.get("label_key")
-            if key and key in seen_groups:
+            box = crop_of(index, figure.get("bbox"))
+            if key and key in groups:                     # another panel of a figure seen
+                groups[key]["crops"] = (groups[key]["crops"] or []) + box
                 continue
             entry = figure_entry(figure.get("figure_id"), figure.get("caption") or "",
-                                 label_source=figure.get("printed_label"))
+                                 label_source=figure.get("printed_label"), crops=box or None)
             if entry is None:
                 unlabelled.append(figure.get("caption") or "")
                 continue
-            seen_groups.add(key)
+            groups[key] = entry
             figures.append(entry)
     return figures, unlabelled
+
+
+#: Contract rule 2: a figure `bbox` is in pixels of the rendered page image.
+#: Prajnya renders that image at its extraction resolution (300 dpi, the
+#: `target_dpi` of its extraction profile) with a 25 px white border
+#: (RENDER_PADDING_PX); the contract does not record either, so they are
+#: stated here and checked against the saved crops (A11).
+RENDER_DPI = 300
+RENDER_PADDING_PX = 25
+
+
+def crop_of(page_index: int, bbox) -> list:
+    """A Prajnya figure bbox (rendered-page pixels) -> one crop in PDF points."""
+    if not bbox or len(bbox) != 4:
+        return []
+    points = [(v - RENDER_PADDING_PX) * 72.0 / RENDER_DPI for v in bbox]
+    return [crop(page_index, points)]
 
 
 def references_of(references: list[dict]) -> list[dict]:

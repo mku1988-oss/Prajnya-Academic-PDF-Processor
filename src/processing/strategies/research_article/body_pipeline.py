@@ -54,6 +54,7 @@ from ...utils.caption_overleaf import (
 from ...utils.figure_label_pass import build_text_lines, find_label_lines, label_words
 from ...utils.reference_pass import reference_signals
 from ...utils.heading_pass import heading_candidates_for_page
+from ...utils.display_formulas import formula_boxes, with_display_formulas
 from ...utils.content_drop_check import (
     CoverageResult,
     check_page_for_content_drop,
@@ -75,7 +76,7 @@ from ...utils.orphan_figures import RESCUE_THRESHOLD, rescue_orphan_figures
 from ...utils.table_continuation import ContinuationTracker
 from .tables import append_table_anchors, extract_page_tables, write_table_manifest
 from .provider_factory import ProviderFactory
-from .rendering import DocumentCache
+from .rendering import RENDER_PADDING_PX, DocumentCache
 
 #: Default location of the CPU layout model (see models/README.md).
 #: The CPU layout detector's weights, anchored to the repository.
@@ -114,6 +115,7 @@ class BodyPipeline:
         logger: Optional[logging.Logger] = None,
         table_crop_max_tokens: Optional[int] = None,
         rescue_orphan_figures: bool = True,
+        table_formula_prompt: Optional[str] = None,
     ) -> None:
         self.extraction_provider = extraction_provider
         # Output cap for table-crop reads; None keeps the model's own limit.
@@ -127,6 +129,9 @@ class BodyPipeline:
         self.extraction_dpi = extraction_dpi
         self.coverage_threshold = coverage_threshold
         self.table_crop_prompt = table_crop_prompt
+        # The second read for a table whose cells are equations
+        # (utils/table_formulas.py); None turns it off.
+        self.table_formula_prompt = table_formula_prompt
         self.caption_read_prompt = caption_read_prompt
         self.figures_base_dir = figures_base_dir
         self.figures_path_root = figures_path_root
@@ -202,6 +207,10 @@ class BodyPipeline:
         table_task = resolve_reference("@task_registry.table_desc", strategy_config)
         table_crop_prompt = fixed_prompts.get(table_task) or fixed_prompts.get(raw_ocr_task)
         caption_read_prompt = fixed_prompts.get(raw_ocr_task)
+        # Equation tables: the model's formula prompt, if the strategy names
+        # the task and the model has a prompt for it. Otherwise no second read.
+        formula_task = strategy_config.get("task_registry", {}).get("formula")
+        table_formula_prompt = fixed_prompts.get(formula_task) if formula_task else None
 
         detector, extra_resident = cls._build_layout_detector(
             strategy_config, factory, raw_ocr_task, onnx_model_path, log)
@@ -248,6 +257,7 @@ class BodyPipeline:
             logger=log,
             table_crop_max_tokens=table_crop_max_tokens,
             rescue_orphan_figures=rescue_orphan_figures,
+            table_formula_prompt=table_formula_prompt,
         )
         log.info(
             "GLM two-phase offline path ENABLED: extraction=%s, layout=%s, "
@@ -336,7 +346,7 @@ class BodyPipeline:
         if page_type is not None and page_type == PageType.TEXT_ONLY and hidden is None:
             self.logger.info("Page %d: pure text -> text layer (T1)", page_idx + 1)
             return self._process_with_text_layer(page, page_idx, analysis,
-                                                 page_type)
+                                                 page_type, cache=cache)
 
         if hidden is not None:
             self.logger.info(
@@ -384,6 +394,7 @@ class BodyPipeline:
             page_idx, recovered=repair_meta.get("recovered_tables"),
             path_root=self.figures_path_root, logger=self.logger,
             read_table_crop=self._read_table_crop,
+            read_formula_crop=self._read_formula_crop if self.table_formula_prompt else None,
             continuation=self._table_continuation)
         if tables:
             final_text = append_table_anchors(final_text, tables)
@@ -544,7 +555,8 @@ class BodyPipeline:
 
     def _process_with_text_layer(self, page: PdfPage, page_idx: int,
                                  analysis: Dict[str, Any],
-                                 page_type: Optional[PageType] = None) -> ContentPage:
+                                 page_type: Optional[PageType] = None,
+                                 cache: Optional[DocumentCache] = None) -> ContentPage:
         """
         Pure-text page: the text layer is authoritative and free (T1).
 
@@ -559,19 +571,70 @@ class BodyPipeline:
            decision and then discarded on this path only, so 60% of pages could
            not say how they were produced. Retrieval quality differs by route,
            so anything reading this output needs to be able to tell.
+        3. (T35) Display equations the layout model finds are read from their
+           crop and put in as `$$LaTeX$$`; see `utils/display_formulas.py`.
         """
+        text, formulas = self._text_with_display_formulas(cache, page, page_idx)
+        metadata = {
+            "processing_method": "pymupdf",
+            "page_type": page_type.value if page_type is not None else None,
+            "analysis": analysis,
+            "headings": heading_candidates_for_page(page, logger=self.logger),
+            **reference_signals(normalize_harvested_text(text)),
+        }
+        if formulas:
+            metadata["display_formulas"] = formulas
         return ContentPage(
             page_number=page_idx + 1,
-            content=normalize_harvested_text(page.text()),
+            content=normalize_harvested_text(text),
             quality_score=0.95,
-            metadata={
-                "processing_method": "pymupdf",
-                "page_type": page_type.value if page_type is not None else None,
-                "analysis": analysis,
-                "headings": heading_candidates_for_page(page, logger=self.logger),
-                **reference_signals(normalize_harvested_text(page.text())),
-            },
+            metadata=metadata,
         )
+
+    def _text_with_display_formulas(self, cache: Optional[DocumentCache], page: PdfPage,
+                                    page_idx: int) -> Tuple[str, List[dict]]:
+        """
+        The text layer, with each display equation the layout model finds
+        replaced by its formula read (T35). Off, giving the plain text layer,
+        when there is no document cache, no formula prompt, or a detector
+        that does not label equations on the CPU.
+        """
+        text = page.text()
+        detector = self.layout_detector
+        if (cache is None or not self.table_formula_prompt or detector is None
+                or not getattr(detector, "supports_formulas", False)):
+            return text, []
+        try:
+            boxes = formula_boxes(page, detector)
+        except Exception as error:                          # pragma: no cover
+            self.logger.warning("p%d: display-formula check failed (%s); text layer kept.",
+                                page_idx + 1, _describe(error))
+            return text, []
+        if not boxes:
+            return text, []
+        page_image = cache.extraction_image(page_idx, self.extraction_dpi)
+        new_text, records = with_display_formulas(
+            text, page, boxes,
+            lambda box: self._read_display_formula(page, page_image, box, page_idx))
+        self.logger.info("Page %d: %d display formula(s) found, %d read from their crop (T35)",
+                         page_idx + 1, len(boxes),
+                         sum(r["status"] == "read" for r in records))
+        return new_text, records
+
+    def _read_display_formula(self, page: PdfPage, page_image: Image.Image,
+                              box, page_idx: int) -> Optional[str]:
+        """Read one display equation (box in PDF points) from the extraction render,
+        which is drawn at `extraction_dpi` with RENDER_PADDING_PX of white around it."""
+        width_pt, _ = page.size
+        scale = (page_image.width - 2 * RENDER_PADDING_PX) / width_pt
+        crop_box = tuple(int(round(v * scale + RENDER_PADDING_PX))
+                         for v in (box.x0, box.y0, box.x1, box.y1))
+        try:
+            return self._read_formula_crop(page_image.crop(crop_box))
+        except Exception as error:
+            self.logger.warning("p%d: a display-formula read failed (%s); its text kept.",
+                                page_idx + 1, _describe(error))
+            return None
 
     def _detections_the_filter_hid(
         self, cache: DocumentCache, page_idx: int, analysis: Dict[str, Any],
@@ -877,6 +940,11 @@ class BodyPipeline:
         """Re-read one cropped table with the extraction model."""
         return self.extraction_provider.read_crop(
             crop_image, self.table_crop_prompt, max_tokens=self.table_crop_max_tokens)
+
+    def _read_formula_crop(self, crop_image: Image.Image) -> str:
+        """Read one cropped equation table with the model's formula prompt."""
+        return self.extraction_provider.read_crop(
+            crop_image, self.table_formula_prompt, max_tokens=self.table_crop_max_tokens)
 
     def _read_caption_crop(self, crop_image: Image.Image) -> str:
         """Read a caption crop (scanned pages only) with the extraction model."""

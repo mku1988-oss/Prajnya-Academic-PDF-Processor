@@ -179,6 +179,12 @@ class LabelAssignment:
             than 1 means these crops are PANELS OF ONE PRINTED FIGURE.
         distance: gap in page units between the crop and its caption line,
             kept so a document-level pass can resolve competing claims.
+        bare_tag: True when the line paired with the crop is a BARE TAG, a
+            line holding only the label ("Fig. 4") printed right under its
+            figure, with the legend set further down (ledger T27). The
+            strongest evidence of which figure a crop is.
+        beside: True when the caption was found BESIDE the crop, in a legend
+            column level with its top (ledger T28, `_side_caption`).
     """
 
     printed: Optional[str]
@@ -187,6 +193,8 @@ class LabelAssignment:
     shared_with: int
     distance: float
     opening: str = ""
+    bare_tag: bool = False
+    beside: bool = False
 
 
 def label_words(page) -> List[tuple]:
@@ -537,6 +545,8 @@ def assign_labels_on_page(
     logger: Optional[logging.Logger] = None,
     text_lines: Optional[Sequence[Tuple[str, float, float, float, float]]] = None,
     typography=None,
+    read_bare_tags: bool = True,
+    read_side_captions: bool = True,
 ) -> List[LabelAssignment]:
     """
     Attach each figure crop on a page to the caption it belongs to.
@@ -559,6 +569,13 @@ def assign_labels_on_page(
             the first-line-only behaviour, which is all the geometry needs.
         typography: passed to `harvest_caption_block`, so a caption ends
             where the article's body type resumes.
+        read_bare_tags: when a crop pairs with a bare tag ("Fig. 4" alone
+            under the figure), read its caption from the legend line that
+            opens with the same label further down, and mark the assignment
+            `bare_tag` (ledger T27). False only in replays.
+        read_side_captions: when a crop has no caption below or above it,
+            look for one set beside it, level with its top (ledger T28,
+            `_side_caption`). Needs `text_lines`. False only in replays.
 
     Returns:
         One `LabelAssignment` per crop, in the order the crops were given.
@@ -570,8 +587,15 @@ def assign_labels_on_page(
     inside = page_height * CAPTION_OVERLAP_TOLERANCE
 
     picks: List[Optional[Tuple[LabelLine, float]]] = []
+    beside_lines: List[LabelLine] = []
     for box in figure_boxes:
-        picks.append(_nearest_caption(box, label_lines, limit, inside))
+        pick = _nearest_caption(box, label_lines, limit, inside)
+        if pick is None and read_side_captions and text_lines is not None:
+            # Some journals set the legend in a column BESIDE the figure (T28).
+            pick = _side_caption(box, label_lines, text_lines, inside)
+            if pick is not None:
+                beside_lines.append(pick[0])
+        picks.append(pick)
 
     picks = _propagate_to_panels(figure_boxes, picks, label_lines)
     picks = _adopt_orphan_captions(figure_boxes, picks, label_lines)
@@ -583,11 +607,17 @@ def assign_labels_on_page(
             assignments.append(LabelAssignment(None, None, "", 0, float("inf")))
             continue
         line, gap = pick
-        caption = (harvest_caption_block(line, text_lines, typography)
-                   if text_lines is not None else line.text)
+        bare = read_bare_tags and _is_bare_tag(line)
+        # A bare tag carries no legend of its own; the legend line with the
+        # same label below it does. Without one, the tag itself is read.
+        source = (_legend_for_tag(line, label_lines, 2 * limit) or line) if bare else line
+        caption = (harvest_caption_block(source, text_lines, typography)
+                   if text_lines is not None else source.text)
         assignments.append(LabelAssignment(
             printed=line.printed, key=line.key, caption=caption,
-            shared_with=shared[line.key], distance=gap, opening=line.text,
+            shared_with=shared[line.key], distance=gap, opening=source.text,
+            bare_tag=bare,
+            beside=any(line is other for other in beside_lines),
         ))
 
     for key, count in shared.items():
@@ -647,6 +677,82 @@ def resolve_across_document(
 # ---------------------------------------------------------------------------
 # Geometry helpers (after the main functions, per CLAUDE.md)
 # ---------------------------------------------------------------------------
+
+def _is_bare_tag(line: LabelLine) -> bool:
+    """True when the line holds its figure label and nothing else ("Fig. 4", "Fig. 4.")."""
+    return line.text.strip().rstrip(".:|").strip() == line.printed.rstrip(".:|").strip()
+
+
+def _legend_for_tag(tag: LabelLine,
+                    label_lines: Sequence[LabelLine],
+                    reach: float) -> Optional[LabelLine]:
+    """
+    The legend line that opens with a bare tag's own label, nearest below it.
+
+    For biology researchers: some journals print a short tag ("Fig. 4")
+    under each figure and the full legends together further down ("Fig. 4. A
+    Y-shaped cartilage ..."). This finds that legend so the crop carries the
+    description, not just the tag. Only lines below the tag and within
+    `reach` count; another bare tag never does.
+    """
+    below = [line for line in label_lines
+             if line is not tag and line.key == tag.key and not _is_bare_tag(line)
+             and 0 <= line.rect[1] - tag.rect[1] <= reach]
+    if not below:
+        return None
+    return min(below, key=lambda line: line.rect[1] - tag.rect[1])
+
+
+def _side_caption(box: Tuple[float, float, float, float],
+                  label_lines: Sequence[LabelLine],
+                  text_lines: Sequence[Tuple[str, float, float, float, float]],
+                  level: float) -> Optional[Tuple[LabelLine, float]]:
+    """
+    The caption set in a column BESIDE a crop, top-aligned with it (ledger T28).
+
+    For biology researchers: J Cell Biol (and others) print some legends to
+    the left or right of the figure, their first line level with the
+    figure's top. Such a line overlaps the crop not at all sideways, so the
+    below/above search never sees it. A line counts here when:
+
+    * it begins a block of text (`starts_a_block`), so a body sentence that
+      happens to open "Figure 3 shows..." mid-paragraph is not taken;
+    * its top lies within `level` of the crop's top;
+    * it lies wholly to the crop's left or right;
+    * no other text line on its height lies between it and the crop.
+
+    The nearest such line sideways wins. Its distance is the sideways gap,
+    for `resolve_across_document`.
+    """
+    candidates: List[Tuple[float, LabelLine]] = []
+    for line in label_lines:
+        if not line.starts_a_block or abs(line.rect[1] - box[1]) > level:
+            continue
+        if line.rect[2] <= box[0]:
+            gap_span = (line.rect[2], box[0])
+        elif line.rect[0] >= box[2]:
+            gap_span = (box[2], line.rect[0])
+        else:
+            continue
+        if _text_between(line.rect, gap_span, text_lines):
+            continue
+        candidates.append((gap_span[1] - gap_span[0], line))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda pair: pair[0])
+    return candidates[0][1], candidates[0][0]
+
+
+def _text_between(rect: Sequence[float], gap_span: Tuple[float, float],
+                  text_lines: Sequence[Tuple[str, float, float, float, float]]) -> bool:
+    """True when any text line on `rect`'s height lies inside the sideways gap."""
+    for _, x0, y0, x1, y1 in (line[:5] for line in text_lines):
+        same_height = y0 < rect[3] and y1 > rect[1]
+        if same_height and x0 >= gap_span[0] - 1 and x1 <= gap_span[1] + 1 \
+                and (x0, y0, x1, y1) != tuple(rect):
+            return True
+    return False
+
 
 def _nearest_caption(box: Tuple[float, float, float, float],
                      label_lines: Sequence[LabelLine],

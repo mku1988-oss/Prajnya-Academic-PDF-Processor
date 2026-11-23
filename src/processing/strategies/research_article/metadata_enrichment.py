@@ -32,6 +32,7 @@ from ....processing.ledger.semantic_ledger import SemanticLedger, generate_hash
 from ...citations.block import SOURCE_FILE_NAME, source_label
 from ...citations.acceptance import (clean_author_list, complete_truncated_authors,
                                       is_truncated_author_list, surname_of)
+from ...citations.journal_name import check_journal_name
 from ...citations.level import LEVEL_LOCAL, LEVEL_ONLINE
 from ...citations.local_confidence import CONFIDENCE_UNCONFIRMED, local_confidence
 from ...models import ContentPage, DocumentProfile
@@ -334,6 +335,7 @@ def apply_citation_level(merged: Dict[str, Any], citation_level: Optional[str],
         merged["validation_confidence"] = confidence
         merged["validation_source"] = source
         log.info("Citation level local: confidence %.2f (%s).", confidence, source)
+        check_own_journal(merged, log)
 
     if citation_level == LEVEL_ONLINE and merged.get("validation_source") in (None, "", "unknown"):
         confidence, source = local_confidence(merged, title_page_text)
@@ -344,6 +346,7 @@ def apply_citation_level(merged: Dict[str, Any], citation_level: Optional[str],
                         "the record stands on Prajnya's own reading and is flagged.")
         merged["validation_confidence"] = confidence
         merged["validation_source"] = source
+        check_own_journal(merged, log)
 
     _label, by_file_name = source_label(merged, file_name)
     if by_file_name:
@@ -352,6 +355,26 @@ def apply_citation_level(merged: Dict[str, Any], citation_level: Optional[str],
         log.warning("No author, editor or title could be established: %s is "
                     "cited by its file name and flagged for review.", file_name)
     return merged
+
+
+def check_own_journal(merged: Dict[str, Any], log: logging.Logger) -> None:
+    """
+    Clean or flag a journal name that only the title page vouches for (ledger T34).
+
+    For biology researchers: at `local` (or `online` with no registry record)
+    the journal is whatever the title page printed there. A running header's
+    "Vol.20 No.1 January 2004" tail is cut off; a section word ("REVIEWS") is
+    kept but recorded as `suspicious_journal`, which flags the record for
+    review (`review._suspicious_items`). See `citations/journal_name.py`.
+    """
+    read = merged.get("journal")
+    cleaned, suspect = check_journal_name(read)
+    if cleaned != read:
+        log.info("Journal name cleaned: %r -> %r (running header tail).", read, cleaned)
+        merged["journal"] = cleaned
+    if suspect:
+        log.warning("Journal name %r looks like a section word, not a journal: flagged.", cleaned)
+        merged["suspicious_journal"] = cleaned
 
 
 def prefer_registry_authors(merged: Dict[str, Any], record: Dict[str, Any], source: str,
@@ -566,6 +589,10 @@ def annotate_provenance(merged: Dict[str, Any]) -> Dict[str, Any]:
 
     provenance["validation_confidence"] = merged.get("validation_confidence", 0.0)
     provenance["validation_source"] = merged.get("validation_source", "unknown")
+
+    suspicious_journal = merged.pop("suspicious_journal", None)   # metadata about metadata (T34)
+    if suspicious_journal:
+        provenance["suspicious_journal"] = suspicious_journal
 
     network = merged.pop("network", None)      # metadata about metadata, like suspicious_authors
     if network:

@@ -1,0 +1,18 @@
+# Second read of a table whose cells are equations (src/processing/utils/table_formulas.py).
+# Recognition models with a fixed prompt (GLM-OCR: "Formula Recognition:") use the
+# prompt in their profile's fixed_prompts instead of the one below.
+task_name: "equation_to_latex"
+task_type: "formula_conversion"
+description: "Transcribe the equations in an image as one LaTeX array"
+
+prompt: |
+  Transcribe this image as LaTeX.
+
+  Write the whole image as ONE LaTeX array environment:
+  one array row per printed row, cells separated by &, rows by \\.
+  Write every equation with its subscripts and superscripts (R_c, T_1, s^-1).
+  Output ONLY the LaTeX, no explanation.
+
+output_format:
+  type: "text"
+  expected_format: "latex_array"

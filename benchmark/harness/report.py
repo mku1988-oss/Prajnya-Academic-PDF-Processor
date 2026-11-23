@@ -23,7 +23,8 @@ from pathlib import Path
 BENCH = Path(__file__).resolve().parents[1]
 TOOL_NAMES = {"pdf_text_layer": "Raw text layer (baseline)", "prajnya": "Prajnya (local)", "prajnya_online": "Prajnya (online)",
               "grobid": "GROBID", "grobid_consolidated": "GROBID (consolidated)",
-              "docling": "Docling", "marker": "Marker", "mineru": "MinerU"}
+              "docling": "Docling", "docling_formula": "Docling (formulas on, A12)",
+              "marker": "Marker", "mineru": "MinerU"}
 NETWORK = {"prajnya_online": "DOI/title to Crossref, OpenAlex",
            "grobid_consolidated": "extracted fields to Crossref"}
 SECTIONS = {

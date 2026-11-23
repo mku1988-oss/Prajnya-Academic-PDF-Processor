@@ -95,6 +95,9 @@ task_registry:
   legacy_ocr: olmocr_document_processing
   figure_desc: figure_description
   table_desc: table_description
+  # A table whose cells are equations is read a second time with this task
+  # (utils/table_formulas.py). A model without the task skips that read.
+  formula: equation_to_latex
   title_detection: title_page_detection
 vlm_provider:
   api_endpoint: http://localhost:9931/v1/chat/completions

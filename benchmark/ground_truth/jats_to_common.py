@@ -10,7 +10,7 @@ answer key in the same shape every tool's output is converted to, so the
 scorer compares like with like.
 
 Run (from src/v6):
-    python benchmark/ground_truth/jats_to_common.py
+    python benchmark/ground_truth/jats_to_common.py [MANIFEST_A11.tsv]
 writes benchmark/outputs/key/<PMCID>.json for every paper in the manifest.
 """
 from __future__ import annotations
@@ -38,12 +38,21 @@ NESTED_OBJECTS = ("disp-formula", "fig", "table-wrap")
 # The common format's name for each kind of link's targets.
 LINK_FIELD = {"bibr": "reference_ids", "fig": "figure_ids", "table": "table_ids"}
 RANGE_JOINERS = re.compile(r"^\s*[-\u2010-\u2015\u2212]\s*$")
+XLINK_HREF = "{http://www.w3.org/1999/xlink}href"
+# Formulas inside these are scored with their object (tables) or not at all (A11).
+FORMULA_EXCLUDED = {"fig", "table-wrap", "supplementary-material", "fn", "fn-group",
+                    "ref-list", "app", "app-group", "ack", "boxed-text"}
+CONTEXT_CHARS = 80             # body text kept before each formula, to place a tool's
+# Text that is not running text, for a formula's context: objects, formulas,
+# labels and section titles (headings are left out of every tool's context too).
+CONTEXT_EXCLUDED = EXCLUDED_ANCESTORS | {"inline-formula", "label", "title"}
 
 
 def main() -> int:
     """Write the answer key for every manifest paper."""
     KEY_DIR.mkdir(parents=True, exist_ok=True)
-    with open(CORPUS / "MANIFEST.tsv", encoding="utf-8") as f:
+    manifest = sys.argv[1] if len(sys.argv) > 1 else "MANIFEST.tsv"   # A11: MANIFEST_A11.tsv
+    with open(CORPUS / manifest, encoding="utf-8") as f:
         rows = list(csv.DictReader(f, delimiter="\t"))
     for row in rows:
         xml_path = CORPUS / "cache" / f"{row['version']}.xml"
@@ -80,6 +89,8 @@ def jats_to_common(xml_bytes: bytes, paper_id: str) -> dict:
         # Amendment A7: in-text table mentions, scored like figure mentions.
         "table_links": links_of(paragraph_elements, "table",
                                 [t["id"] for t in tables]),
+        # Amendment A11: display and inline formulas, as the publisher's MathML.
+        "formulas": formulas_of(root, paragraph_elements),
     }
 
 
@@ -203,8 +214,91 @@ def figures_of(root) -> list[dict]:
         figures.append({"id": fig.get("id"), "label": label,
                         "label_number": parsed[1],
                         "caption": text_of(fig.find("caption")),
-                        "object_count": 1})
+                        "object_count": 1,
+                        # A11: the publisher image, to find the figure's true box.
+                        "image": figure_image(fig)})
     return figures
+
+
+def figure_image(fig) -> str | None:
+    """The file name of a figure's publisher image: its own <graphic>, not one
+    inside its caption (PLOS captions carry equation images, which come first)."""
+    for graphic in fig.iter("graphic"):
+        if not any(a.tag == "caption" for a in graphic.iterancestors() if a is not fig):
+            return graphic.get(XLINK_HREF)
+    return None
+
+
+def formulas_of(root, paragraph_elements: list) -> list[dict]:
+    """Every body display and inline formula, in document order (A11).
+
+    Each keeps its MathML (None when the publisher gave only an image or
+    TeX: such a formula is counted, not scored), the body paragraph it sits
+    in or follows, and the CONTEXT_CHARS of text before it, which place a
+    tool's formula by position."""
+    body = root.find(".//body")
+    if body is None:
+        return []
+    holders = {id(p): i for i, p in enumerate(paragraph_elements)}
+    formulas = []
+    for node in body.iter("disp-formula", "inline-formula"):
+        if any(a.tag in FORMULA_EXCLUDED for a in node.iterancestors()):
+            continue
+        if any(a.tag in ("disp-formula", "inline-formula") for a in node.iterancestors()):
+            continue
+        math = next(node.iter("math"), None)
+        formulas.append({
+            "id": node.get("id") or f"formula-{len(formulas) + 1}",
+            "kind": "display" if node.tag == "disp-formula" else "inline",
+            "label": text_of(node.find("label")) or None,
+            "mathml": etree.tostring(math, encoding="unicode", with_tail=False)
+            if math is not None else None,
+            "paragraph_index": paragraph_before(node, holders),
+            "context_before": text_before(node)})
+    return formulas
+
+
+def paragraph_before(node, holders: dict) -> int | None:
+    """Index of the body paragraph holding the formula, or else the last one before it.
+    `holders` maps id(paragraph element) -> its index in the key's paragraphs."""
+    for ancestor in node.iterancestors():
+        if id(ancestor) in holders:
+            return holders[id(ancestor)]
+    # lxml hands back the same element object while a reference to it lives
+    # (paragraph_elements holds one), so id() identifies a paragraph here.
+    for previous in reversed(node.xpath("preceding::p")):
+        if id(previous) in holders:
+            return holders[id(previous)]
+    return None
+
+
+def text_before(node) -> str:
+    """The last CONTEXT_CHARS of body text before a formula.
+
+    Only running text counts: not figure or table text, captions, footnotes
+    or other formulas, which a tool's reading order puts elsewhere or writes
+    differently. The same rule builds a tool's context (adapters/common.py)."""
+    kept = []
+    for piece in reversed(node.xpath("preceding::text()")):
+        if is_running_text(piece):
+            kept.append(str(piece))
+            if sum(len(k) for k in kept) > 4 * CONTEXT_CHARS:
+                break
+    text = re.sub(r"\s+", " ", " ".join(reversed(kept)))
+    return text[-CONTEXT_CHARS:].strip()
+
+
+def is_running_text(piece) -> bool:
+    """Whether a text node is body text outside figures, tables and formulas.
+    A tail belongs to the element's parent, not to the element itself."""
+    owner = piece.getparent()
+    if owner is None:
+        return False
+    if piece.is_tail:
+        owner = owner.getparent()
+    chain = [owner, *owner.iterancestors()]
+    tags = {element.tag for element in chain if element is not None}
+    return "body" in tags and not tags & CONTEXT_EXCLUDED
 
 
 def tables_of(root) -> list[dict]:

@@ -7,7 +7,7 @@ This folder says exactly what they may rely on.
 - **`prajnya_document.schema.json`** is the promise, as a JSON Schema
   (draft 2020-12). It is checked by `tests/test_output_contract.py` against
   the writer's output and against every document in `run_outputs/`.
-- **Contract version: 1.5.** Every file written from v6.4.0 on says its
+- **Contract version: 1.6.** Every file written from v6.4.0 on says its
   version in `document_info.contract_version`. A file without that key was
   written by 6.3.0 or earlier and follows contract 1.0 in every respect.
 - **`examples/`** holds two small hand-written documents that follow the
@@ -26,6 +26,7 @@ This folder says exactly what they may rely on.
 | 1.3 | v6.7.0 | `pages[].body` (the page's running text), `pages[].metadata.furniture` (running headers, footers and page numbers, labelled) and `pages[].metadata.outside_body` (placeholders, tables, legends and the reference list, marked). Additive. |
 | 1.4 | v6.8.0 | `metadata_final.author_names`: each author as `{given, family}`, in the order of `authors`, when a registry record gave the surname apart (Crossref at level `online`); `[]` otherwise. A compound surname ("Rosendahl Huber", "García Martínez de Artola") cannot be told from the joined string by any rule. Additive. |
 | 1.5 | v6.8.0 | `document_info.status` (`success`, `partial`, `failed`) and `document_info.failed_pages`: whether every page was read. Before 1.5 a page whose reading failed was written empty and the file still said `success: true`. Additive; `success` keeps its meaning. |
+| 1.6 | v6.9.0 | `document_info.provenance`: what produced the run (Python, OS, the PDF and imaging library versions, the PDFium build, the layout model file, each model role's model file and quantisation, the llama.cpp build, the GPU, driver and CUDA version). File names only, never paths. `null` when not recorded (an older file re-cited later). Also `pages[].metadata.display_formulas` on text-layer pages (rule 22). Additive. |
 
 Anything the schema does not name is internal and may change in any release:
 for example `pages[].metadata.analysis`, `coverage`, and the rest of the
@@ -46,7 +47,8 @@ schema does not list.
 A file is held to what its own `contract_version` promises: from 1.1 it
 must carry `citations`, from 1.2 `mentions`, from 1.3 each page's `body`,
 `furniture` and `outside_body`, from 1.4 `metadata_final.author_names`, from
-1.5 `document_info.status` and `failed_pages`. An older file, or one with no
+1.5 `document_info.status` and `failed_pages`, from 1.6
+`document_info.provenance` (which may be `null`). An older file, or one with no
 version stamp, is not held to the later rules. A new key added in a MINOR
 version goes into the schema's `allOf` list the same way, so a file that
 claims the new version cannot leave it out.
@@ -80,7 +82,9 @@ compares the first two fails if you forget.
 7. **`image_path` is relative to `run_outputs/`**, with forward slashes.
 8. **`profile.pdf_path` is an absolute path on the machine that ran Prajnya.**
    It is informational. Never open it, and never publish a file without
-   considering that it names a directory on someone's computer.
+   considering that it names a directory on someone's computer. To share a
+   file, write a portable copy, in which the field holds only the PDF's file
+   name: `python -m src.processing.export <document>.v6.json`.
 9. **A book's front-matter pages carry no `processing_method`** (a known,
    deferred gap). A reader should call their route "unknown", not guess.
 
@@ -146,6 +150,21 @@ compares the first two fails if you forget.
     fixed value (0.95 for a text-layer page, 0.0 for a failed one). Nothing
     in Prajnya acts on it. Do not filter or rank pages by it: use
     `processing_method` and `status` to tell a failed read from a good one.
+21. **Compare runs by `provenance`, not by `pipeline_version` alone** (from
+    contract 1.6). The same release can read a PDF differently with another
+    model file, quantisation, llama.cpp build or library version. `models`
+    lists the model configured for each role; which pages actually used a
+    model is in each page's `processing_method`. A part that could not be
+    read on that machine (no GPU, the model server not running) is `null`.
+22. **A text-layer page can hold LaTeX** (from v6.9, contract 1.6). On a
+    page read from the text layer (`processing_method: pymupdf`), each
+    display equation the layout model finds is read from its crop and
+    written as `$$...$$` in place of the text layer's (often garbled) run.
+    `metadata.display_formulas` lists every box found, `bbox` in **PDF
+    points** (like headings), with `status`: `read` (replaced),
+    `not_in_text` (its words were not one unbroken run; left as printed) or
+    `empty_read` (the read gave nothing; left as printed). Absent when the
+    page has none. Inline formulas stay as the text layer prints them.
 
 ## Checking a file yourself
 

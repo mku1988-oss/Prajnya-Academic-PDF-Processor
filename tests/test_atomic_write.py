@@ -65,7 +65,7 @@ class TestTheDocumentJsonUsesIt:
         target = tmp_path / "paper.json"
         target.write_text('{"from": "last run"}', encoding="utf-8")
         monkeypatch.setattr(document_json, "build_document_json",
-                            lambda profile, elapsed, timings=None: {"new": True})
+                            lambda profile, elapsed, timings=None, provenance=None: {"new": True})
         monkeypatch.setattr(atomic_write.json, "dump", half_a_dump)
 
         with pytest.raises(OSError):

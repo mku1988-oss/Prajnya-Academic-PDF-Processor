@@ -511,7 +511,10 @@ def _suspicious_items(metadata: Dict[str, Any]) -> List[str]:
     """Fields that are present but which the pipeline itself doubted."""
     provenance = metadata.get("provenance")
     provenance = provenance if isinstance(provenance, dict) else {}
-    return ["authors"] if provenance.get("suspicious_authors") else []
+    suspicious = ["authors"] if provenance.get("suspicious_authors") else []
+    if provenance.get("suspicious_journal"):
+        suspicious.append("journal")       # a section word read as the journal (T34)
+    return suspicious
 
 
 def _confidence_of(metadata: Dict[str, Any]) -> float:

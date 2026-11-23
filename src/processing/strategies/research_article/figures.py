@@ -44,6 +44,7 @@ from ...utils.figure_label_pass import (
 )
 from ...utils.figure_labels import parse_printed_label
 from ...utils.figure_crop_fit import fit_crops_to_captions
+from ...utils.figure_side_split import split_side_by_side_figures
 from .rendering import RENDER_PADDING_PX
 
 #: Extra clip slop in PDF points, so a caption line that merely touches the
@@ -67,6 +68,8 @@ def extract_page_figures(
     logger: Optional[logging.Logger] = None,
     body_style: Optional[TextStyle] = None,
     fit_crops: bool = True,
+    split_side_by_side: bool = True,
+    side_captions: bool = True,
 ) -> List[FigureAsset]:
     """
     Crop and save every figure on this page, tagging each with its caption.
@@ -91,6 +94,12 @@ def extract_page_figures(
         fit_crops: fit each crop to the band its printed caption labels
             (ledger T25, `utils/figure_crop_fit.py`). False only in replays
             that compare with and without.
+        split_side_by_side: split one figure box that holds several printed
+            figures side by side (ledger T27, `utils/figure_side_split.py`).
+            False only in replays that compare with and without.
+        side_captions: pair a crop with a legend set beside it, level with
+            its top (ledger T28, `figure_label_pass._side_caption`). False
+            only in replays that compare with and without.
 
     Returns:
         One `FigureAsset` per saved figure; [] when the page has none.
@@ -98,6 +107,8 @@ def extract_page_figures(
     log = logger or logging.getLogger("Figures")
     if not detections:
         return []
+    if split_side_by_side:
+        detections = split_figures_safely(page, page_image, detections, log)
     doc_id = safe_doc_id(Path(pdf_path).stem)
     out_dir = Path(figures_base_dir) / doc_id
     read_caption = make_caption_reader(page, page_image, read_crop=read_crop, logger=log)
@@ -111,10 +122,34 @@ def extract_page_figures(
         logger=log,
     )
     assets = attach_printed_labels(page, page_image, assets, logger=log,
-                                   body_style=body_style)
+                                   body_style=body_style,
+                                   trust_bare_tags=split_side_by_side,
+                                   side_captions=side_captions)
     if fit_crops:
         fit_and_resave_crops(page, page_image, assets, detections, out_dir, logger=log)
     return assets
+
+
+def split_figures_safely(
+    page: PdfPage,
+    page_image: Image.Image,
+    detections: Sequence[Detection],
+    logger: logging.Logger,
+) -> List[Detection]:
+    """
+    Split side-by-side figures sharing one box; any failure keeps the boxes as detected.
+
+    For biology researchers: two figures printed next to each other can come
+    back from the detector as one box, so the second figure gets no crop
+    (`utils/figure_side_split.py`). A page with no text layer simply has no
+    tags to split by.
+    """
+    try:
+        return split_side_by_side_figures(page, page_image, detections, logger=logger)
+    except Exception as error:                              # pragma: no cover
+        logger.warning("Side-by-side split failed on page %d (%s); boxes kept "
+                       "as detected.", page.number + 1, error)
+        return list(detections)
 
 
 def fit_and_resave_crops(
@@ -151,6 +186,8 @@ def attach_printed_labels(
     assets: List[FigureAsset],
     logger: Optional[logging.Logger] = None,
     body_style: Optional[TextStyle] = None,
+    trust_bare_tags: bool = True,
+    side_captions: bool = True,
 ) -> List[FigureAsset]:
     """
     Label each crop from the page's own text, and rejoin panels of one figure.
@@ -165,12 +202,19 @@ def attach_printed_labels(
     A label the caption already supplied is never overwritten: the caption box
     was paired geometrically and is the stronger evidence. Measured over the
     corpus, this pass agrees with all but two of those and contradicts none.
+    The one exception is a BARE TAG ("Fig. 4" alone, printed right under the
+    crop; ledger T27): two figures side by side share one legend block below
+    their tags, and that block names only the first of them.
 
     Args:
         page: the PDF page, for its text layer and dimensions.
         page_image: the render the crop boxes are expressed in, for scaling.
         assets: the figures saved for this page.
         logger: optional logger.
+        trust_bare_tags: let a bare tag under the crop decide its label and
+            caption (ledger T27). False only in replays.
+        side_captions: also pair a crop with a legend set beside it (T28).
+            False only in replays.
 
     Returns:
         The same assets, with `printed_label`, `label_key`, `panel_group_size`
@@ -191,7 +235,9 @@ def attach_printed_labels(
                       if body_style is not None else None)
         assignments = assign_labels_on_page(boxes, label_lines, height, logger=log,
                                             text_lines=text_lines,
-                                            typography=typography)
+                                            typography=typography,
+                                            read_bare_tags=trust_bare_tags,
+                                            read_side_captions=side_captions)
     except Exception as error:                              # pragma: no cover
         # A page with no text layer is a scan; it simply has no labels to
         # read. That must never cost us the figures themselves.
@@ -203,6 +249,16 @@ def attach_printed_labels(
     for asset, assignment in zip(assets, assignments):
         asset.panel_group_size = max(1, assignment.shared_with)
         if not assignment.printed:
+            continue
+        if assignment.bare_tag and asset.label_key != assignment.key:
+            # The tag under the crop names it; a label from a shared legend
+            # block below does not (T27). Its caption goes with the label.
+            log.info("p%d %s: bare tag %s under the crop replaces label %s",
+                     asset.page, asset.figure_id, assignment.printed,
+                     asset.printed_label)
+            asset.printed_label = assignment.printed
+            asset.label_key = assignment.key
+            asset.caption = normalize_harvested_text(assignment.caption)
             continue
         if not asset.printed_label:
             asset.printed_label = assignment.printed
@@ -253,6 +309,13 @@ def _repair_caption(asset, assignment) -> Optional[str]:
         return None
     if asset.printed_label and asset.label_key != assignment.key:
         return None                        # two passes, two different figures
+
+    # A legend set BESIDE its figure (T28) is a plain text column, read whole
+    # from the text layer; the detector's box over it often starts part way
+    # down, and putting back only the opening line would drop the lines
+    # between (14-3-3 p6: "Figure 4. A mutant 14-3-3, which containing ...").
+    if assignment.beside:
+        return assignment.caption
 
     # Cases 1 and 2: nothing worth keeping, so take the whole caption.
     if not asset.caption or _is_panel_sublabel(asset.caption):

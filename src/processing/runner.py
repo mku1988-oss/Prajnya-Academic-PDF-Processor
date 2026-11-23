@@ -48,6 +48,7 @@ from .ledger.semantic_ledger import LedgerRecord
 from .models import DocumentProfile
 from .paths import DEFAULT_LEDGER_PATH
 from .pdf import get_backend
+from .run_provenance import run_provenance
 
 # The cheap CPU inspection half lives next door — deciding is separate from
 # doing. Re-exported here so a caller has ONE import site for "run a document",
@@ -132,7 +133,8 @@ def process_one(entry: PreflightEntry, request: RunRequest, backend=None,
 
         elapsed = time.time() - started
         out_path = request.output_for(entry.path)
-        write_result(profile, out_path, elapsed)
+        write_result(profile, out_path, elapsed,
+                     provenance=run_provenance(request.config_root))   # contract 1.6
         emit(log, "document_done", stage="write",
              message=f"Done in {elapsed:.1f}s -> {out_path}",
              path=str(entry.path), elapsed=elapsed, output=str(out_path))

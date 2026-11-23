@@ -364,6 +364,9 @@ def _write_back(payload: Dict[str, Any], json_path: Path, metadata: Dict[str, An
     info.update(status_fields((payload.get("summary") or {}).get("errors") or [],
                               payload["pages"]))
     info["contract_version"] = CONTRACT_VERSION        # the file now carries a block
+    # 1.6: a re-cited file keeps what produced its run; an older file never
+    # recorded it, and null says "not recorded" rather than guessing.
+    info.setdefault("provenance", None)
 
     result = (payload.get("profile") or {}).get("processing_result")
     if isinstance(result, dict):

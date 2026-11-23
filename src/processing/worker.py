@@ -131,7 +131,9 @@ def run_in_subprocess(entry: PreflightEntry, request: RunRequest,
         stderr_reader.join(timeout=5)
 
     if outcome_holder.get("outcome") is not None:
-        return outcome_holder["outcome"]
+        outcome = outcome_holder["outcome"]
+        discard_job_if_done(job, outcome, log)
+        return outcome
 
     # No result and no exception: the child died before it could report.
     lines = [line for line in stderr_tail if line.strip()]
@@ -201,6 +203,25 @@ def write_job_file(entry: PreflightEntry, request: RunRequest,
     with open(job_path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, ensure_ascii=False)
     return job_path
+
+
+def discard_job_if_done(job_path: Path, outcome: DocumentOutcome,
+                        logger: Optional[logging.Logger] = None) -> None:
+    """
+    Delete a job file once its document finished cleanly (audit L6).
+
+    For biology researchers: every document of every run wrote one of these
+    and none was ever removed, so `.jobs/` grew without end. A job file
+    exists so a FAILURE can be re-run by hand, so it is kept whenever the
+    document failed, timed out or the child died, and deleted only after a
+    clean result. A later run of the same document overwrites it.
+    """
+    if outcome.error is not None:
+        return
+    try:
+        job_path.unlink()
+    except OSError as error:            # a leftover file is not worth failing a document for
+        (logger or LOG).debug("Could not remove job file %s: %s", job_path, error)
 
 
 def load_job(job_path: Path) -> tuple:

@@ -57,7 +57,7 @@ LLAMA_SERVER = Path(os.environ.get("BENCH_LLAMA_SERVER")
 DOCKER = Path(os.environ.get("BENCH_DOCKER") or shutil.which("docker") or "docker")
 GROBID_URL = "http://localhost:8070"
 TOOL_ORDER = ["prajnya", "grobid", "grobid_consolidated", "docling", "mineru",
-              "marker"]
+              "marker", "docling_formula"]
 TIMEOUT_S = {"prajnya": 2400, "marker": 1800}
 
 
@@ -69,7 +69,7 @@ def main() -> int:
     signal.signal(signal.SIGINT, signal.SIG_IGN)     # a tool's Ctrl-C is not ours
     run_dir = OUTPUTS / f"run{args.run}"
     run_dir.mkdir(parents=True, exist_ok=True)
-    papers = load_papers(args.roles)
+    papers = load_papers(args.roles, args.manifest)
     for tool in [t for t in TOOL_ORDER if t in args.tools]:
         log(run_dir, {"event": "tool_start", "tool": tool,
                       "idle_vram_mib": gpu_memory_used()})
@@ -93,6 +93,8 @@ def parse_arguments() -> argparse.Namespace:
                         help="run name: outputs go to outputs/run<NAME>/")
     parser.add_argument("--tools", default=",".join(TOOL_ORDER + ["prajnya_online"]))
     parser.add_argument("--roles", default="pilot,scored")
+    parser.add_argument("--manifest", default="MANIFEST.tsv",
+                        help="the manifest under corpus/ (A11: MANIFEST_A11.tsv)")
     parser.add_argument("--prajnya-root", default=None,
                         help="the Prajnya checkout to run (default: this one)")
     args = parser.parse_args()
@@ -101,9 +103,9 @@ def parse_arguments() -> argparse.Namespace:
     return args
 
 
-def load_papers(roles: list[str]) -> list[dict]:
+def load_papers(roles: list[str], manifest: str = "MANIFEST.tsv") -> list[dict]:
     """Manifest rows in role order (pilot first), then manifest order."""
-    with open(CORPUS / "MANIFEST.tsv", encoding="utf-8") as f:
+    with open(CORPUS / manifest, encoding="utf-8") as f:
         rows = list(csv.DictReader(f, delimiter="\t"))
     return [r for role in roles for r in rows if r["role"] == role]
 
@@ -141,7 +143,7 @@ def mark_done(out_dir: Path, paper: dict) -> None:
 # --- one runner per tool ----------------------------------------------------
 
 def run_prajnya(paper: dict, pdf: Path, out_dir: Path) -> str:
-    """Prajnya v6.6.4 at `local`, with a fresh llama-server for each paper
+    """Prajnya at `local` (the checkout run), with a fresh llama-server for each paper
     (llama-server's glm-ocr child leaks host RAM on long runs)."""
     paper_dir = out_dir / "input" / paper["pmcid"]
     paper_dir.mkdir(parents=True, exist_ok=True)
@@ -184,10 +186,10 @@ def run_grobid_consolidated(paper: dict, pdf: Path, out_dir: Path) -> str:
     return run_grobid(paper, pdf, out_dir, consolidate=1)
 
 
-def run_docling(paper: dict, pdf: Path, out_dir: Path) -> str:
+def run_docling(paper: dict, pdf: Path, out_dir: Path, extra: tuple = ()) -> str:
     code = run_process(
         [str(ENV / "bench_docling" / "Scripts" / "docling.exe"), "convert", str(pdf),
-         "--to", "json", "--output", str(out_dir)],
+         "--to", "json", "--output", str(out_dir), *extra],
         cwd=V6_ROOT, env={**os.environ, "PYTHONUTF8": "1"},
         log_path=out_dir / f"{paper['pmcid']}.log", timeout=1800)
     if code == 0:
@@ -220,9 +222,14 @@ def run_marker(paper: dict, pdf: Path, out_dir: Path) -> str:
     return f"exit {code}"
 
 
+def run_docling_formula(paper: dict, pdf: Path, out_dir: Path) -> str:
+    """Amendment A12: Docling with its formula reader on (off by default)."""
+    return run_docling(paper, pdf, out_dir, extra=("--enrich-formula",))
+
+
 TOOL_RUNNERS = {"prajnya": run_prajnya, "grobid": run_grobid,
                 "grobid_consolidated": run_grobid_consolidated,
-                "docling": run_docling, "mineru": run_mineru, "marker": run_marker}
+                "docling": run_docling, "docling_formula": run_docling_formula, "mineru": run_mineru, "marker": run_marker}
 
 
 def recite_online(run_dir: Path) -> None:

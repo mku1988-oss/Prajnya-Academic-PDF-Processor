@@ -138,6 +138,12 @@ class OnnxLayoutDetector:
     def supports_figures(self) -> bool:
         return True
 
+    @property
+    def supports_formulas(self) -> bool:
+        """It labels display equations (`display_formula`) and runs on the CPU,
+        so a text-layer page can be checked for them cheaply (T35)."""
+        return True
+
     def detect(self, page_image: "Image.Image",
                page: Optional[PdfPage] = None) -> List[Detection]:
         """

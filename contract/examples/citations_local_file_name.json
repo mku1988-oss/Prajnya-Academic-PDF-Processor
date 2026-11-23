@@ -7,7 +7,21 @@
     "status": "success",
     "failed_pages": [],
     "pipeline_version": "v6.6.0",
-    "contract_version": "1.5"
+    "contract_version": "1.6",
+    "provenance": {
+      "python": "3.10.16",
+      "os": "Windows 10.0.26300",
+      "packages": {"pypdfium2": "5.15.2", "onnxruntime": "1.21.0", "numpy": "1.26.4",
+                   "Pillow": "10.4.0", "opencv-python-headless": "4.11.0.86"},
+      "pdfium": "159.0.8149.0@sourcebuild-toolchained",
+      "layout_model": {"file": "pp-doclayoutv3.onnx", "bytes": 130502049},
+      "models": [
+        {"role": "extraction", "model": "glm-ocr", "file": "GLM-OCR-f16.gguf", "quantisation": "F16"},
+        {"role": "understanding", "model": "olmocr-2-7b", "file": "olmOCR-2-7B-1025.Q5_K_M.gguf", "quantisation": "Q5_K_M"}
+      ],
+      "llama_server": {"build": "b7000-0123abc"},
+      "gpu": {"name": "NVIDIA GeForce RTX 4070 Laptop GPU", "driver": "617.42", "cuda": "13.4"}
+    }
   },
   "metadata_final": {
     "title": null,

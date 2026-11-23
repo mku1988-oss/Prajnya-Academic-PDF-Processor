@@ -33,7 +33,7 @@ LOG = logging.getLogger(__name__)
 
 #: Stamped into every document's `document_info`, so an output file says which
 #: pipeline produced it.
-PIPELINE_VERSION = "v6.8.1"
+PIPELINE_VERSION = "v6.9.0"
 
 #: The version of the output FORMAT, which moves independently of the release.
 #: Stamped into `document_info.contract_version`, and pinned against
@@ -48,11 +48,13 @@ PIPELINE_VERSION = "v6.8.1"
 #: 1.3 (item 000a, fix 1): `pages[].body`, `metadata.furniture`, `metadata.outside_body`.
 #: 1.4 (post-release fix cycle): `metadata_final.author_names`.
 #: 1.5 (v6.8, audit D1): `document_info.status` and `document_info.failed_pages`.
-CONTRACT_VERSION = "1.5"
+#: 1.6 (v6.9, audit D8 + L5): `document_info.provenance`, what produced the run.
+CONTRACT_VERSION = "1.6"
 
 
 def write_result(profile: DocumentProfile, out_path: Path, elapsed: float,
-                 timings: Optional[Dict[str, float]] = None) -> None:
+                 timings: Optional[Dict[str, float]] = None,
+                 provenance: Optional[Dict[str, Any]] = None) -> None:
     """
     Write the run as a canonical document JSON (see `build_document_json`).
 
@@ -68,16 +70,18 @@ def write_result(profile: DocumentProfile, out_path: Path, elapsed: float,
         out_path: where to write. Its parent directory is created.
         elapsed: total wall time in seconds.
         timings: optional per-bucket wall time.
+        provenance: what produced the run (`run_provenance`); None when unknown.
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = build_document_json(profile, elapsed, timings)
+    payload = build_document_json(profile, elapsed, timings, provenance)
 
     # All or nothing (D4): a crash mid-write keeps the previous file whole.
     write_json_atomically(out_path, payload, default=last_resort_encoder)
 
 
 def build_document_json(profile: DocumentProfile, elapsed: float,
-                        timings: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
+                        timings: Optional[Dict[str, float]] = None,
+                        provenance: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Serialize a processed document into the canonical interchange shape.
 
@@ -104,6 +108,8 @@ def build_document_json(profile: DocumentProfile, elapsed: float,
         timings: optional per-bucket wall time (title / reads / detection /
             repair / swap). Recorded under document_info['timings'], which the
             harness prefers over anything it can reconstruct.
+        provenance: the model files, runtimes and GPU that produced the run
+            (contract 1.6, `run_provenance.py`); written as null when None.
 
     Returns:
         A JSON-serializable dict in the canonical shape.
@@ -125,6 +131,7 @@ def build_document_json(profile: DocumentProfile, elapsed: float,
         **status_fields(errors, pages),
         "pipeline_version": PIPELINE_VERSION,
         "contract_version": CONTRACT_VERSION,
+        "provenance": provenance,
     }
     if timings:
         info["timings"] = dict(timings)

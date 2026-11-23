@@ -6,6 +6,76 @@ it in `document_info.pipeline_version`.
 
 ---
 
+## 6.9.0
+
+Formulas, figures and citations, and a second benchmark round. The output
+contract goes from 1.5 to 1.6 by adding fields; every existing field keeps
+its meaning.
+
+- **Display formulas on text-layer pages are read as LaTeX.** A page read
+  straight from the PDF's text layer used to keep a displayed equation as
+  the text layer spells it, and many fonts spell math as ordinary letters
+  ("qtmd ¼ Dm r"). The CPU layout model now checks each such page for
+  displayed formulas, and each one found is read from its crop by the
+  vision model with its formula prompt and stored as `$$...$$` in the page
+  text. Each formula's box and outcome are recorded in
+  `pages[].metadata.display_formulas` (contract 1.6). About 0.7 s more per
+  text-layer page, plus about 3 s per formula found.
+- **A figure printed beside its caption gets its label.** A caption set to
+  the side of its figure (common in Cell Press papers) is now paired with it
+  when no caption sits above or below.
+- **Two figures merged into one crop are split.** When the layout model
+  draws one box over two side-by-side figures, the crop is cut between them
+  where two printed figure labels sit on one row below a clear gap.
+- **More citations are found and linked.**
+  - A word broken across lines in an author name or a reference entry is
+    joined again ("Lomvar das" becomes "Lomvardas").
+  - Accented names match whichever way the PDF encodes the accent.
+  - A cover sheet's own "References" heading no longer hides the paper's
+    reference list.
+  - Superscript citation numbers set slightly above the line are no longer
+    cut onto lines of their own.
+  - A false column split at the top of a page no longer breaks a reference
+    list's numbering.
+  - Author lists written without a space after the comma ("Siegel,R.") are
+    read, and so are references from before 1800.
+- **A DOI broken at a line end is read whole.** The full DOI printed on the
+  page is taken, not the part before the break.
+- **The journal name at `local` is cleaned and checked.** Where no registry
+  confirms the record, a volume, issue or date that a running header added
+  to the journal name is cut off, and a "journal name" that is really a
+  section heading ("REVIEWS") is kept but flags the record for review.
+- **Each output records what produced it** (contract 1.6).
+  `document_info.provenance` lists the Python, OS, PDF and imaging library
+  versions, the PDFium build, the layout model file, each model's file and
+  quantisation, the llama.cpp build, and the GPU, driver and CUDA version.
+  It holds file names only, never paths.
+- **Outputs can be shared without your folder names.**
+  `python -m src.processing.export <file>` writes a copy whose only change
+  is `profile.pdf_path` cut to the PDF's file name. The copy still validates
+  against the contract.
+- **Job files are tidied.** The small file each document writes so a failed
+  run can be repeated by hand is now removed once the document finishes
+  cleanly. It is kept when the document fails.
+- **`requirements.txt` pins exact versions.** Every package is pinned to the
+  version the published numbers were measured with, and a test checks it.
+- **18 more test files ship.** They read their sample PDFs from one setting
+  and are skipped cleanly without them.
+- **Benchmark round 2.** 40 unseen papers in biology, physics and chemistry,
+  with two new measures, figure crops and formulas. Results are in
+  [BENCHMARK.md](BENCHMARK.md).
+- **Equations in tables keep their subscripts.** A table whose cells are
+  equations could come back as plain text ("1/T1=Rc+hb/h(Rbp-Rc)"). Such a
+  table (two or more equation cells) is now read a second time with the
+  model's formula prompt, and its equation cells are stored as LaTeX
+  ("$1/T_{1}=R_{c}+...$"); every other cell is kept from the table read.
+  About 5 s per equation table; other tables are not read again.
+
+**Known limitation.** A hyphen at the end of a line is joined in page text
+and now in reference lists too, so a compound broken at its own hyphen
+("collagen-related") comes out as one word. The PDF does not say which
+line-end hyphens are real. To be addressed in v7.
+
 ## 6.8.1
 
 - **A fresh install opens Prajnya Studio's table view again.** Studio draws

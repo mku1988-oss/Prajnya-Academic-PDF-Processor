@@ -312,6 +312,8 @@ class PyPdfiumPage:
         space_pending = False
         for index in range(count):
             character = _character_at(text_page, index)
+            if _is_line_end_hyphen(text_page, index, character, characters):
+                character = "-"
             if character is None or character.isspace() or not character.isprintable():
                 space_pending = space_pending or (character is not None and character.isspace())
                 continue
@@ -362,6 +364,29 @@ class PyPdfiumPage:
         scale = render_scale(self.size, dpi=dpi, max_edge=max_edge)
         bitmap = self._page.render(scale=scale)
         return bitmap.to_pil().convert("RGB")
+
+
+#: PDFium's code for a hyphen printed at a line end ("Lomvar\x02das").
+LINE_END_HYPHEN = "\x02"
+
+
+def _is_line_end_hyphen(text_page, index: int, character: Optional[str],
+                        printed: List[PrintedChar]) -> bool:
+    """
+    Whether this character is PDFium's line-end hyphen, between two letters.
+
+    For biology researchers: PDFium writes the hyphen that ends a line as a
+    control code, not "-", although a hyphen glyph is printed there (it has a
+    box at the column edge). Dropped, a name broken over a line reads
+    "Lomvar das" and can no longer be matched to its reference (ledger T30).
+    Kept as "-", the lines that carry it can be mended where they are joined.
+    Only a code with a letter on both sides counts; one standing alone stood
+    for a symbol the font lost, and stays dropped.
+    """
+    if character != LINE_END_HYPHEN or not printed or not printed[-1].text.isalpha():
+        return False
+    following = _character_at(text_page, index + 1)
+    return following is not None and following.isalpha()
 
 
 def _character_at(text_page, index: int) -> Optional[str]:

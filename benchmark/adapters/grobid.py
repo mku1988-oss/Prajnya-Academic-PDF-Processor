@@ -14,7 +14,7 @@ from pathlib import Path
 from lxml import etree
 
 from .common import (cells_to_html, clean_doi, collapse_figures, empty_document,
-                     figure_entry, table_entry, year_of)
+                     figure_entry, formulas_of_pieces, table_entry, year_of)
 
 TEI = "{http://www.tei-c.org/ns/1.0}"
 XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
@@ -48,6 +48,7 @@ def convert(tei_path: Path, paper_id: str, tool: str = "grobid",
         link["table_ids"] = [table_number[i] for i in link["table_ids"] if table_number.get(i)]
     document["table_links"] = [l for l in table_links if l["table_ids"]]
     document["references"] = references_of(root)
+    document["formulas"] = formulas_of(root)          # A11 (GROBID gives no figure crop)
     return document
 
 
@@ -77,6 +78,29 @@ def metadata_of(root) -> dict:
             "doi": clean_doi(text(doi)) if doi is not None else None,
             "year": year_of(date.get("when") or text(date)) if date is not None else None,
             "journal": text(journal) or None}
+
+
+def formulas_of(root) -> list[dict]:
+    """A11: each <formula> of <body> is a display formula, in reading order,
+    its text as GROBID gives it (the PDF's characters; no LaTeX); its
+    <label> (the equation number) is left out. GROBID marks no inline math."""
+    body = root.find(f".//{TEI}text/{TEI}body")
+    if body is None:
+        return []
+    pieces = []
+    for node in body.iter(f"{TEI}p", f"{TEI}formula"):
+        if any(a.tag == f"{TEI}figure" for a in node.iterancestors()):
+            continue
+        if node.tag == f"{TEI}formula":
+            label = node.find(f"{TEI}label")
+            label_text = text(label) if label is not None else ""
+            content = text(node)
+            if label_text and content.endswith(label_text):
+                content = content[:-len(label_text)].strip()
+            pieces.append(("display", content))
+        else:
+            pieces.append(("text", text(node)))
+    return formulas_of_pieces(pieces)
 
 
 def body_of(root) -> tuple[list[str], list[dict], list[dict], list[dict]]:

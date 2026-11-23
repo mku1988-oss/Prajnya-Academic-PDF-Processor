@@ -32,7 +32,7 @@ import statistics
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from .layout_lines import LayoutLine
+from .layout_lines import LayoutLine, join_line_texts
 
 # A list needs at least this many entries to count as one.
 MIN_ENTRIES = 5
@@ -103,7 +103,10 @@ _AFTER_LIST_HEADING = re.compile(
 
 _PARTICLES = r"(?:(?:van|von|de|der|den|di|du|da|del|della|la|le|ten|ter|dos|das)\s+)*"
 _NAME_WORD = r"[A-ZÀ-ɏ][\wÀ-ɏ'’\-]*"
-_SURNAME_FIRST = (r"^" + _PARTICLES + _NAME_WORD + r"(?:\s+" + _PARTICLES + _NAME_WORD + r"){0,2},?\s+"
+# After the surname: a space, a comma and a space, or (OUP's house style,
+# "Siegel,R., Ma,J.") a comma glued to an initial with its full stop (T32).
+_SURNAME_FIRST = (r"^" + _PARTICLES + _NAME_WORD + r"(?:\s+" + _PARTICLES + _NAME_WORD + r"){0,2}"
+                  r"(?:,?\s+|,(?=[A-ZÀ-ɏ][.\-]))"
                   r"(?:[A-ZÀ-ɏ][.\-]|[A-Z]{1,3}\b|&|and\b|et\s+al)")
 # Initials first, as Science prints: "P. W. Reddien, A. Sánchez Alvarado,".
 _INITIALS = r"(?:[A-ZÀ-ɏ]\.(?:\s?-?[A-Z]\.)*\s+)"
@@ -117,6 +120,9 @@ _SUFFIX = re.compile(r"\s+(?:Jr|Sr|II|III|IV|2nd|3rd|4th)\.?$")
 
 _YEAR = re.compile(r"(?<![\d/])(?:18|19|20)\d{2}[a-z]?(?![\d/])")
 _YEAR_IN_PARENTHESES = re.compile(r"\(((?:18|19|20)\d{2}[a-z]?)\)")
+# A year before 1800, taken only where no later year stands in the entry and
+# only in a year's own place: "(1743)" or Vancouver's "1743;1:318" (T32).
+_EARLY_YEAR = re.compile(r"(?<![\d/])\((1[5-7]\d{2})\)|(?<![\d/\-–—−])(1[5-7]\d{2})(?=;\s*\d)")
 
 
 @dataclass
@@ -200,7 +206,7 @@ def numbered_entry_text(lines: Sequence[LayoutLine], start: int, end: int, numbe
     first = _NUMBER_START.sub("", lines[start].text, count=1)
     rest = [line.text for line in lines[start + 1:end]]
     kept = [text for text in [first] + rest if not is_own_number_line(text, number)]
-    return " ".join(kept).strip()
+    return join_line_texts(kept)
 
 
 def is_own_number_line(text: str, number: int) -> bool:
@@ -314,8 +320,32 @@ def last_entry_end(lines: Sequence[LayoutLine], start: int) -> int:
 
 
 def author_year_list(lines: Sequence[LayoutLine]) -> Optional[ReferenceList]:
-    """The list after the last "References" heading, split by hanging indent or by gaps."""
-    region, end_line = list_region(lines)
+    """The list after the last "References" heading that opens one, split by hanging indent or by gaps.
+
+    The LAST heading is tried first, as before. When no list follows it, the
+    heading before it is tried, its region ending where the later heading
+    begins, and so on. Genome Research PDFs end with a publisher's download
+    cover sheet whose own "References" heading leads only to a link and a
+    licence (ledger T30), which hid the real list.
+    """
+    headings = reference_headings(lines)
+    for position in range(len(headings) - 1, -1, -1):
+        stop = headings[position + 1] if position + 1 < len(headings) else None
+        found = _author_year_list_after(lines, headings[position], stop)
+        if found is not None:
+            return found
+    return None
+
+
+def reference_headings(lines: Sequence[LayoutLine]) -> List[int]:
+    """Positions of the lines that are a reference-list heading ("References")."""
+    return [index for index, line in enumerate(lines) if _REFERENCE_HEADING.match(line.text)]
+
+
+def _author_year_list_after(lines: Sequence[LayoutLine], heading: int,
+                            stop: Optional[int]) -> Optional[ReferenceList]:
+    """The author-year list after one heading, its region ending at `stop` when given."""
+    region, end_line = list_region(lines, heading, stop)
     if not region:
         return None
     first_line = list(lines).index(region[0])
@@ -323,7 +353,7 @@ def author_year_list(lines: Sequence[LayoutLine]) -> Optional[ReferenceList]:
     entries = []
     for position, index in enumerate(starts):
         end = starts[position + 1] if position + 1 < len(starts) else len(region)
-        text = " ".join(line.text for line in region[index:end])
+        text = join_line_texts(line.text for line in region[index:end])
         entries.append(make_entry(None, region[index].page, text))
     if len(entries) < MIN_ENTRIES:
         return None
@@ -331,8 +361,9 @@ def author_year_list(lines: Sequence[LayoutLine]) -> Optional[ReferenceList]:
                          end_line=end_line)
 
 
-def list_region(lines: Sequence[LayoutLine]) -> Tuple[List[LayoutLine], Optional[int]]:
-    """The list's lines after the last reference heading, and where the list ends.
+def list_region(lines: Sequence[LayoutLine], heading: Optional[int] = None,
+                stop: Optional[int] = None) -> Tuple[List[LayoutLine], Optional[int]]:
+    """The list's lines after a reference heading (the last, by default), and where the list ends.
 
     The list ends at a heading that follows lists ("Conflict of interest"),
     unless that heading only opens a back-matter note set inside the list:
@@ -342,23 +373,32 @@ def list_region(lines: Sequence[LayoutLine]) -> Tuple[List[LayoutLine], Optional
     note is printed in a different text size from the entries, so lines of
     another size are left out of the list, and the list goes on after them.
 
+    Args:
+        lines: every line of the document, in reading order.
+        heading: the heading line to read after; None means the last one.
+        stop: where the region must end at the latest (a later heading);
+            None means the end of the document.
+
     Returns:
         (the list's lines, the position just after the list in `lines`, or
         None when the list runs to the end of the document).
     """
-    headings = [index for index, line in enumerate(lines) if _REFERENCE_HEADING.match(line.text)]
-    if not headings:
-        return [], None
-    start = headings[-1] + 1
+    if heading is None:
+        headings = reference_headings(lines)
+        if not headings:
+            return [], None
+        heading = headings[-1]
+    start = heading + 1
+    end = len(lines) if stop is None else stop
     size = list_text_size(lines, start)
     region: List[LayoutLine] = []
-    for index in range(start, len(lines)):
+    for index in range(start, end):
         line = lines[index]
         if _AFTER_LIST_HEADING.match(line.text) and not list_resumes_after(lines, index, size):
             return region, index
         if is_list_sized(line, size):
             region.append(line)
-    return region, None
+    return region, (None if stop is None else stop)
 
 
 def list_text_size(lines: Sequence[LayoutLine], start: int) -> Optional[float]:
@@ -493,4 +533,14 @@ def entry_year(text: str) -> Optional[str]:
         before = text[max(0, match.start() - 2):match.start()]
         if not re.match(r"\s*[-–—−]\s*\d", after) and not re.search(r"[-–—−]\s*$", before):
             return match.group(0)
-    return None
+    return early_year(text)
+
+
+def early_year(text: str) -> Optional[str]:
+    """A year before 1800 in a year's own place ("(1743)", "1743;1:318"), or None.
+
+    Called only when the entry holds no year from 1800 on: a bare 15xx-17xx
+    number is far more often a page than a year.
+    """
+    match = _EARLY_YEAR.search(text)
+    return (match.group(1) or match.group(2)) if match else None

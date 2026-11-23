@@ -14,8 +14,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .common import (cells_to_html, collapse_figures, empty_document,
-                     figure_entry, table_entry)
+from .common import (cells_to_html, collapse_figures, crop, empty_document,
+                     figure_entry, formulas_of_pieces, table_entry)
 
 BODY_LABELS = {"text", "paragraph", "list_item"}
 
@@ -33,13 +33,18 @@ def convert(json_path: Path, paper_id: str) -> dict:
     figures, unlabelled = [], []
     for picture in data.get("pictures", []):
         caption = caption_of(picture, data, items)
-        entry = figure_entry(picture["self_ref"], caption)
+        entry = figure_entry(picture["self_ref"], caption, crops=picture_crops(picture, data))
         if entry is None:
             unlabelled.append(caption)
         else:
             figures.append(entry)
     document["figures"] = collapse_figures(figures)
     document["unlabelled_figure_objects"] = unlabelled
+    # A11: items labelled "formula" are display formulas, in reading order.
+    document["formulas"] = formulas_of_pieces(
+        [("display" if items[ref].get("label") == "formula" else "text", items[ref].get("text") or "")
+         for ref in reading_order(data, items)
+         if items[ref].get("label") in BODY_LABELS | {"formula"}])
     document["tables"] = [table_entry(t["self_ref"], caption_of(t, data, items),
                                       table_html(t)) for t in data.get("tables", [])]
     return document
@@ -74,6 +79,23 @@ def reading_order(data: dict, items: dict) -> list[str]:
     for child in data.get("body", {}).get("children", []):
         walk(child["$ref"])
     return order
+
+
+def picture_crops(picture: dict, data: dict) -> list | None:
+    """A11: each provenance box in PDF points, turned to a top-left origin
+    with the page height Docling records."""
+    boxes = []
+    for prov in picture.get("prov") or []:
+        box, page_no = prov.get("bbox") or {}, prov.get("page_no")
+        height = ((data.get("pages") or {}).get(str(page_no)) or {}).get("size", {}).get("height")
+        if not box or not page_no or height is None:
+            continue
+        if box.get("coord_origin", "BOTTOMLEFT").upper() == "BOTTOMLEFT":
+            top, bottom = height - box["t"], height - box["b"]
+        else:
+            top, bottom = box["t"], box["b"]
+        boxes.append(crop(page_no - 1, (box["l"], min(top, bottom), box["r"], max(top, bottom))))
+    return boxes or None
 
 
 def caption_of(item: dict, data: dict, items: dict) -> str:

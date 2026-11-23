@@ -1,0 +1,51 @@
+role	field	journal	pmcid	version	doi	licence	pages	draw_rank	figures	tables	display_formulas	inline_formulas	references	title
+scored	biochemistry	Proc Natl Acad Sci U S A	PMC7720201	PMC7720201.1	10.1073/pnas.2020189117	CC BY	8	7	6	0	0	0	55	Replisome bypass of a protein-based R-loop block by Pif1
+scored	biochemistry	Proc Natl Acad Sci U S A	PMC9169775	PMC9169775.1	10.1073/pnas.2119467119	CC BY	9	8	4	0	0	0	66	Structural conservation among variants of the SARS-CoV-2 spike postfusion bundle
+scored	biochemistry	Nat Commun	PMC6901537	PMC6901537.1	10.1038/s41467-019-13579-3	CC BY	15	20	7	0	0	0	92	Oxidation and alkylation stresses activate ribosome-quality control
+scored	biochemistry	Nat Commun	PMC10965928	PMC10965928.1	10.1038/s41467-024-46991-5	CC BY	14	21	7	1	4	0	90	Meta-analysis shows the impacts of ecological restoration on greenhouse gas emissions
+scored	biochemistry	Nature	PMC9849139	PMC9849139.1	10.1038/s41586-022-05528-w	CC BY	26	24	15	0	16	15	49	A quantitative map of nuclear pore assembly reveals two distinct mechanisms
+scored	biophysics	Sci Adv	PMC9242592	PMC9242592.1	10.1126/sciadv.abn8048	CC BY	12	1	6	0	0	0	48	Activation of the human chemokine receptor CX3CR1 regulated by cholesterol
+scored	biophysics	Sci Adv	PMC7875533	PMC7875533.1	10.1126/sciadv.abe5905	CC BY	10	70	4	0	0	0	55	Bridging-induced phase separation induced by cohesin SMC protein complexes
+scored	biophysics	Nat Commun	PMC11043347	PMC11043347.1	10.1038/s41467-024-47807-2	CC BY	14	82	7	1	6	95	42	IFT cargo and motors associate sequentially with IFT trains to enter cilia of C. elegans
+scored	biophysics	Nat Commun	PMC7293213	PMC7293213.1	10.1038/s41467-020-16794-5	CC BY	19	155	10	1	0	0	62	Autophagy controls the induction and developmental decline of NMDAR-LTD through endocytic recycling
+scored	biophysics	Sci Rep	PMC6952389	PMC6952389.1	10.1038/s41598-019-56898-7	CC BY	13	3	5	0	4	0	86	Single-cell adhesion force kinetics of cell populations from combined label-free optical biosensor and robotic fluidic force microscopy
+scored	developmental biology	Proc Natl Acad Sci U S A	PMC8126771	PMC8126771.1	10.1073/pnas.2023163118	CC BY	11	108	6	0	0	0	70	Hindbrain neuropore tissue geometry determines asymmetric cell-mediated closure dynamics in mouse embryos
+scored	developmental biology	Proc Natl Acad Sci U S A	PMC11194556	PMC11194556.1	10.1073/pnas.2318838121	CC BY	8	188	5	0	0	5	74	A cytokinetic ring-driven cell rotation achieves Hertwig’s rule in early development
+scored	developmental biology	Nat Commun	PMC10480477	PMC10480477.1	10.1038/s41467-023-41039-6	CC BY	14	4	6	0	0	0	53	Notch and retinoic acid signals regulate macrophage formation from endocardium downstream of Nkx2-5
+scored	developmental biology	Sci Rep	PMC8941093	PMC8941093.1	10.1038/s41598-022-08982-8	CC BY	15	59	13	1	0	0	57	Spidroin striped micropattern promotes chondrogenic differentiation of human Wharton’s jelly mesenchymal stem cells
+scored	developmental biology	Nature	PMC10396959	PMC10396959.1	10.1038/s41586-023-06288-x	CC BY	23	63	8	6	2	1	66	Evolution of a minimal cell
+scored	computational biology	PLoS Comput Biol	PMC7272006	PMC7272006.1	10.1371/journal.pcbi.1007889	CC BY	17	1	7	0	14	36	40	Disease evolution in reaction networks: Implications for a diagnostic problem
+scored	computational biology	PLoS Comput Biol	PMC10754467	PMC10754467.1	10.1371/journal.pcbi.1011450	CC BY	16	2	5	2	10	9	56	Unravelling cancer subtype-specific driver genes in single-cell transcriptomics data with CSDGI
+scored	computational biology	PLoS Comput Biol	PMC10593221	PMC10593221.1	10.1371/journal.pcbi.1011544	CC BY	17	3	5	0	0	26	50	Phertilizer: Growing a clonal tree from ultra-low coverage single-cell DNA sequencing of tumors
+scored	computational biology	PLoS Comput Biol	PMC8407594	PMC8407594.1	10.1371/journal.pcbi.1009227	CC BY	27	4	6	3	0	0	108	Relating simulation studies by provenance—Developing a family of Wnt signaling models
+scored	computational biology	PLoS Comput Biol	PMC5786326	PMC5786326.1	10.1371/journal.pcbi.1005939	CC BY	20	6	4	0	1	0	114	Interactions between species introduce spurious associations in microbiome studies
+scored	physics	Proc Natl Acad Sci U S A	PMC11067015	PMC11067015.1	10.1073/pnas.2316493121	CC BY	10	22	5	0	0	4	67	The nonexistence of a paddlewheel effect in superionic conductors
+scored	physics	Proc Natl Acad Sci U S A	PMC8685682	PMC8685682.1	10.1073/pnas.2111436118	CC BY	7	34	6	1	2	112	33	Complex pathways and memory in compressed corrugated sheets
+scored	physics	Proc Natl Acad Sci U S A	PMC11161751	PMC11161751.1	10.1073/pnas.2320007121	CC BY	10	53	7	0	17	302	49	Recurrent flow patterns as a basis for two-dimensional turbulence: Predicting statistics from structures
+scored	physics	Sci Adv	PMC10431702	PMC10431702.1	10.1126/sciadv.adg3833	CC BY	7	8	4	0	2	6	66	Giant acceleration of polaron transport by ultrafast laser-induced coherent phonons
+scored	physics	Sci Adv	PMC10413676	PMC10413676.1	10.1126/sciadv.adf8106	CC BY	7	16	5	0	6	17	58	Yield-stress transition in suspensions of deformable droplets
+scored	physics	Sci Adv	PMC11559608	PMC11559608.1	10.1126/sciadv.adp3056	CC BY	8	29	4	0	1	3	63	Breaking Abbe’s diffraction limit with harmonic deactivation microscopy
+scored	physics	Nat Commun	PMC9151679	PMC9151679.1	10.1038/s41467-022-30643-7	CC BY	12	1	7	2	0	0	57	Open-source personal pipetting robots with live-cell incubation and microscopy compatibility
+scored	physics	Nat Commun	PMC10869830	PMC10869830.1	10.1038/s41467-024-45699-w	CC BY	8	7	5	0	1	11	45	Integrated microcavity electric field sensors using Pound-Drever-Hall detection
+scored	physics	Sci Rep	PMC9098489	PMC9098489.1	10.1038/s41598-022-11662-2	CC BY	7	11	3	0	8	110	37	Impact of host phonons on interstitial diffusion
+scored	physics	Sci Rep	PMC10209100	PMC10209100.1	10.1038/s41598-023-34816-2	CC BY	10	29	9	1	13	166	29	A simple model for pink noise from amplitude modulations
+scored	chemistry	Front Chem	PMC12069056	PMC12069056.1	10.3389/fchem.2025.1600769	CC BY	12	1	4	2	0	0	40	Proposal of a new chemical marker for the quality control of the herb Scleromitrion diffusum
+scored	chemistry	Front Chem	PMC6363693	PMC6363693.1	10.3389/fchem.2019.00035	CC BY	14	2	4	2	8	1	41	e-Sweet: A Machine-Learning Based Platform for the Prediction of Sweetener and Its Relative Sweetness
+scored	chemistry	Front Chem	PMC9995511	PMC9995511.1	10.3389/fchem.2023.1129133	CC BY	10	3	9	1	4	0	35	Access to carbon nanofiber composite hydrated cobalt phosphate nanostructure as an efficient catalyst for the hydrogen evolution reaction
+scored	chemistry	Nat Commun	PMC9744856	PMC9744856.1	10.1038/s41467-022-35429-5	CC BY	10	6	6	0	0	0	55	Charge-transfer interface of insulating metal-organic frameworks with metallic conduction
+scored	chemistry	Nat Commun	PMC11494085	PMC11494085.1	10.1038/s41467-024-53226-0	CC BY	15	15	5	0	0	0	89	Darwinian Evolution of Self-Replicating DNA in a Synthetic Protocell
+scored	chemistry	Sci Rep	PMC11306596	PMC11306596.1	10.1038/s41598-024-68018-1	CC BY	16	13	12	0	4	18	51	Comprehensive study on the efficiency of vertical bifacial photovoltaic systems: a UK case study
+scored	chemistry	Sci Rep	PMC9772223	PMC9772223.1	10.1038/s41598-022-26666-1	CC BY	10	31	11	3	2	2	25	Cooling potential for hot climates by utilizing thermal management of compressed air energy storage systems
+scored	chemistry	Proc Natl Acad Sci U S A	PMC7776598	PMC7776598.1	10.1073/pnas.2019198117	CC BY	10	24	8	0	2	0	33	A new ultrafast energy funneling material harvests three times more diffusive solar energy for GaInP photovoltaics
+scored	chemistry	Proc Natl Acad Sci U S A	PMC6431231	PMC6431231.1	10.1073/pnas.1813987116	CC BY	6	38	6	0	0	0	46	Environmental control programs the emergence of distinct functional ensembles from unconstrained chemical reactions
+scored	chemistry	Sci Adv	PMC12429024	PMC12429024.1	10.1126/sciadv.adw6133	CC BY	12	20	7	0	0	0	68	A universal oxygen scavenger for oxidase-based biosensors
+pilot	biochemistry	Proc Natl Acad Sci U S A	PMC10194004	PMC10194004.1	10.1073/pnas.2301121120	CC BY	11	80	7	0	8	484	52	Gβγ activates PIP2 hydrolysis by recruiting and orienting PLCβ on the membrane surface
+pilot	biophysics	Sci Adv	PMC11524191	PMC11524191.1	10.1126/sciadv.adp5929	CC BY	21	110	8	0	3	1	83	Decisive role of mDia-family formins in cell cortex function of highly adherent cells
+pilot	developmental biology	Proc Natl Acad Sci U S A	PMC9674220	PMC9674220.1	10.1073/pnas.2206025119	CC BY	11	392	7	0	0	0	47	Silencing RNAs expressed from W-linked PxyMasc “retrocopies” target that gene during female sex determination in Plutella xylostella
+pilot	computational biology	PLoS Comput Biol	PMC8244857	PMC8244857.1	10.1371/journal.pcbi.1009085	CC BY	18	7	6	5	0	42	27	Analyzing cancer gene expression data through the lens of normal tissue-specificity
+pilot	physics	Proc Natl Acad Sci U S A	PMC10927490	PMC10927490.1	10.1073/pnas.2314083121	CC BY	8	84	4	0	0	9	47	Torsional force microscopy of van der Waals moirés and atomic lattices
+pilot	chemistry	Front Chem	PMC9626653	PMC9626653.1	10.3389/fchem.2022.996358	CC BY	10	5	4	1	0	0	32	An ultrasensitive detection platform for cocaine: Aptasensing strategy in capillary tube
+pilot	biochemistry	Proc Natl Acad Sci U S A	PMC11962472	PMC11962472.1	10.1073/pnas.2423858122	CC BY	9	152	5	0	0	90	69	Substrate recognition by a peptide-aminoacyl-tRNA ligase
+pilot	biophysics	Sci Adv	PMC10699781	PMC10699781.1	10.1126/sciadv.adh8152	CC BY	11	121	5	0	1	4	63	A mechanochemical model recapitulates distinct vertebrate gastrulation modes
+pilot	developmental biology	Proc Natl Acad Sci U S A	PMC12685074	PMC12685074.1	10.1073/pnas.2508432122	CC BY	12	427	7	0	0	0	74	VGLL1 contributes to both the transcriptome and epigenome of the developing trophoblast compartment
+pilot	computational biology	PLoS Comput Biol	PMC5991653	PMC5991653.1	10.1371/journal.pcbi.1006201	CC BY	16	8	4	0	29	72	29	Temporal precision of regulated gene expression

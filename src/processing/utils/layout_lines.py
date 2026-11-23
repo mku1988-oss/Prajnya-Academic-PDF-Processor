@@ -65,6 +65,19 @@ GUTTER_PROBE_POINTS = (4.0, 1.0)
 # it, so they stay on their line; the next line is a full line height away.
 SAME_LINE_SHARE = 0.5
 
+# A raised citation run ("apoptosis.¹⁻⁵") can rise by half its line's height
+# or a little more (a Bull. Korean Chem. Soc. paper: 4.42-4.5 pt on 8.91 pt
+# type), so the test above sets it off as a segment of its own; so does one
+# the PDF writes after the rest of its line. A segment of SMALL characters
+# (each at most `RAISED_HEIGHT_SHARE` of the line's height) set right after
+# a segment and above it, by `MIN_RAISE_SHARE` to `MAX_RAISE_SHARE` of that
+# segment's height, is joined back to it.
+RAISED_HEIGHT_SHARE = 0.85
+# A line's baseline and height come from its letters when it has this many.
+MIN_LINE_LETTERS = 3
+MIN_RAISE_SHARE = 0.15
+MAX_RAISE_SHARE = 0.75
+
 # A horizontal gap wider than this many character heights is never a space
 # between words, even where no gutter was found.
 GUTTER_HEIGHTS = 1.6
@@ -169,7 +182,7 @@ def page_layout_lines(characters: Sequence[PrintedChar], page_number: int,
     if not upright:
         return []
     layout = RowLayout(upright, page_height)
-    segments = merge_neighbours(split_into_segments(upright, layout), layout)
+    segments = merge_neighbours(attach_raised_runs(split_into_segments(upright, layout), layout), layout)
     lines = [build_line(segment, page_number) for segment in segments]
     lines = [line for line in lines if any(ch.isalnum() for ch in line.text)]
     for line in lines:
@@ -308,9 +321,25 @@ def rows_gutters(rows: List[List[PrintedChar]], characters: Sequence[PrintedChar
                    (index - ROW_WINDOW // 2, index + ROW_WINDOW // 2)]
         windows = [(max(0, lo), min(last, hi)) for lo, hi in windows]
         full = [(lo, hi) for lo, hi in windows if hi - lo >= min(ROW_WINDOW // 2, last)]
-        found = [window_gutters(running, lo, hi, text_width) for lo, hi in full or [(0, last)]]
-        result.append(max(found, key=len))
+        found = [(window_gutters(running, lo, hi, text_width), hi - lo) for lo, hi in full or [(0, last)]]
+        result.append(best_window_gutters(found, BAND_SHIFT_SHARE * text_width))
     return result
+
+
+def best_window_gutters(found: List[Tuple[Tuple[float, ...], int]], tolerance: float) -> Tuple[float, ...]:
+    """Of (gutters, rows spanned) per window: the most gutters; of those, the
+    set most other windows agree with; then the widest window.
+
+    In a few rows of justified text, word gaps can line up into a false
+    gutter, in a window cut short at a page top (g1 p15, ledger T31: 362 pt
+    instead of 396.5) or in a full one (g1 p17: 316.5 instead of 392.5). The
+    false set cut those rows into a band of their own and read entries 26 and
+    43 before entry 14. The other windows of the same row see the true one.
+    """
+    def agreement(item: Tuple[Tuple[float, ...], int]) -> int:
+        return sum(1 for other in found if other is not item and same_gutters(item[0], other[0], tolerance))
+
+    return max(found, key=lambda item: (len(item[0]), agreement(item), item[1]))[0]
 
 
 def window_gutters(running: np.ndarray, low: int, high: int, text_width: float) -> Tuple[float, ...]:
@@ -484,6 +513,34 @@ def crosses_gutter(left: float, right: float, gutters: Sequence[float]) -> bool:
     return any(left < gutter <= right + 0.5 for gutter in gutters)
 
 
+def attach_raised_runs(segments: List[List[PrintedChar]], layout: RowLayout) -> List[List[PrintedChar]]:
+    """Join each run of small raised characters to the segment printed just before it.
+
+    A citation run ("1–5") that rises a little more than `SAME_LINE_SHARE` of
+    its line's height is cut off as a segment of its own; on a line of its
+    own it is raised above nothing, so the citation was lost (ledger T31).
+    """
+    kept: List[List[PrintedChar]] = []
+    for segment in segments:
+        if kept and is_raised_run_after(kept[-1], segment, layout):
+            kept[-1] = kept[-1] + segment
+        else:
+            kept.append(segment)
+    return kept
+
+
+def is_raised_run_after(host: List[PrintedChar], segment: List[PrintedChar], layout: RowLayout) -> bool:
+    """Whether `segment` is small raised type set right after the end of `host`."""
+    height = segment_height(host)
+    if any(c.rect.height > RAISED_HEIGHT_SHARE * height for c in segment):
+        return False
+    rise = segment_baseline(host) - statistics.median(c.baseline for c in segment)
+    gap = segment[0].rect.x0 - host[-1].rect.x1
+    return (MIN_RAISE_SHARE * height <= rise < MAX_RAISE_SHARE * height
+            and -OVERLAP_HEIGHTS * height < gap < GUTTER_HEIGHTS * height
+            and not crosses_gutter(host[-1].rect.x1, segment[0].rect.x0, layout.gutters_at(host[-1].baseline)))
+
+
 def merge_neighbours(segments: List[List[PrintedChar]], layout: RowLayout) -> List[List[PrintedChar]]:
     """Join segments of one line that the text order split (an italic run written later)."""
     merged: List[List[PrintedChar]] = []
@@ -562,15 +619,68 @@ def drop_running_furniture(lines: List[LayoutLine], page_heights: Sequence[float
 
 
 def segment_baseline(segment: Sequence[PrintedChar]) -> float:
-    """The baseline most of a segment's characters sit on (the median)."""
-    return statistics.median(c.baseline for c in segment)
+    """The baseline most of a segment's LETTERS sit on (the median), or of all its characters.
+
+    Letters, because a short last line ("partner,¹⁷,¹⁹,²¹,²⁴⁻²⁶") can hold
+    more raised digits than letters, and the line's baseline is the letters'
+    (ledger T31). A segment with no letter (a table cell of numbers) uses all.
+    """
+    return statistics.median(c.baseline for c in _letters_or_all(segment))
 
 
 def segment_height(segment: Sequence[PrintedChar]) -> float:
-    """The median loose character height of a segment, at least 1 point."""
-    return max(1.0, statistics.median(c.rect.height for c in segment))
+    """The median loose height of a segment's letters (or of all its characters), at least 1 point."""
+    return max(1.0, statistics.median(c.rect.height for c in _letters_or_all(segment)))
+
+
+def _letters_or_all(segment: Sequence[PrintedChar]) -> Sequence[PrintedChar]:
+    """The segment's letters when it has at least `MIN_LINE_LETTERS`, else the whole segment.
+
+    A line with one or two letters does not speak through them: in
+    "1997;94(21):11312e7." the "e" stands for a dash, set in a symbol font
+    with a box half the line's height (NMR's list, ledger T31).
+    """
+    letters = [c for c in segment if c.text.isalpha()]
+    return letters if len(letters) >= MIN_LINE_LETTERS else segment
 
 
 def is_jumbled(segment: Sequence[PrintedChar]) -> bool:
     """Whether the text order runs backwards anywhere (so the line must be re-sorted by x)."""
     return any(b.rect.x0 < a.rect.x0 - 0.5 * a.rect.height for a, b in zip(segment, segment[1:]))
+
+
+def join_line_texts(texts: Iterable[str]) -> str:
+    """
+    Printed lines joined into one string, with words broken at a line end mended.
+
+    For biology researchers: a word or name hyphenated over a line end
+    ("Lomvar-" / "das", "Martinez-" / "Palomo") must be read as one word
+    again, or it can never be matched to a reference (ledger T30). The rule
+    is the one the author-year linker's `body_stream` uses: a line ending in
+    a letter and a hyphen, followed by a line starting with a letter, is
+    joined with no space; a lower-case continuation means the hyphen was only
+    typesetting and is dropped ("Lomvardas"), a capital means a real hyphen
+    and it is kept ("Martinez-Palomo"). Every other pair of lines is joined
+    with one space, as before.
+
+    Args:
+        texts: the lines' texts, in reading order.
+
+    Returns:
+        The joined text, stripped.
+    """
+    joined = ""
+    for text in texts:
+        text = text.strip()
+        if not text:
+            continue
+        if joined and _ends_in_letter_hyphen(joined) and text[0].isalpha():
+            joined = (joined[:-1] if text[0].islower() else joined) + text
+        else:
+            joined = (joined + " " + text) if joined else text
+    return joined
+
+
+def _ends_in_letter_hyphen(text: str) -> bool:
+    """Whether text ends in a letter and a hyphen ("assem-", "Pucci-")."""
+    return len(text) >= 2 and text.endswith("-") and text[-2].isalpha()

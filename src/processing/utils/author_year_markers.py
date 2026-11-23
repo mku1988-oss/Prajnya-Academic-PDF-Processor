@@ -75,8 +75,12 @@ ET_AL_AUTHORS = 99
 
 # --- the shapes a citation can take -------------------------------------------------------
 
-# A capitalised surname: "Doi", "Münder", "Pucci-Minafra", "O'Brien".
-_NAME = r"[A-ZÀ-ÖØ-Þ][^\W\d_]*(?:['’\-‐‑][^\W\d_]+)*"
+# A capitalised surname: "Doi", "Münder", "Pucci-Minafra", "O'Brien". A
+# letter may carry combining accents: a text layer may print "Martín" as a
+# dotless i plus a combining acute ("Martı́n", ledger T30), and `\w` does not
+# match a combining mark.
+_LETTER = r"(?:[^\W\d_][̀-ͯ]*)"
+_NAME = r"[A-ZÀ-ÖØ-Þ][̀-ͯ]*" + _LETTER + r"*(?:['’\-‐‑]" + _LETTER + r"+)*"
 _PARTICLES = {"van", "von", "de", "der", "den", "del", "della", "di", "da", "dos", "du", "la", "le",
               "ter", "ten", "el", "al", "bin", "ibn"}
 _PARTICLE = r"(?:" + "|".join(sorted(_PARTICLES)) + r")"
@@ -413,10 +417,15 @@ def strip_particles(surname: str) -> str:
     return " ".join(words)
 
 
+#: Letters NFKD does not take apart: a text layer may print "Martín" as a
+#: dotless i plus a combining accent ("Martı́n", ledger T30).
+_PLAIN_LETTERS = str.maketrans({"ı": "i"})
+
+
 def _fold(text: str) -> str:
     """Accents removed, case folded."""
     plain = "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
-    return plain.casefold()
+    return plain.translate(_PLAIN_LETTERS).casefold()
 
 
 def fold_letters(text: str) -> str:

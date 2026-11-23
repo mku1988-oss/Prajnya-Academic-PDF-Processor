@@ -189,22 +189,22 @@ class MetadataExtractor:
         labeled_match = self.labeled_doi_pattern.search(text)
         if labeled_match:
             doi = labeled_match.group(1).strip().rstrip('.,;:)]}>')
-            return (doi, 0.98)
-        
+            return (self._whole_doi(doi, text), 0.98)
+
         # Pattern 2: URL DOI (high confidence - 0.95)
         # Matches: "https://doi.org/10.xxxx", "http://dx.doi.org/10.xxxx"
         url_match = self.url_doi_pattern.search(text)
         if url_match:
             doi = url_match.group(1).strip().rstrip('.,;:)]}>')
-            return (doi, 0.95)
-        
+            return (self._whole_doi(doi, text), 0.95)
+
         # Pattern 3: Bare DOI (lower confidence - 0.85)
         # Matches: "10.1234/abcd" anywhere in text
         # V3 core pattern: 10.dddd/[allowed chars]
         bare_match = self.bare_doi_pattern.search(text)
         if bare_match:
             doi = bare_match.group(1).strip().rstrip('.,;:)]}>')
-            return (doi, 0.85)
+            return (self._whole_doi(doi, text), 0.85)
         
         # No DOI found
         return (None, 0.0)
@@ -243,6 +243,31 @@ class MetadataExtractor:
             'doi.org/10.1038/s41578-1'
         """
         return self.wrapped_doi_pattern.sub(r'\1', text)
+
+    def _whole_doi(self, doi: str, text: str) -> str:
+        """
+        The longer DOI the page prints whole, when the one found was cut short.
+
+        For biology researchers: PNAS prints "doi:10.1073/pnas." at the end of
+        a line in its supplement link, with "2220167120" on the next line, and
+        prints "https://doi.org/10.1073/pnas.2220167120" whole in its footer.
+        The labelled pattern is tried first and found "10.1073/pnas" (ledger
+        T33). When another DOI on the same text begins with the one found and
+        continues it with ".", "-" or "_", that whole one is the DOI. Nothing
+        is joined across lines: only a DOI printed whole is ever used.
+
+        Args:
+            doi: the DOI a pattern found, trailing punctuation removed.
+            text: the text it was found in.
+
+        Returns:
+            The longest DOI in `text` that continues `doi`, or `doi` itself.
+        """
+        longer = [candidate.rstrip('.,;:)]}>') for candidate in self.bare_doi_pattern.findall(text)]
+        longer = [candidate for candidate in longer
+                  if len(candidate) > len(doi) and candidate.startswith(doi)
+                  and candidate[len(doi)] in '.-_']
+        return max(longer, key=len) if longer else doi
 
     def extract_chapter_number(self, text: str) -> tuple[Union[int, None], float]:
         """

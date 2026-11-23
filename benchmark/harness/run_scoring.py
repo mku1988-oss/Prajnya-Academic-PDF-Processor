@@ -30,16 +30,17 @@ sys.path.insert(0, str(BENCH))
 
 from adapters import docling, grobid, marker, mineru, prajnya   # noqa: E402
 from harness import metrics                                       # noqa: E402
+from harness.a11_measures import score_a11                        # noqa: E402
 
 TOOLS = ["pdf_text_layer", "prajnya", "prajnya_online", "grobid",
-         "grobid_consolidated", "docling", "marker", "mineru"]
+         "grobid_consolidated", "docling", "docling_formula", "marker", "mineru"]
 
 
 def main() -> int:
     """Convert, score and summarise one run for one role (pilot/scored)."""
     args = parse_arguments()
     run_dir = BENCH / "outputs" / f"run{args.run}"
-    papers = load_papers(args.role)
+    papers = load_papers(args.role, args.manifest)
     scores_dir = run_dir / "scores"
     scores_dir.mkdir(parents=True, exist_ok=True)
     rows = []
@@ -53,8 +54,9 @@ def main() -> int:
                 common = failed_output(tool, paper["pmcid"])
             write_common(run_dir, tool, paper["pmcid"], common)
             row = {"tool": tool, "pmcid": paper["pmcid"], "role": paper["role"],
-                   "stratum": paper["stratum"], "failed": common.get("failed", False),
-                   **score(key, common)}
+                   "stratum": paper.get("stratum") or paper.get("field"), "failed": common.get("failed", False),
+                   **score(key, common, load_boxes(paper["pmcid"]) if args.a11 else None,
+                           args.a11)}
             rows.append(row)
             print(f"{tool:20s} {paper['pmcid']:12s} done", flush=True)
     name = scores_name(args)
@@ -76,6 +78,10 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--role", default="pilot")
     parser.add_argument("--tools", default=",".join(TOOLS),
                         help="comma-separated subset (default: every tool found)")
+    parser.add_argument("--manifest", default="MANIFEST.tsv",
+                        help="the manifest under corpus/ (A11: MANIFEST_A11.tsv)")
+    parser.add_argument("--a11", action="store_true",
+                        help="also score formulas and figure crops (amendment A11)")
     parser.add_argument("--key", default="key",
                         help="answer-key folder under outputs/ (A7: 'key_frozen' is "
                              "the key as frozen before amendment A7)")
@@ -95,13 +101,19 @@ def scores_name(args: argparse.Namespace) -> str:
     return name
 
 
-def load_papers(role: str) -> list[dict]:
-    with open(BENCH / "corpus" / "MANIFEST.tsv", encoding="utf-8") as f:
+def load_papers(role: str, manifest: str = "MANIFEST.tsv") -> list[dict]:
+    with open(BENCH / "corpus" / manifest, encoding="utf-8") as f:
         return [r for r in csv.DictReader(f, delimiter="\t") if r["role"] == role]
 
 
 def load_key(pmcid: str, folder: str = "key") -> dict:
     return json.loads((BENCH / "outputs" / folder / f"{pmcid}.json").read_text(encoding="utf-8"))
+
+
+def load_boxes(pmcid: str) -> dict | None:
+    """A11: the key figures' located boxes (ground_truth/locate_key_figures.py)."""
+    path = BENCH / "outputs" / "key_boxes" / f"{pmcid}.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
 def convert(tool: str, paper: dict, run_dir: Path) -> dict | None:
@@ -116,6 +128,7 @@ def convert(tool: str, paper: dict, run_dir: Path) -> dict | None:
         "grobid": folder / f"{pmcid}.tei.xml",
         "grobid_consolidated": folder / f"{pmcid}.tei.xml",
         "docling": folder / f"{version}.json",
+        "docling_formula": folder / f"{version}.json",
         "marker": folder / version / f"{version}.json",
         "mineru": folder / f"{version}.content_list.json",
     }
@@ -129,7 +142,8 @@ def convert(tool: str, paper: dict, run_dir: Path) -> dict | None:
     if tool.startswith("grobid"):
         return grobid.convert(path, pmcid, tool=tool,
                               track="online" if "consolidated" in tool else "offline")
-    return {"docling": docling, "marker": marker, "mineru": mineru}[tool].convert(path, pmcid)
+    return {"docling": docling, "docling_formula": docling, "marker": marker,
+            "mineru": mineru}[tool].convert(path, pmcid)
 
 
 def text_layer_baseline(pmcid: str, version: str) -> dict:
@@ -163,6 +177,7 @@ def failed_output(tool: str, pmcid: str) -> dict:
 
 
 SUPPORTED_FIELDS = {
+    # "formulas" for every tool: A11 (appended below).
     # figure_links and table_links for Prajnya, table_links for GROBID: A7.
     "prajnya": ["metadata", "body_paragraphs", "figures", "tables",
                 "figure_links", "table_links"],
@@ -174,13 +189,18 @@ SUPPORTED_FIELDS = {
                             "tables", "references", "citation_links", "figure_links",
                             "table_links"],
     "docling": ["title", "body_paragraphs", "figures", "tables"],
+    "docling_formula": ["title", "body_paragraphs", "figures", "tables"],   # A12
     "marker": ["body_paragraphs", "figures", "tables"],
     "mineru": ["body_paragraphs", "figures", "tables", "references"],
 }
 
 
-def score(key: dict, tool: dict) -> dict:
-    """Every §6 metric for one tool on one paper."""
+for _fields in SUPPORTED_FIELDS.values():
+    _fields.append("formulas")
+
+
+def score(key: dict, tool: dict, boxes: dict | None = None, a11: bool = False) -> dict:
+    """Every §6 metric for one tool on one paper (plus A11's two when asked)."""
     result = {}
     result.update(metrics.score_metadata(key, tool))
     result.update(metrics.score_abstract(key, tool))
@@ -193,6 +213,8 @@ def score(key: dict, tool: dict) -> dict:
     result.update(metrics.score_links(key, tool, spans, stream, "citations", pairs))
     result.update(metrics.score_links(key, tool, spans, stream, "figures"))
     result.update(metrics.score_links(key, tool, spans, stream, "tables"))
+    if a11:
+        result.update(score_a11(key, tool, boxes))
     return result
 
 

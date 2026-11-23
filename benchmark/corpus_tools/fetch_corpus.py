@@ -33,7 +33,7 @@ FILE_KINDS = ("pdf", "xml")
 def main() -> int:
     """Fetch the PDF and XML of every manifest paper in the chosen roles."""
     args = parse_arguments()
-    papers = manifest_papers(args.roles)
+    papers = manifest_papers(args.roles, args.manifest)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     fetched, kept = 0, 0
     for paper in papers:
@@ -55,14 +55,16 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--roles", default="scored,pilot,seen",
                         help="comma-separated manifest roles to fetch (default: all)")
+    parser.add_argument("--manifest", default="MANIFEST.tsv",
+                        help="the manifest under corpus/ (round 2: MANIFEST_A11.tsv)")
     args = parser.parse_args()
     args.roles = set(args.roles.split(","))
     return args
 
 
-def manifest_papers(roles: set[str]) -> list[dict]:
+def manifest_papers(roles: set[str], manifest: str = "MANIFEST.tsv") -> list[dict]:
     """The manifest rows whose role is one of `roles`."""
-    with open(CORPUS_DIR / "MANIFEST.tsv", encoding="utf-8", newline="") as f:
+    with open(CORPUS_DIR / manifest, encoding="utf-8", newline="") as f:
         return [row for row in csv.DictReader(f, delimiter="\t") if row["role"] in roles]
 
 

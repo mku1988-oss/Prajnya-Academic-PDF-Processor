@@ -1,0 +1,173 @@
+{
+  "amendment": "A11",
+  "seed": 20261123,
+  "scored": 40,
+  "pilot": 10,
+  "per_field": {
+    "biochemistry": 5,
+    "biophysics": 5,
+    "developmental biology": 5,
+    "computational biology": 5,
+    "physics": 10,
+    "chemistry": 10
+  },
+  "per_journal": {
+    "Front Chem": 3,
+    "Nat Commun": 9,
+    "Nature": 2,
+    "PLoS Comput Biol": 5,
+    "Proc Natl Acad Sci U S A": 9,
+    "Sci Adv": 6,
+    "Sci Rep": 6
+  },
+  "shortfalls": {},
+  "skipped": {
+    "biochemistry / Proc Natl Acad Sci U S A": {
+      "not a research article": 21,
+      "field: none or two": 102,
+      "field: physics": 9,
+      "field: chemistry": 7,
+      "excluded (used or probed)": 6,
+      "field: developmental biology": 3
+    },
+    "biochemistry / Nat Commun": {
+      "field: none or two": 15,
+      "not a research article": 1,
+      "field: physics": 2,
+      "field: computational biology": 1
+    },
+    "biochemistry / Nature": {
+      "field: none or two": 14,
+      "field: physics": 3,
+      "field: chemistry": 1,
+      "field: computational biology": 3,
+      "field: developmental biology": 1,
+      "not a research article": 1
+    },
+    "biophysics / Sci Adv": {
+      "field: none or two": 99,
+      "excluded (used or probed)": 4,
+      "field: physics": 13,
+      "retracted or author manuscript": 1
+    },
+    "biophysics / Nat Commun": {
+      "field: physics": 9,
+      "field: none or two": 86,
+      "field: chemistry": 16,
+      "field: biochemistry": 13,
+      "field: computational biology": 10,
+      "retracted or author manuscript": 1,
+      "field: developmental biology": 4,
+      "not a research article": 14
+    },
+    "biophysics / Sci Rep": {
+      "field: none or two": 2
+    },
+    "developmental biology / Proc Natl Acad Sci U S A": {
+      "field: none or two": 300,
+      "not a research article": 61,
+      "excluded (used or probed)": 9,
+      "field: biochemistry": 23,
+      "field: chemistry": 12,
+      "field: physics": 18
+    },
+    "developmental biology / Nat Commun": {
+      "field: none or two": 2,
+      "field: computational biology": 1
+    },
+    "developmental biology / Sci Rep": {
+      "field: none or two": 47,
+      "field: biophysics": 1,
+      "field: biochemistry": 2,
+      "field: chemistry": 4,
+      "field: computational biology": 3,
+      "not a research article": 1
+    },
+    "developmental biology / Nature": {
+      "field: chemistry": 6,
+      "field: none or two": 32,
+      "field: computational biology": 4,
+      "field: biochemistry": 5,
+      "not a research article": 6,
+      "field: physics": 7,
+      "retracted or author manuscript": 2
+    },
+    "computational biology / PLoS Comput Biol": {
+      "not a research article": 1
+    },
+    "physics / Proc Natl Acad Sci U S A": {
+      "field: none or two": 59,
+      "not a research article": 13,
+      "excluded (used or probed)": 2,
+      "field: biochemistry": 4,
+      "field: developmental biology": 2
+    },
+    "physics / Sci Adv": {
+      "field: none or two": 25,
+      "excluded (used or probed)": 1
+    },
+    "physics / Nat Commun": {
+      "field: none or two": 2,
+      "field: chemistry": 1,
+      "field: developmental biology": 1,
+      "field: biochemistry": 1
+    },
+    "physics / Sci Rep": {
+      "field: none or two": 20,
+      "field: chemistry": 4,
+      "field: developmental biology": 1,
+      "not a research article": 1,
+      "field: computational biology": 1
+    },
+    "chemistry / Front Chem": {
+      "not a research article": 1
+    },
+    "chemistry / Nat Commun": {
+      "field: none or two": 8,
+      "field: biophysics": 1,
+      "field: biochemistry": 1,
+      "not a research article": 2,
+      "field: computational biology": 1
+    },
+    "chemistry / Sci Rep": {
+      "field: computational biology": 2,
+      "field: none or two": 22,
+      "field: developmental biology": 2,
+      "field: physics": 2,
+      "field: biophysics": 1
+    },
+    "chemistry / Proc Natl Acad Sci U S A": {
+      "field: none or two": 26,
+      "field: biochemistry": 3,
+      "field: physics": 2,
+      "not a research article": 5
+    },
+    "chemistry / Sci Adv": {
+      "field: none or two": 17,
+      "field: physics": 1,
+      "not a research article": 1
+    }
+  },
+  "candidates": {
+    "biochemistry / Proc Natl Acad Sci U S A": 4617,
+    "biochemistry / Nat Commun": 54268,
+    "biochemistry / Nature": 2596,
+    "biophysics / Sci Adv": 4742,
+    "biophysics / Nat Commun": 54268,
+    "biophysics / Sci Rep": 96916,
+    "developmental biology / Proc Natl Acad Sci U S A": 4617,
+    "developmental biology / Nat Commun": 54268,
+    "developmental biology / Sci Rep": 96916,
+    "developmental biology / Nature": 2596,
+    "computational biology / PLoS Comput Biol": 6125,
+    "physics / Proc Natl Acad Sci U S A": 4617,
+    "physics / Sci Adv": 4742,
+    "physics / Nat Commun": 54268,
+    "physics / Sci Rep": 96916,
+    "chemistry / Front Chem": 7665,
+    "chemistry / Nat Commun": 54268,
+    "chemistry / Sci Rep": 96916,
+    "chemistry / Proc Natl Acad Sci U S A": 4617,
+    "chemistry / Sci Adv": 4742
+  }
+}

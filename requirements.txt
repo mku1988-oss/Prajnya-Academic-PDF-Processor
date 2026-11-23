@@ -1,16 +1,19 @@
-# Prajnya v6.8.1 — dependencies
+# Prajnya v6.9.0 — dependencies
+#
+# PINNED EXACTLY (==) to the environment every published number was measured
+# on (researcher's standing order, 2026-11-22). Upgrading a package is a
+# deliberate step: raise its pin and run the corpus comparison first.
+# tests/test_requirements_pinned.py checks this file against the running env.
 #
 # LICENCE RULE: every line must be OSI-permissive
 # (Apache-2.0 / MIT / BSD). Annotate each entry with its licence.
 # AGPL and "community licence" components are banned.
 
 # --- Core -------------------------------------------------------------------
-pydantic>=2.0.0            # MIT
-PyYAML>=6.0                # MIT
-requests>=2.31.0           # Apache-2.0
-python-dotenv>=1.0.0       # BSD-3-Clause
-colorlog>=6.7.0            # MIT
-tqdm>=4.66.0               # MPL-2.0 + MIT (permissive, file-level copyleft only)
+pydantic==2.11.1           # MIT
+PyYAML==6.0.2              # MIT
+requests==2.32.3           # Apache-2.0
+python-dotenv==1.0.1       # BSD-3-Clause
 
 # --- PDF & imaging ----------------------------------------------------------
 pypdfium2==5.15.2          # Apache-2.0 OR BSD-3-Clause (PDFium: BSD-3-Clause)
@@ -22,9 +25,9 @@ pypdfium2==5.15.2          # Apache-2.0 OR BSD-3-Clause (PDFium: BSD-3-Clause)
 #   runs on 4.x (the suite passes on 4.30.0), but any version change needs its
 #   own corpus comparison first. 6.4.0's open range is why a fresh 6.3.0
 #   install crashed on every page.
-Pillow>=10.0.0             # MIT-CMU
-numpy>=1.24.0              # BSD-3-Clause
-opencv-python>=4.8.0       # Apache-2.0
+Pillow==10.4.0             # MIT-CMU
+numpy==1.26.4              # BSD-3-Clause
+opencv-python-headless==4.11.0.86   # Apache-2.0  (headless: no GUI libraries needed)
 # ^ used ONLY by layout/regions.find_unclaimed_ink (dilate + connected
 #   components), to recover table footnotes no detector boxed. It used to be
 #   imported without ever being declared — the same trap as fitz.
@@ -32,7 +35,7 @@ opencv-python>=4.8.0       # Apache-2.0
 #   ever matters, the function is small enough to reimplement in numpy.
 
 # --- Layout detection (Stage 2) ---------------------------------------------
-onnxruntime>=1.17.0        # MIT
+onnxruntime==1.21.0        # MIT
 # Model weights: PP-DocLayoutV3 (Apache-2.0), fetched per models/README.md.
 # Deliberately NOT installing paddlex/paddleocr — we run the exported ONNX
 # directly to keep the dependency surface to one wheel.
@@ -40,22 +43,22 @@ onnxruntime>=1.17.0        # MIT
 # of README.md.
 
 # --- Page classification ----------------------------------------------------
-scikit-learn>=1.3.0        # BSD-3-Clause  (DBSCAN, visual region clustering)
+scikit-learn==1.6.1        # BSD-3-Clause  (DBSCAN, visual region clustering)
 
 # --- Metadata enrichment ----------------------------------------------------
-pyzotero>=1.5.0            # Blue Oak Model License 1.0.0 (permissive, OSI-approved)
+pyzotero==1.6.9            # Blue Oak Model License 1.0.0 (permissive, OSI-approved)
 
 # --- Optional: cloud provider path ------------------------------------------
-google-genai>=0.3.0        # Apache-2.0
-aiohttp>=3.9.0             # Apache-2.0
+google-genai==1.56.0       # Apache-2.0
 
 # --- Testing ----------------------------------------------------------------
-pytest>=7.4.0              # MIT
-jsonschema>=4.17.3         # MIT  (test-only: tests/test_output_contract.py)
+pytest==8.4.1              # MIT
+jsonschema==4.23.0         # MIT  (tests: the output contract, the portable export)
 
 # --- GUI (Prajnya Studio) -----------------------------------------------------
-nicegui>=1.4.0              # MIT
-latex2mathml>=3.77.0       # MIT  (formulas in Studio's table view; NiceGUI 3.x no longer installs it)
+nicegui==3.3.1             # MIT
+aiohttp==3.11.18           # Apache-2.0  (required by NiceGUI; pinned so it is the measured one)
+latex2mathml==3.78.0       # MIT  (formulas in Studio's table view; NiceGUI 3.x no longer installs it)
 
 # =============================================================================
 # NOT DECLARED HERE — deliberate
@@ -68,6 +71,8 @@ latex2mathml>=3.77.0       # MIT  (formulas in Studio's table view; NiceGUI 3.x 
 #   implementation may use PyMuPDF *if installed locally*, with pypdfium2
 #   (Apache-2.0/BSD-3) as the permissive path. Resolve before any closed-source
 #   or SaaS distribution. See the Licence section of README.md.
+#
+# colorlog, tqdm  —  declared before v6.9, imported nowhere; dropped.
 #
 # pytesseract  —  Apache-2.0 wrapper, but Tesseract itself is Apache-2.0.
 #   Carried previously; re-add only if the scanned-document path needs it.

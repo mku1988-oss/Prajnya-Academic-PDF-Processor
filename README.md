@@ -2,7 +2,7 @@
 
 ### Scientific PDF Processing Engine for RAG
 
-![Status](https://img.shields.io/badge/Status-Active%20development-orange?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.8.1-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Active%20development-orange?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.9.0-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge)
 
 <p align="center">
   <img src="assets/readme/prajnya_overview.png" alt="Prajnya: scientific PDFs into RAG-ready JSON, fully offline on one 8 GB GPU. Figures and panel groups, tables rebuilt as grids, figure and table mentions linked to their objects, citations linked to references, metadata verified" width="100%">
@@ -130,13 +130,31 @@ model, or giving one job to a cloud model, is a configuration change.
 
 ## Measured
 
-Prajnya was benchmarked against leading open-source tools on 40 biology
-papers, drawn at random and scored blind against each publisher's own
-structured version of the article. It is strongest at finding figures and
-tables under their printed labels, reading table structure, and linking in-text
-mentions to the right figure or table. It trails on body-text cleanliness,
-author order and citation recall for author–year styles, and it is the slowest
-of the tools measured.
+Prajnya is benchmarked on research articles it has never seen, drawn at
+random and scored blind against each publisher's own structured version of
+the article (no hand labelling). The latest round: v6.9.0 on 40 papers in
+biology, physics and chemistry.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benchmark/plots/prajnya_by_field_dark.png">
+  <img src="benchmark/plots/prajnya_by_field_light.png" alt="Prajnya's mean scores on 40 unseen papers, per field: figures found 0.97, figure crops right 0.91, table structure 0.92, display formulas 0.89, figure mentions found 0.88, title 1.00, DOI 0.90, year 1.00" width="100%">
+</picture>
+
+Every figure comes out as its own crop, cut to the figure's true outline. A
+typical one, chosen by rule rather than by eye:
+
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benchmark/plots/prajnya_crop_dark.png">
+  <img src="benchmark/plots/prajnya_crop_light.png" alt="A PLOS Computational Biology page with Prajnya's crop of Figure 6 drawn over the figure's true box; IoU 0.97" width="60%">
+</picture>
+</p>
+
+Compared with leading open-source tools, Prajnya is strongest at finding
+figures and cropping them accurately, reading table structure and display
+formulas, and linking figure and table mentions to their objects. It trails
+on body-text cleanliness, reference titles and citation links, and it is the
+slowest of the tools measured.
 
 The benchmark, its protocol and every result are in
 [**BENCHMARK.md**](BENCHMARK.md); the code to rerun it is in
@@ -159,7 +177,8 @@ title or citation leaves your machine.
 - **read anything but PDFs.** No DOCX, HTML or slides.
 - **install in one click.** Local mode needs `llama-server` and about 13 GB of
   model weights. Cloud models are optional, per job.
-- **race to be fastest.** About 11 s per page on an 8 GB laptop GPU. It would
+- **race to be fastest.** About 11 to 17 s per page on an 8 GB laptop GPU,
+  depending on the papers. It would
   rather take longer than hand you a wrong table, caption or citation.
 
 ---
@@ -266,7 +285,7 @@ If you use Prajnya in your research, please cite:
   title   = {Prajnya: A Scientific PDF Processing Engine},
   author  = {Manu Unni},
   year    = {2026},
-  version = {6.8.1},
+  version = {6.9.0},
   url     = {https://github.com/mku1988-oss/Prajnya-Academic-PDF-Processor}
 }
 ```

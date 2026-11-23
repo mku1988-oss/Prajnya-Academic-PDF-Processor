@@ -56,6 +56,7 @@ from ...utils.figure_label_pass import build_text_lines, label_words
 from ...utils.table_labels import find_table_title, table_label_of
 from ...utils.text_normalization import normalize_harvested_text
 from ...utils.table_continuation import ContinuationTracker
+from ...utils.table_formulas import MIN_FLAT_CELLS, flat_equation_cells, with_formula_cells
 from ...utils.table_orientation import table_read_image
 from ...utils.table_repair import CropReader, RecoveredTable
 from ...utils.table_sections import read_table_with_sections
@@ -128,6 +129,7 @@ def extract_page_tables(
     logger: Optional[logging.Logger] = None,
     read_table_crop: Optional[CropReader] = None,
     continuation: Optional[ContinuationTracker] = None,
+    read_formula_crop: Optional[CropReader] = None,
 ) -> List[TableAsset]:
     """
     Crop and save every table on this page, tagging each with its caption.
@@ -155,6 +157,9 @@ def extract_page_tables(
         continuation: the document's header carry (`utils/table_continuation.py`).
             Gives a header-less continuation table the previous page's column
             headers. None reads every table on its own, as before.
+        read_formula_crop: reads one cropped table with the model's formula
+            prompt. Used only for a table whose grid has equations written
+            as plain text (`utils/table_formulas.py`). None: no second read.
 
     Returns:
         One `TableAsset` per saved table, in page order; [] when none.
@@ -180,9 +185,11 @@ def extract_page_tables(
                 page=page, page_image=page_image, box=region.box,
                 detections=detections, out_dir=out_dir,
                 page_number=page_idx + 1, index=index,
-                grid=_grid_for(region, grid_lookup, page_image,
-                               read_table_crop, page_idx + 1, log, page,
-                               continuation=continuation),
+                grid=_with_formulas(
+                    _grid_for(region, grid_lookup, page_image,
+                              read_table_crop, page_idx + 1, log, page,
+                              continuation=continuation),
+                    region, page_image, page, read_formula_crop, page_idx + 1, log),
                 path_root=path_root, logger=log,
             ))
         except Exception as error:
@@ -444,6 +451,41 @@ def _plain_grid(
     # after the first (t12 lost 64 of 82 values). Runs on the repair path's
     # grid too: that is where t12's came from.
     return _with_sections(crop, text, read_table_crop, page_number, box, logger)
+
+
+def _with_formulas(
+    grid: Optional[str],
+    region: TableRegion,
+    page_image: "Image.Image",
+    page: Optional[PdfPage],
+    read_formula_crop: Optional[CropReader],
+    page_number: int,
+    logger: logging.Logger,
+) -> Optional[str]:
+    """
+    The grid with its flat equation cells in LaTeX, when it has enough of them.
+
+    For biology researchers: the table reader writes some equation tables as
+    plain text ("1/T1=Rc+hb/h(Rbp-Rc)", every subscript lost). Such a table
+    (at least MIN_FLAT_CELLS equation cells) is read once more with the
+    formula prompt, and the equation cells are swapped for that read's LaTeX
+    (`utils/table_formulas.py`). Every other table, and any table whose
+    second read fails, keeps its grid exactly as read.
+    """
+    if not grid or read_formula_crop is None or flat_equation_cells(grid) < MIN_FLAT_CELLS:
+        return grid
+    try:
+        latex_read = read_formula_crop(table_read_image(page_image, region.reading_box, page))
+        merged = with_formula_cells(grid, latex_read or "")
+    except Exception as error:  # the LaTeX is a bonus, never a risk
+        logger.warning("Formula read failed on page %d at %s: %s",
+                       page_number, tuple(region.box), error)
+        return grid
+    logger.info("Page %d table at %s: %d of %d equation cells now LaTeX",
+                page_number, tuple(region.box),
+                flat_equation_cells(grid) - flat_equation_cells(merged),
+                flat_equation_cells(grid))
+    return merged
 
 
 def _with_sections(
