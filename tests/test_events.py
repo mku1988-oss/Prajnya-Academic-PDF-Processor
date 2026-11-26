@@ -335,9 +335,14 @@ class TestTheEmissionPointsAreActuallyWired:
     def test_the_batch_loop_emits_document_events(self):
         import inspect
 
+        from src.processing import runner
         from src.processing.runner import process_batch, process_one
 
-        assert '"document_start"' in inspect.getsource(process_batch)
+        # T39: both batch loops (Studio's per-document one and the CLI's
+        # batch by model) announce each document through `_announce`.
+        assert '"document_start"' in inspect.getsource(runner._announce)
+        assert "_announce(" in inspect.getsource(runner._process_each)
+        assert "_announce(" in inspect.getsource(runner._process_by_model)
         assert '"batch_done"' in inspect.getsource(process_batch)
         assert '"document_done"' in inspect.getsource(process_one)
         assert '"document_failed"' in inspect.getsource(process_one)

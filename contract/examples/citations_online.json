@@ -7,7 +7,7 @@
     "status": "success",
     "failed_pages": [],
     "pipeline_version": "v6.6.0",
-    "contract_version": "1.6",
+    "contract_version": "1.7",
     "provenance": {
       "python": "3.10.16",
       "os": "Windows 10.0.26300",
@@ -20,7 +20,9 @@
         {"role": "understanding", "model": "olmocr-2-7b", "file": "olmOCR-2-7B-1025.Q5_K_M.gguf", "quantisation": "Q5_K_M"}
       ],
       "llama_server": {"build": "b7000-0123abc"},
-      "gpu": {"name": "NVIDIA GeForce RTX 4070 Laptop GPU", "driver": "617.42", "cuda": "13.4"}
+      "gpu": {"name": "NVIDIA GeForce RTX 4070 Laptop GPU", "driver": "617.42", "cuda": "13.4"},
+      "source": {"commit": "0123456789abcdef0123456789abcdef01234567", "dirty": false},
+      "config_sha256": "3b1f0c6a9e5d2b7f8a4c1e0d9b6a3f2e7c5d8b1a4f0e3c6b9d2a5f8e1c4b7a0d"
     }
   },
   "metadata_final": {

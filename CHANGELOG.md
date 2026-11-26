@@ -6,6 +6,51 @@ it in `document_info.pipeline_version`.
 
 ---
 
+## 6.10.0
+
+Speed. The 9-PDF sample corpus runs 15.6% faster than 6.9.0 (articles 25%
+faster) with the same figures, tables, references and metadata. The output
+contract goes from 1.6 to 1.7 by adding fields; every existing field keeps its
+meaning.
+
+- **The title page is read from the PDF's own text.** On a born-digital title
+  page, the first of the two title-page reads now takes the text stored in
+  the PDF instead of asking the vision model to transcribe the page image
+  (about 22 s saved per paper). The second read, which fills in title,
+  authors, journal and DOI, still sees the image. A scanned page, or one
+  with fewer than 50 words of text, is still transcribed by the model.
+  Superscripts and subscripts in that text are marked from the characters'
+  size and position, so an affiliation letter is no longer glued to a
+  surname ("Harvey-Samuela"). Page 1's `content` is now that text; a
+  graphical abstract's in-image labels, which the model used to read off
+  the picture, are no longer in it. To go back:
+  `vlm_provider.title_page.shot1_source: vlm`.
+- **Titles carry real subscripts and superscripts.** "CO$_{2}$",
+  "Ca^{2+}" or "P2RY_{12}" in a title is written "CO₂", "Ca²⁺", "P2RY₁₂"
+  (the plain characters when Unicode has no such form).
+- **A folder is processed model by model.** In chunks of 25 documents,
+  every title page is read first, then every body, so the two vision models
+  are each loaded once per chunk instead of once per document. Title pages
+  wait on disk in the run folder between the two steps and are removed when
+  the run ends. `--chunk-size 1` (or `batching.chunk_size: 1`) restores the
+  old one-document-at-a-time order. Prajnya Studio still runs one document
+  at a time.
+- **The title-page model no longer spills into system memory.** Its batch
+  size was halved (`ubatch-size` 1024 in `model.ini`), which kept it from
+  overflowing an 8 GB card into much slower shared memory; the title page
+  went from about 52 s to 28 s.
+- **Each output records the code and the settings that produced it**
+  (contract 1.7). `provenance.source` gives the git commit (and whether
+  files had been changed from it), `provenance.config_sha256` one hash of
+  the effective configuration: equal hashes mean equal settings, across
+  machines. No path and no key is hashed.
+- **Prajnya Studio's exposure is pinned by tests:** it listens on this
+  computer only unless started with `--host`, and serves only its own icons
+  and the output folder.
+- **Windows is the only tested platform**, as the README now says.
+- **Benchmark protocol amendment A13** (for the next round): every tool runs
+  in its own batch mode and time is reported per page over the whole corpus.
+
 ## 6.9.0
 
 Formulas, figures and citations, and a second benchmark round. The output

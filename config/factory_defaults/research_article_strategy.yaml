@@ -116,9 +116,24 @@ vlm_provider:
     resolution_override: 1288
     shot1_task: '@task_registry.raw_ocr'
     shot2_task: '@task_registry.structured_title'
+    # Where shot 1's text comes from (T37, eval/title_text_layer/GATE.md):
+    #   vlm         the model transcribes the page image (every release to v6.9)
+    #   text_layer  a born-digital page's own stored text, free; a scanned page
+    #               or one with < 50 words of text still goes to the model.
+    # Shot 2 always sees the image (a text-only shot 2 was rejected, session 8).
+    # text_layer from v6.10.0 (T37-T37e, researcher, session 47).
+    shot1_source: text_layer
   body_pages:
     resolution_override: 1024
     profile: '@profile_registry.default'
+    # How a page with figures or tables is read (T38b, researcher 2026-11-24):
+    #   vlm_full    the vision model reads the whole page (every release to v6.9)
+    #   text_first  the PDF's text layer, minus figure/table/caption text, when
+    #               the page passes four guards (no maths, clean characters, no
+    #               glued sub/superscripts); figures and tables still from their
+    #               crops. 10 unseen papers: same quality, -19% wall time
+    #               (eval/text_first_body/GATE_T38b.md).
+    read_mode: vlm_full
 quality:
   minimum_overall_score: 0.5
   minimum_page_score: 0.3
@@ -130,6 +145,17 @@ metadata:
   validate_doi_format: true
   validate_year_range: true
   fallback_to_pdf_metadata: true
+# --- Batch by model (T39, eval/batch_by_model/GATE.md) ---------------------
+# A folder run reads the title page of every document in a chunk with the
+# title model, then every body with the body model: the two cannot share the
+# 8 GB GPU and each swap costs ~14 s, so this swaps twice per CHUNK instead of
+# twice per paper. Title-page readings wait on disk between the phases
+# (<run>/.title_pages/, removed after the run), never in memory.
+#   chunk_size  documents per chunk. Bigger = fewer swaps; smaller = first
+#               results sooner. 1 = title then body per document (pre-T39
+#               order). `--chunk-size N` overrides it for one run.
+batching:
+  chunk_size: 25
 performance:
   image_format: png
   image_padding: 200

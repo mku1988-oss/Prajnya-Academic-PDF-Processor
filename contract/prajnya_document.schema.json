@@ -3,7 +3,7 @@
   "$id": "urn:prajnya:document-contract:1",
   "title": "Prajnya document JSON",
   "description": "One file per processed PDF: run_outputs/documents/<name>.v6.json. This schema pins the part other programs may rely on. Keys it does not name (for example pages[].metadata.analysis) are internal and may change in any release. Unknown extra keys are always allowed, so adding a key is never a breaking change. See contract/README.md for the version rules.",
-  "x-contract-version": "1.6",
+  "x-contract-version": "1.7",
   "type": "object",
   "required": ["document_info", "metadata_final", "pages", "summary", "profile"],
   "if": {
@@ -43,6 +43,11 @@
       "$comment": "Contract 1.6 added document_info.provenance (null when not recorded).",
       "if": {"required": ["document_info"], "properties": {"document_info": {"required": ["contract_version"], "properties": {"contract_version": {"pattern": "^(1\\.([6-9]|[1-9]\\d+)|([2-9]|[1-9]\\d+)\\.\\d+)$"}}}}},
       "then": {"properties": {"document_info": {"required": ["provenance"]}}}
+    },
+    {
+      "$comment": "Contract 1.7 added provenance.source and provenance.config_sha256 (each null when not recorded; provenance itself may still be null).",
+      "if": {"required": ["document_info"], "properties": {"document_info": {"required": ["contract_version"], "properties": {"contract_version": {"pattern": "^(1\\.([7-9]|[1-9]\\d+)|([2-9]|[1-9]\\d+)\\.\\d+)$"}}}}},
+      "then": {"properties": {"document_info": {"properties": {"provenance": {"required": ["source", "config_sha256"]}}}}}
     }
   ],
   "properties": {
@@ -98,7 +103,18 @@
               }
             },
             "llama_server": {"type": ["object", "null"], "properties": {"build": {"type": ["string", "null"]}}},
-            "gpu": {"type": ["object", "null"], "properties": {"name": {"type": "string"}, "driver": {"type": "string"}, "cuda": {"type": ["string", "null"]}}}
+            "gpu": {"type": ["object", "null"], "properties": {"name": {"type": "string"}, "driver": {"type": "string"}, "cuda": {"type": ["string", "null"]}}},
+            "source": {
+              "type": ["object", "null"],
+              "description": "Contract 1.7. The Prajnya git commit the code came from; dirty: tracked files differed from it. null when the code is not a git checkout (a downloaded archive) or the file predates 1.7.",
+              "required": ["commit", "dirty"],
+              "properties": {"commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "dirty": {"type": ["boolean", "null"]}}
+            },
+            "config_sha256": {
+              "type": ["string", "null"],
+              "pattern": "^[0-9a-f]{64}$",
+              "description": "Contract 1.7. sha256 of the effective configuration: every config file as parsed (comments ignored), model paths reduced to file names, ${VAR} placeholders unexpanded (no secret is hashed), plus the run's one-run overrides (citation level, chunk size, pages, backend). Equal hashes = equal settings. null when it could not be computed or the file predates 1.7."
+            }
           }
         }
       }

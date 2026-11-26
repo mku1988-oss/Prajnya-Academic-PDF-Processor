@@ -33,7 +33,7 @@ LOG = logging.getLogger(__name__)
 
 #: Stamped into every document's `document_info`, so an output file says which
 #: pipeline produced it.
-PIPELINE_VERSION = "v6.9.0"
+PIPELINE_VERSION = "v6.10.0"
 
 #: The version of the output FORMAT, which moves independently of the release.
 #: Stamped into `document_info.contract_version`, and pinned against
@@ -49,7 +49,8 @@ PIPELINE_VERSION = "v6.9.0"
 #: 1.4 (post-release fix cycle): `metadata_final.author_names`.
 #: 1.5 (v6.8, audit D1): `document_info.status` and `document_info.failed_pages`.
 #: 1.6 (v6.9, audit D8 + L5): `document_info.provenance`, what produced the run.
-CONTRACT_VERSION = "1.6"
+#: 1.7 (v6.10, audit 2.4): `provenance.source` (git commit) and `provenance.config_sha256`.
+CONTRACT_VERSION = "1.7"
 
 
 def write_result(profile: DocumentProfile, out_path: Path, elapsed: float,

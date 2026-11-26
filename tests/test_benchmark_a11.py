@@ -13,6 +13,11 @@ import numpy as np
 import pytest
 from PIL import Image
 
+# The benchmark's own packages are not Prajnya dependencies (requirements.txt);
+# a plain install, such as the release's CI, skips these tests.
+pytest.importorskip("lxml")
+pytest.importorskip("rapidfuzz")
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "benchmark"))
 from ground_truth.jats_to_common import jats_to_common          # noqa: E402
 from harness.figure_locator import (crop_iou, locate_figure,     # noqa: E402

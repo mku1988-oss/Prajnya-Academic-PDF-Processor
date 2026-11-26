@@ -160,11 +160,13 @@ from src.processing.runner import (
     open_ledger as _open_ledger,
     process_batch,
     process_one,
+    read_title_pages,
     record_document,
     record_outcome,
     resolve_decisions,
     run_preflight,
 )
+from src.processing.title_page_store import TitlePageStore
 
 
 def main() -> int:
@@ -314,11 +316,17 @@ def run_one_document(pdf_path: Path, args: argparse.Namespace,
     entry = PreflightEntry(path=pdf_path, document_type=profile.document_type,
                            confidence=profile.classification_confidence or 0.0,
                            page_count=profile.page_count, decision=decision)
+    # A single PDF is a chunk of one (T39): the same title phase, then the
+    # same body phase, as a batch. Its saved title page is removed once the
+    # document is done; after a crash it stays for the re-run.
+    title_pages = TitlePageStore(request.out_root, logger=log)
+    read_title_pages([entry], request, backend, title_pages, log)
     # The profile is handed on rather than rebuilt: deciding whether this was a
     # book already cost one full front-matter scan, and the answer has not
     # changed since.
     outcome = process_one(entry, request, backend=backend, logger=log,
-                          profile=profile)
+                          profile=profile, title_pages=title_pages)
+    title_pages.discard(pdf_path)
 
     if outcome.error:
         log.error("Failed: %s", outcome.error)
@@ -510,6 +518,12 @@ def _parse_args() -> argparse.Namespace:
                              f"(default: {DEFAULT_FRONT_MATTER_PAGES})")
     parser.add_argument("--backend", default=None,
                         help="PDF backend name (default: pypdfium2)")
+    parser.add_argument("--chunk-size", type=int, default=None,
+                        help="documents per chunk in a folder run: the title model reads "
+                             "every title page of a chunk, then the body model every "
+                             "body, so models swap twice per chunk instead of twice per "
+                             "paper. 1 = title then body per document. Default: "
+                             "`batching.chunk_size` in config/research_article_strategy.yaml")
     parser.add_argument("--verbose", action="store_true", help="DEBUG logging")
     return parser.parse_args()
 

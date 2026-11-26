@@ -2,7 +2,7 @@
 
 ### Scientific PDF Processing Engine for RAG
 
-![Status](https://img.shields.io/badge/Status-Active%20development-orange?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.9.0-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Active%20development-orange?style=for-the-badge) ![Version](https://img.shields.io/badge/Version-6.10.0-blue?style=for-the-badge) ![License](https://img.shields.io/badge/License-Apache%202.0-purple?style=for-the-badge) ![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge)
 
 <p align="center">
   <img src="assets/readme/prajnya_overview.png" alt="Prajnya: scientific PDFs into RAG-ready JSON, fully offline on one 8 GB GPU. Figures and panel groups, tables rebuilt as grids, figure and table mentions linked to their objects, citations linked to references, metadata verified" width="100%">
@@ -185,7 +185,9 @@ title or citation leaves your machine.
 
 ## Installation
 
-**Requirements:** Windows 10/11 or Linux; Python **3.10**; for local mode an
+**Requirements:** Windows 10/11 (the only platform tested: CI and every
+published number run on Windows; Linux and macOS may work but are untested);
+Python **3.10**; for local mode an
 8 GB NVIDIA GPU, [llama.cpp](https://github.com/ggml-org/llama.cpp)'s
 `llama-server`, and ~13 GB of model weights. In cloud mode no GPU is needed.
 
@@ -285,7 +287,7 @@ If you use Prajnya in your research, please cite:
   title   = {Prajnya: A Scientific PDF Processing Engine},
   author  = {Manu Unni},
   year    = {2026},
-  version = {6.9.0},
+  version = {6.10.0},
   url     = {https://github.com/mku1988-oss/Prajnya-Academic-PDF-Processor}
 }
 ```

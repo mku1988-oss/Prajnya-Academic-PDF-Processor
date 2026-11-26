@@ -20,6 +20,8 @@ profile's `model_type` for cloud, `local_server.enabled` +
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -92,7 +94,8 @@ class ResearchArticleStrategy:
         self.logger.info("Research article strategy initialized with config-driven settings")
 
     def process(self, profile: DocumentProfile,
-                test_pages_override: Optional[List[int]] = None) -> DocumentProfile:
+                test_pages_override: Optional[List[int]] = None,
+                title_page: Optional[ContentPage] = None) -> DocumentProfile:
         """
         Process a document, populating `profile.processing_result`.
 
@@ -100,6 +103,9 @@ class ResearchArticleStrategy:
             profile: the document profile (path, page count, quick identifiers).
             test_pages_override: optional list of 1-based page numbers, used
                 by the parity harness to run a subset.
+            title_page: a title page already read by `read_title_page` in a
+                batch's first phase (T39). None reads it here, as before.
+                Ignored on the cloud path.
 
         Returns:
             The same profile, its `processing_result` filled in. The strategy
@@ -118,7 +124,7 @@ class ResearchArticleStrategy:
                         cache, profile, test_pages_override)
                 else:
                     all_pages, bibliographic = self._run_local(
-                        cache, profile, test_pages_override)
+                        cache, profile, test_pages_override, title_page)
         except Exception as error:
             message = f"Strategy execution failed: {type(error).__name__} - {error}"
             self.logger.error(message, exc_info=True)
@@ -135,6 +141,54 @@ class ResearchArticleStrategy:
         )
         self.logger.info("Research article processing complete.")
         return profile
+
+    def read_title_page(self, profile: DocumentProfile) -> Optional[ContentPage]:
+        """
+        Phase 1 of a batch by model (T39): read ONLY the title page.
+
+        For biology researchers: a batch reads every title page with the
+        title model first, then every body with the body model, so the GPU
+        swaps models twice per chunk instead of twice per paper. This is the
+        first half; `process(profile, title_page=...)` is the second.
+
+        It is exactly the title-page step of `_run_local` — the same GPU
+        reservation, the same two-shot read — and nothing more. Metadata is
+        NOT derived here: that happens in phase 2 from this reading.
+
+        Args:
+            profile: the document profile (its PDF and title-page index).
+
+        Returns:
+            The title page as the model returned it, or None on the cloud
+            path, which is not batched (a cloud call swaps no model).
+
+        Raises:
+            Whatever the read raises; the runner records it, and phase 2 then
+            processes the document the ordinary way.
+        """
+        if self.use_cloud_pipeline:
+            return None
+        with DocumentCache(self.backend, profile.pdf_path, logger=self.logger) as cache:
+            return self._read_title_page(cache, profile)
+
+    def title_settings_key(self) -> str:
+        """
+        A fingerprint of everything that decides what the title page reads.
+
+        A saved title page (see `title_page_store.py`) is trusted only when
+        this matches, so a changed model, profile, task or resolution can
+        never hand phase 2 a reading made under other settings.
+        """
+        settings = {
+            "model": self.title_model,
+            "profile": self.title_profile_data,
+            "shot1_task": self.title_shot1_task,
+            "shot2_task": self.title_shot2_task,
+            "resolution": self.title_resolution,
+            "shot1_source": self.title_shot1_source,
+        }
+        encoded = json.dumps(settings, sort_keys=True, default=str).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
 
     def get_title_detection_config(self) -> Dict[str, str]:
         """
@@ -197,6 +251,10 @@ class ResearchArticleStrategy:
         self.title_resolution = title_cfg.get("resolution_override", 1288)
         self.title_shot1_task = resolve_reference(title_cfg.get("shot1_task"), self.config)
         self.title_shot2_task = resolve_reference(title_cfg.get("shot2_task"), self.config)
+        # T37: where shot 1's text comes from ("vlm" = the model reads the
+        # image, as every release to v6.9; "text_layer" = the PDF's own text
+        # on a born-digital page). See eval/title_text_layer/GATE.md.
+        self.title_shot1_source = title_cfg.get("shot1_source", "vlm")
 
         title_profile_name = resolve_reference(title_cfg.get("profile"), self.config)
         self.title_profile_data = self.loader.vlm_profile(title_profile_name)
@@ -297,16 +355,19 @@ class ResearchArticleStrategy:
             return ""
 
     def _run_local(self, cache: DocumentCache, profile: DocumentProfile,
-                   test_pages_override: Optional[List[int]]):
-        """Title two-shot -> enrichment -> GLM two-phase body."""
-        self._reserve_gpu_for(self.title_model)
+                   test_pages_override: Optional[List[int]],
+                   title_page: Optional[ContentPage] = None):
+        """
+        Title two-shot -> enrichment -> GLM two-phase body.
 
-        self.logger.info("Processing page 1/%d (title page metadata)...",
-                         profile.page_count)
-        title_page = process_title_page(
-            cache, profile.title_page_index, self.factory, self.title_profile_data,
-            self.title_shot1_task, self.title_shot2_task, self.title_resolution,
-            logger=self.logger)
+        `title_page`, when given, was read in a batch's first phase (T39); the
+        title model is then not touched here at all.
+        """
+        if title_page is None:
+            title_page = self._read_title_page(cache, profile)
+        else:
+            self.logger.info("Title page (page %d): using the reading from the "
+                             "batch's title phase", profile.title_page_index + 1)
         pages = [title_page]
 
         bibliographic = extract_metadata_from_page1(title_page, profile.pdf_path,
@@ -318,6 +379,18 @@ class ResearchArticleStrategy:
             self.logger.info("Body pages: GLM two-phase offline path")
             pages.extend(self.body_pipeline.process_body_pages(cache, body_indices))
         return pages, bibliographic
+
+    def _read_title_page(self, cache: DocumentCache,
+                         profile: DocumentProfile) -> ContentPage:
+        """The title model alone on the GPU, then the two-shot title-page read."""
+        self._reserve_gpu_for(self.title_model)
+
+        self.logger.info("Processing page 1/%d (title page metadata)...",
+                         profile.page_count)
+        return process_title_page(
+            cache, profile.title_page_index, self.factory, self.title_profile_data,
+            self.title_shot1_task, self.title_shot2_task, self.title_resolution,
+            logger=self.logger, shot1_source=self.title_shot1_source)
 
     def _reserve_gpu_for(self, model: Optional[str]) -> None:
         """

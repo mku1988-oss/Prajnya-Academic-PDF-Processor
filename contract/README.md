@@ -7,7 +7,7 @@ This folder says exactly what they may rely on.
 - **`prajnya_document.schema.json`** is the promise, as a JSON Schema
   (draft 2020-12). It is checked by `tests/test_output_contract.py` against
   the writer's output and against every document in `run_outputs/`.
-- **Contract version: 1.6.** Every file written from v6.4.0 on says its
+- **Contract version: 1.7.** Every file written from v6.4.0 on says its
   version in `document_info.contract_version`. A file without that key was
   written by 6.3.0 or earlier and follows contract 1.0 in every respect.
 - **`examples/`** holds two small hand-written documents that follow the
@@ -27,6 +27,7 @@ This folder says exactly what they may rely on.
 | 1.4 | v6.8.0 | `metadata_final.author_names`: each author as `{given, family}`, in the order of `authors`, when a registry record gave the surname apart (Crossref at level `online`); `[]` otherwise. A compound surname ("Rosendahl Huber", "García Martínez de Artola") cannot be told from the joined string by any rule. Additive. |
 | 1.5 | v6.8.0 | `document_info.status` (`success`, `partial`, `failed`) and `document_info.failed_pages`: whether every page was read. Before 1.5 a page whose reading failed was written empty and the file still said `success: true`. Additive; `success` keeps its meaning. |
 | 1.6 | v6.9.0 | `document_info.provenance`: what produced the run (Python, OS, the PDF and imaging library versions, the PDFium build, the layout model file, each model role's model file and quantisation, the llama.cpp build, the GPU, driver and CUDA version). File names only, never paths. `null` when not recorded (an older file re-cited later). Also `pages[].metadata.display_formulas` on text-layer pages (rule 22). Additive. |
+| 1.7 | v6.10.0 | `provenance.source` (the Prajnya git commit, and whether tracked files differed from it; `null` outside a git checkout) and `provenance.config_sha256` (one hash of the effective configuration: config files as parsed, model paths as file names, `${VAR}` unexpanded, plus the run's overrides). Each `null` when not recorded. Additive. |
 
 Anything the schema does not name is internal and may change in any release:
 for example `pages[].metadata.analysis`, `coverage`, and the rest of the
@@ -48,7 +49,8 @@ A file is held to what its own `contract_version` promises: from 1.1 it
 must carry `citations`, from 1.2 `mentions`, from 1.3 each page's `body`,
 `furniture` and `outside_body`, from 1.4 `metadata_final.author_names`, from
 1.5 `document_info.status` and `failed_pages`, from 1.6
-`document_info.provenance` (which may be `null`). An older file, or one with no
+`document_info.provenance` (which may be `null`), from 1.7 its `source` and
+`config_sha256` (each may be `null`). An older file, or one with no
 version stamp, is not held to the later rules. A new key added in a MINOR
 version goes into the schema's `allOf` list the same way, so a file that
 claims the new version cannot leave it out.
@@ -71,7 +73,12 @@ compares the first two fails if you forget.
    `metadata.error`, and its `content` is not a reliable reading. A reader
    should skip or flag these pages, not index them as text.
 4. **`pymupdf` is the text-layer route's historical name.** The text layer is
-   now read with pypdfium2. The label is kept so old and new files agree.
+   now read with pypdfium2 (no PyMuPDF code runs). The label is kept so old
+   and new files agree. It means the page's TEXT came from the text layer.
+   From v6.10 a page with figures or tables can carry it too, when the run
+   sets `body_read_mode: text_first` (off by default): its figures and
+   tables are still cut and read from their crops, and its `page_type` is
+   `simple_visual`. The label will be replaced in contract 2.0.
 5. **Table `grid` is an HTML `<table>` string, and cells can contain LaTeX
    between `$...$`.** About 9 of the 31 corpus tables have such cells. Treat
    `$...$` as math markup, not prose. Cell text is a model's reading and can
@@ -156,6 +163,8 @@ compares the first two fails if you forget.
     lists the model configured for each role; which pages actually used a
     model is in each page's `processing_method`. A part that could not be
     read on that machine (no GPU, the model server not running) is `null`.
+    From 1.7, `source.commit` names the code and `config_sha256` the
+    settings: two runs with equal hashes ran with the same configuration.
 22. **A text-layer page can hold LaTeX** (from v6.9, contract 1.6). On a
     page read from the text layer (`processing_method: pymupdf`), each
     display equation the layout model finds is read from its crop and

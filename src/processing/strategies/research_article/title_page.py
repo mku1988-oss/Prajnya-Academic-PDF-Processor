@@ -30,13 +30,28 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from ...models import ContentPage
 from ...events import emit
+from ...pdf.base import PdfPage
 from ...utils.anchor_extractor import extract_document_anchoring
+from ...utils.content_drop_check import is_scanned_page
+from ...utils.script_marking import (
+    recase_capitals_journal, text_with_scripts, unicode_scripts, without_script_marks,
+)
+from ...utils.text_normalization import normalize_harvested_text
 from .provider_factory import ProviderFactory
 from .rendering import DocumentCache
+
+#: Shot 1's text comes from the PDF's text layer on a born-digital title page
+#: (T37, eval/title_text_layer/GATE.md), or from the vision model ("vlm").
+SHOT1_TEXT_LAYER = "text_layer"
+SHOT1_VLM = "vlm"
+
+#: Below this many words, a text layer is too thin to stand in for shot 1
+#: (a cover page with one image, a broken text layer): the model reads it.
+MIN_TEXT_LAYER_WORDS = 50
 
 
 def process_title_page(
@@ -48,6 +63,7 @@ def process_title_page(
     shot2_task: str,
     resolution: int,
     logger: Optional[logging.Logger] = None,
+    shot1_source: str = SHOT1_VLM,
 ) -> ContentPage:
     """
     Run the two-shot title-page read and return the page with its metadata.
@@ -63,6 +79,9 @@ def process_title_page(
         resolution: render size for the title page (1288px in config — chosen
             so the footer DOI survives).
         logger: optional logger.
+        shot1_source: "vlm" (the model transcribes the page) or "text_layer"
+            (T37: on a born-digital page, the PDF's own text stands in for
+            shot 1; a scanned or near-empty page still goes to the model).
 
     Returns:
         A `ContentPage` whose content is the deduplicated shot-1 text and
@@ -83,24 +102,14 @@ def process_title_page(
 
         two_shot_params = title_profile_data.get("two_shot_parameters", {})
 
-        # --- Shot 1: raw OCR (faithful transcription) ----------------------
-        log.info("Title Page Shot 1: Raw OCR extraction...")
+        # --- Shot 1: the page's full text -----------------------------------
         shot1_start = time.time()
-        shot1_params = two_shot_params.get("shot1_ocr", {})
-        shot1_provider = factory.build_shot(
-            title_profile_data, shot1_task,
-            temperature=shot1_params.get("temperature", 0.05),
-            max_tokens=shot1_params.get("max_tokens", 8192),
-            repeat_penalty=shot1_params.get("repeat_penalty", 1.15),
-            frequency_penalty=shot1_params.get("frequency_penalty", 0.1),
-        )
-        # The anchor text gives structural guidance about the whole page
-        # without biasing the model toward specific regions.
-        shot1_result = shot1_provider.process_page(image, base_text=anchor_text)
-        raw_text = shot1_result.get("content", "")
+        raw_text, used_source = _shot1_text(
+            page, image, anchor_text, factory, title_profile_data, shot1_task,
+            two_shot_params.get("shot1_ocr", {}), shot1_source, log)
         shot1_time = time.time() - shot1_start
-        log.info("Title Page Shot 1 complete: %d characters in %.2fs",
-                 len(raw_text), shot1_time)
+        log.info("Title Page Shot 1 complete (%s): %d characters in %.2fs",
+                 used_source, len(raw_text), shot1_time)
 
         if not raw_text:
             log.error("Title Page Shot 1 returned empty text - CRITICAL FAILURE")
@@ -136,6 +145,12 @@ def process_title_page(
         # Shot 2's task returns ONLY metadata — the page content is always
         # the cleaned shot-1 transcription.
         final_metadata = dict(shot2_result.get("metadata", {}))
+        if used_source == SHOT1_TEXT_LAYER:
+            _tidy_text_layer_metadata(final_metadata)
+        elif "title" in final_metadata:
+            # T37e: the vision model's own titles carry bare LaTeX too
+            # ("Ca^{2+}", "P2RY_{12}"); written in Unicode on both paths.
+            final_metadata["title"] = unicode_scripts(final_metadata["title"])
         final_content = cleaned_text
 
         # Quality is scored on the content we keep, not on shot 2's
@@ -144,6 +159,7 @@ def process_title_page(
 
         final_metadata.update({
             "processing_method": "two_shot_title_page",
+            "shot1_source": used_source,
             "shot1_time": round(shot1_time, 2),
             "shot2_time": round(shot2_time, 2),
             "dedup_time": round(dedup_time, 2),
@@ -169,6 +185,90 @@ def process_title_page(
             metadata={"error": str(error),
                       "processing_method": "two_shot_title_failed"},
         )
+
+
+def _shot1_text(page: PdfPage, image, anchor_text: str, factory: ProviderFactory,
+                title_profile_data: Dict[str, Any], shot1_task: str,
+                shot1_params: Dict[str, Any], shot1_source: str,
+                log: logging.Logger) -> Tuple[str, str]:
+    """
+    Shot 1's transcription of the title page, and where it came from.
+
+    For biology researchers: on a born-digital PDF the publisher's own text is
+    stored in the file, so reading it back costs nothing, while the vision
+    model needs 10-41 s to transcribe the same page from its picture (T37).
+    The model is still used when the page is a scan or its stored text is
+    too thin to trust.
+
+    Returns:
+        (text, "text_layer") or (text, "vlm").
+    """
+    if shot1_source == SHOT1_TEXT_LAYER:
+        text = _usable_text_layer(page, log)
+        if text:
+            log.info("Title Page Shot 1: text layer (born-digital page)")
+            return text, SHOT1_TEXT_LAYER
+
+    log.info("Title Page Shot 1: Raw OCR extraction...")
+    shot1_provider = factory.build_shot(
+        title_profile_data, shot1_task,
+        temperature=shot1_params.get("temperature", 0.05),
+        max_tokens=shot1_params.get("max_tokens", 8192),
+        repeat_penalty=shot1_params.get("repeat_penalty", 1.15),
+        frequency_penalty=shot1_params.get("frequency_penalty", 0.1),
+    )
+    # The anchor text gives structural guidance about the whole page
+    # without biasing the model toward specific regions.
+    shot1_result = shot1_provider.process_page(image, base_text=anchor_text)
+    return shot1_result.get("content", ""), SHOT1_VLM
+
+
+def _tidy_text_layer_metadata(metadata: Dict[str, Any]) -> None:
+    """
+    Undo what the text layer leads shot 2 to copy (T37b, T37c), in place.
+
+    - authors: script marks, ORCID "ID"s and symbols copied into the names
+      ("Mattia Serra$^{1}$*", "MiuraID1,2☯"), see `without_script_marks`;
+    - journal: a running header copied whole ("Science Advances | Research
+      Article"): a journal name with " | " keeps its first part (T37c fix 2);
+      one in capitals is re-cased ("SCIENCE ADVANCES"; T37d fix 2);
+    - title: script marks written in Unicode ("CO$_{2}$" -> "CO₂"; T37d fix 1).
+    """
+    if "authors" in metadata:
+        metadata["authors"] = without_script_marks(metadata["authors"])
+    if "title" in metadata:
+        metadata["title"] = unicode_scripts(metadata["title"])
+    journal = metadata.get("journal_name")
+    if isinstance(journal, str) and " | " in journal:
+        journal = journal.split(" | ")[0].strip()
+    if isinstance(journal, str):
+        metadata["journal_name"] = recase_capitals_journal(journal)
+
+
+def _usable_text_layer(page: PdfPage, log: logging.Logger) -> str:
+    """
+    The page's text layer, normalised as the body's text-layer route does,
+    or "" when it cannot stand in for shot 1 (a scan, or < 50 words).
+
+    T37b: superscripts and subscripts are written as `$^{..}$` / `$_{..}$`
+    (`utils/script_marking.py`), so an affiliation letter is never glued to
+    a surname ("Harvey-Samuela" -> "Harvey-Samuel$^{a}$").
+    """
+    if is_scanned_page(page):
+        log.info("Title page is a scan: shot 1 is read by the model")
+        return ""
+    marked = text_with_scripts(page)
+    if marked.aligned:
+        log.info("Title page text layer: %d sub/superscript group(s) marked", marked.runs)
+    else:
+        log.warning("Title page text and characters do not align: its "
+                    "sub/superscripts are not marked")
+    text = normalize_harvested_text(marked.text)
+    if len(text.split()) < MIN_TEXT_LAYER_WORDS:
+        log.info("Title page text layer has %d words (< %d): shot 1 is read by "
+                 "the model", len(text.split()), MIN_TEXT_LAYER_WORDS)
+        return ""
+    return text
 
 
 def deduplicate_paragraphs(text: str) -> str:

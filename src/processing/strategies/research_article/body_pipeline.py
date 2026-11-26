@@ -65,6 +65,9 @@ from ...utils.model_swap import RouterClient
 from ...utils.page_classifier import PageClassifier, PageType, extract_text_stats
 from ...utils.table_repair import repair_page_tables
 from ...utils.text_normalization import normalize_harvested_text
+from ...utils.text_first_page import (BODY_READ_MODES, DROPPED_LABELS, TEXT_LAYER_ROUTE,
+                                      boxes_in_points, filtered_text, route_verdict,
+                                      without_legend_fragments, without_legends)
 from .figure_escalation import (
     FIGURE_LABELS,
     collect_suspect_pages,
@@ -116,6 +119,7 @@ class BodyPipeline:
         table_crop_max_tokens: Optional[int] = None,
         rescue_orphan_figures: bool = True,
         table_formula_prompt: Optional[str] = None,
+        body_read_mode: str = "vlm_full",
     ) -> None:
         self.extraction_provider = extraction_provider
         # Output cap for table-crop reads; None keeps the model's own limit.
@@ -153,6 +157,13 @@ class BodyPipeline:
         # model missed (see `_rescue_orphan_figures`). ON for articles and
         # single chapters; a whole-book read switches it OFF.
         self.rescue_orphan_figures = rescue_orphan_figures
+        # How a figure/table page is read: "vlm_full" (the vision model, every
+        # release to v6.9) or "text_first" (T38b: the text layer when the page
+        # passes utils/text_first_page.py's guards).
+        if body_read_mode not in BODY_READ_MODES:
+            raise ValueError(f"body_read_mode must be one of {BODY_READ_MODES}, "
+                             f"not {body_read_mode!r}")
+        self.body_read_mode = body_read_mode
 
     # ------------------------------------------------------------------ #
     # construction from config
@@ -235,6 +246,8 @@ class BodyPipeline:
                                                output_root)
 
         tables_cfg = strategy_config.get("vlm_provider", {}).get("tables", {})
+        body_read_mode = strategy_config.get("vlm_provider", {}).get(
+            "body_pages", {}).get("read_mode") or "vlm_full"
         tables_base_dir = anchor_output_path(tables_cfg.get("output_dir"),
                                              output_root, "tables")
 
@@ -258,11 +271,13 @@ class BodyPipeline:
             table_crop_max_tokens=table_crop_max_tokens,
             rescue_orphan_figures=rescue_orphan_figures,
             table_formula_prompt=table_formula_prompt,
+            body_read_mode=body_read_mode,
         )
         log.info(
             "GLM two-phase offline path ENABLED: extraction=%s, layout=%s, "
-            "coverage_threshold=%s, extraction_dpi=%s",
-            extraction_model, detector.name, coverage_threshold, extraction_dpi)
+            "coverage_threshold=%s, extraction_dpi=%s, body_read_mode=%s",
+            extraction_model, detector.name, coverage_threshold, extraction_dpi,
+            body_read_mode)
         return pipeline
 
     # ------------------------------------------------------------------ #
@@ -347,6 +362,18 @@ class BodyPipeline:
             self.logger.info("Page %d: pure text -> text layer (T1)", page_idx + 1)
             return self._process_with_text_layer(page, page_idx, analysis,
                                                  page_type, cache=cache)
+
+        # T38b: a figure/table page that passes the text-first guards is read
+        # from the text layer; the rest keep the extraction model's read.
+        # Under the default "vlm_full" nothing here runs.
+        text_first = None
+        if self.body_read_mode == "text_first" and page_type == PageType.SIMPLE_VISUAL:
+            text_first = route_verdict(page)
+            if text_first["route"] == TEXT_LAYER_ROUTE:
+                self.logger.info("Page %d: figure/table page -> text layer (T38b)",
+                                 page_idx + 1)
+                return self._process_visual_page_with_text_layer(
+                    cache, page, page_idx, page_type, analysis, hidden, text_first)
 
         if hidden is not None:
             self.logger.info(
@@ -437,6 +464,8 @@ class BodyPipeline:
             "tables": [t.to_dict() for t in tables],
             "table_count": len(tables),
         }
+        if text_first is not None:
+            metadata["text_first"] = text_first
         return ContentPage(page_number=page_idx + 1, content=final_text,
                            quality_score=quality, metadata=metadata)
 
@@ -591,15 +620,105 @@ class BodyPipeline:
             metadata=metadata,
         )
 
+    def _process_visual_page_with_text_layer(
+        self, cache: DocumentCache, page: PdfPage, page_idx: int,
+        page_type: PageType, analysis: Dict[str, Any],
+        hidden: Optional[List[Detection]], verdict: Dict[str, Any],
+    ) -> ContentPage:
+        """
+        A figure/table page read from its text layer (T38b, `text_first`).
+
+        The text comes from the PDF's text layer, without what is printed in
+        figure, table and caption boxes or outside every layout box; figures
+        and tables are cut and read from their crops by the SAME calls as the
+        model path. `processing_method` is "pymupdf", the text-layer route's
+        historical name (contract rule 4; researcher, 2026-11-24): the page
+        text came from the text layer. `metadata.text_first` says why.
+        """
+        page_image = cache.extraction_image(page_idx, self.extraction_dpi)
+        detections = hidden if hidden else self.layout_detector.detect(page_image, page=page)
+        text, formulas = self._text_first_page_text(cache, page, page_idx, page_image,
+                                                    detections, verdict)
+        figures, tables = self._text_first_objects(cache, page, page_idx, page_image,
+                                                   detections)
+        objects = [f.to_dict() for f in figures] + [t.to_dict() for t in tables]
+        text, verdict["legends_removed"] = without_legends(
+            normalize_harvested_text(text), objects)
+        text, verdict["legend_fragments_removed"] = without_legend_fragments(text, objects)
+        if figures:
+            text = append_figure_anchors(text, figures)
+        if tables:
+            text = append_table_anchors(text, tables)
+        text = normalize_harvested_text(text)
+        metadata = self._text_first_metadata(page, page_type, analysis, detections,
+                                             figures, tables, text, formulas, verdict)
+        return ContentPage(page_number=page_idx + 1, content=text, quality_score=0.95,
+                           metadata=metadata)
+
+    def _text_first_page_text(self, cache: DocumentCache, page: PdfPage, page_idx: int,
+                              page_image: Image.Image, detections, verdict: Dict[str, Any]):
+        """The filtered text layer, then T35's display formulas on it."""
+        padding = RENDER_PADDING_PX
+        dropped = boxes_in_points(detections, page, page_image.width, padding, DROPPED_LABELS)
+        covered = boxes_in_points(detections, page, page_image.width, padding)
+        text, verdict["dropped_characters"] = filtered_text(page, dropped, covered)
+        verdict["dropped_boxes"] = len(dropped)
+        return self._text_with_display_formulas(cache, page, page_idx, text=text)
+
+    def _text_first_objects(self, cache: DocumentCache, page: PdfPage, page_idx: int,
+                            page_image: Image.Image, detections):
+        """Figures and tables, by the model path's own calls (no repair read)."""
+        figures = extract_page_figures(
+            page, page_image, detections, cache.pdf_path, self.figures_base_dir,
+            page_idx, read_crop=self._read_caption_crop,
+            path_root=self.figures_path_root, logger=self.logger,
+            body_style=cache.body_style())
+        figures = self._rescue_orphan_figures(cache, page, page_idx, page_image,
+                                              detections, figures)
+        tables = extract_page_tables(
+            page, page_image, detections, cache.pdf_path, self.tables_base_dir,
+            page_idx, recovered=None, path_root=self.figures_path_root,
+            logger=self.logger, read_table_crop=self._read_table_crop,
+            read_formula_crop=self._read_formula_crop if self.table_formula_prompt else None,
+            continuation=self._table_continuation)
+        return figures, tables
+
+    def _text_first_metadata(self, page: PdfPage, page_type: PageType,
+                             analysis: Dict[str, Any], detections, figures, tables,
+                             text: str, formulas: List[dict],
+                             verdict: Dict[str, Any]) -> Dict[str, Any]:
+        """The model path's metadata keys, with the text-layer method and verdict."""
+        metadata = {
+            "processing_method": "pymupdf",
+            "page_type": page_type.value,
+            "headings": heading_candidates_for_page(page, logger=self.logger),
+            **reference_signals(text),
+            "coverage": None,
+            "tables_recovered": 0,
+            "visual_element_count": len(analysis.get("visual_regions", [])),
+            "figures": [f.to_dict() for f in figures],
+            "figure_count": len(figures),
+            "needs_figure_second_opinion": (
+                not figures and page_needs_second_opinion(analysis, detections, page.size)),
+            "tables": [t.to_dict() for t in tables],
+            "table_count": len(tables),
+            "text_first": verdict,
+        }
+        if formulas:
+            metadata["display_formulas"] = formulas
+        return metadata
+
     def _text_with_display_formulas(self, cache: Optional[DocumentCache], page: PdfPage,
-                                    page_idx: int) -> Tuple[str, List[dict]]:
+                                    page_idx: int,
+                                    text: Optional[str] = None) -> Tuple[str, List[dict]]:
         """
         The text layer, with each display equation the layout model finds
         replaced by its formula read (T35). Off, giving the plain text layer,
         when there is no document cache, no formula prompt, or a detector
-        that does not label equations on the CPU.
+        that does not label equations on the CPU. `text` replaces the page's
+        whole text layer (the text-first route passes its filtered text).
         """
-        text = page.text()
+        text = page.text() if text is None else text
         detector = self.layout_detector
         if (cache is None or not self.table_formula_prompt or detector is None
                 or not getattr(detector, "supports_formulas", False)):

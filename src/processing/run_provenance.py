@@ -12,10 +12,23 @@ Only FILE NAMES are recorded, never full paths (an output file is meant to
 be shareable, audit L1). Every part is best-effort: a missing `nvidia-smi`,
 a llama-server that is not running, or an unreadable config gives `null` for
 that part and never fails a run.
+
+Contract 1.7 (v6.10.0, audit 2.4) adds two parts:
+    source         the Prajnya git commit the code came from, and whether
+                   tracked files were changed from it ("dirty"); null for a
+                   copy that is not a git checkout (a downloaded zip);
+    config_sha256  one hash of the effective configuration: every config
+                   file as PARSED (so comments and line endings do not
+                   count), model paths reduced to file names (so two
+                   machines with the same settings agree), `${VAR}` left
+                   unexpanded (so no key or secret is ever hashed), plus
+                   the run's own overrides (`--citations`, `--chunk-size`,
+                   pages, backend). Same hash = same settings.
 """
 from __future__ import annotations
 
 import configparser
+import hashlib
 import json
 import logging
 import platform
@@ -37,12 +50,17 @@ MODEL_ROLES = ("default", "title_detection", "extraction", "understanding", "fig
 
 #: How long the optional probes may take before they give up.
 SERVER_TIMEOUT_SECONDS = 0.5
+GIT_TIMEOUT_SECONDS = 5.0
+
+#: Kept beside the live config as the reset copy; never read by a run.
+FACTORY_DEFAULTS = "factory_defaults"
 GPU_TIMEOUT_SECONDS = 5.0
 
 _QUANTISATION = re.compile(r"(?i)(?<![A-Za-z0-9])((?:IQ|Q)\d(?:_[A-Z0-9]+)*|BF16|F16|F32)(?=[.\-_]|$)")
 
 
-def run_provenance(config_root: Path | str) -> Dict[str, Any]:
+def run_provenance(config_root: Path | str,
+                   overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     The provenance record for runs made with the config tree at `config_root`.
 
@@ -53,12 +71,19 @@ def run_provenance(config_root: Path | str) -> Dict[str, Any]:
     Args:
         config_root: the config directory the run uses (holds
             `research_article_strategy.yaml` and `vlm_profiles/`).
+        overrides: the run's one-run settings that change what is read
+            (`RunRequest.config_overrides()`); part of `config_sha256`.
 
     Returns:
         `{"python", "os", "packages", "pdfium", "layout_model", "models",
-        "llama_server", "gpu"}`; a part that could not be read is None.
+        "llama_server", "gpu", "source", "config_sha256"}`; a part that could
+        not be read is None.
     """
-    return dict(_cached_provenance(str(Path(config_root).resolve())))
+    root = str(Path(config_root).resolve())
+    record = dict(_cached_provenance(root))
+    record["config_sha256"] = _safely(
+        lambda: effective_config_hash(_cached_config_digest(root), overrides or {}))
+    return record
 
 
 @lru_cache(maxsize=4)
@@ -74,7 +99,14 @@ def _cached_provenance(config_root: str) -> Dict[str, Any]:
         "models": _safely(lambda: model_records(root, strategy), []),
         "llama_server": _safely(lambda: llama_server_record(strategy)),
         "gpu": _safely(gpu_record),
+        "source": _safely(source_record),
     }
+
+
+@lru_cache(maxsize=4)
+def _cached_config_digest(config_root: str) -> Dict[str, Any]:
+    """The parsed config tree, read once per process (see `config_tree_digest`)."""
+    return config_tree_digest(Path(config_root))
 
 
 # --- helpers (after the main function, per CLAUDE.md) -----------------------
@@ -185,6 +217,68 @@ def gpu_record() -> Optional[Dict[str, Optional[str]]]:
     banner = subprocess.run(["nvidia-smi"], capture_output=True, text=True, timeout=GPU_TIMEOUT_SECONDS)
     cuda = re.search(r"CUDA (?:UMD )?Version:\s*([\d.]+)", banner.stdout or "")
     return {"name": name.strip(), "driver": driver.strip(), "cuda": cuda.group(1) if cuda else None}
+
+
+def source_record() -> Optional[Dict[str, Any]]:
+    """The git commit of this checkout and whether tracked files differ from it.
+
+    None when the code is not a git checkout or git is not installed.
+    """
+    from .paths import REPO_ROOT
+    head = _git(REPO_ROOT, "rev-parse", "HEAD")
+    if head is None:
+        return None
+    changed = _git(REPO_ROOT, "status", "--porcelain", "--untracked-files=no")
+    return {"commit": head, "dirty": bool(changed) if changed is not None else None}
+
+
+def _git(repo: Path, *arguments: str) -> Optional[str]:
+    """One git command's output, stripped; None when it fails."""
+    result = subprocess.run(["git", "-C", str(repo), *arguments], capture_output=True,
+                            text=True, timeout=GIT_TIMEOUT_SECONDS)
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def config_tree_digest(config_root: Path) -> Dict[str, Any]:
+    """
+    {relative path: parsed content} for every YAML and INI file of the config tree.
+
+    YAML is parsed (comments and layout do not count) with `${VAR}` left as
+    written; an INI value that is a path keeps only its file name. The
+    factory-default copy is left out: a run never reads it.
+    """
+    import yaml
+    digest: Dict[str, Any] = {}
+    for path in sorted(config_root.rglob("*")):
+        relative = path.relative_to(config_root).as_posix()
+        if not path.is_file() or relative.split("/")[0] == FACTORY_DEFAULTS:
+            continue
+        suffix = path.suffix.lower()
+        if suffix in (".yaml", ".yml"):
+            digest[relative] = yaml.safe_load(path.read_text(encoding="utf-8"))
+        elif suffix == ".ini":
+            digest[relative] = _ini_without_paths(path)
+    return digest
+
+
+def _ini_without_paths(path: Path) -> Dict[str, Dict[str, str]]:
+    """An INI file's sections, each path-like value reduced to its file name."""
+    parser = configparser.ConfigParser(strict=False, inline_comment_prefixes=(";", "#"),
+                                       interpolation=None)
+    parser.read(path, encoding="utf-8")
+    sections = {}
+    for section in parser.sections():
+        values = dict(parser[section])
+        sections[section] = {key: (PureWindowsPath(value).name if ("/" in value or "\\" in value)
+                                   else value) for key, value in values.items()}
+    return sections
+
+
+def effective_config_hash(digest: Dict[str, Any], overrides: Dict[str, Any]) -> str:
+    """sha256 of the config digest and the run's overrides, as canonical JSON."""
+    canonical = json.dumps({"config": digest, "overrides": overrides}, sort_keys=True,
+                           ensure_ascii=False, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def load_strategy(config_root: Path) -> Dict[str, Any]:

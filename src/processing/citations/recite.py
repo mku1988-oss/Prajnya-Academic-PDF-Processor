@@ -367,6 +367,10 @@ def _write_back(payload: Dict[str, Any], json_path: Path, metadata: Dict[str, An
     # 1.6: a re-cited file keeps what produced its run; an older file never
     # recorded it, and null says "not recorded" rather than guessing.
     info.setdefault("provenance", None)
+    # 1.7: a run from before 1.7 recorded no commit or config hash: null.
+    if isinstance(info["provenance"], dict):
+        info["provenance"].setdefault("source", None)
+        info["provenance"].setdefault("config_sha256", None)
 
     result = (payload.get("profile") or {}).get("processing_result")
     if isinstance(result, dict):

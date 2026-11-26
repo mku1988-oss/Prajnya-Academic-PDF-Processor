@@ -74,6 +74,10 @@ class RunRequest:
             `citations.level` decides. See `citations/level.py`.
         book_overrides: a per-run policy override — how a GUI passes a choice
             without writing the config file. Same keys as the YAML `books` block.
+        chunk_size: a one-run override of `batching.chunk_size` (`--chunk-size`):
+            how many documents share one title-model phase and one body-model
+            phase (T39). 1 means title then body per document, as before T39.
+            None means the config decides.
     """
 
     paths: List[Path] = field(default_factory=list)
@@ -92,6 +96,7 @@ class RunRequest:
     ledger_path: Optional[Path] = None
     book_overrides: Optional[Dict[str, Any]] = None
     citations: Optional[str] = None
+    chunk_size: Optional[int] = None
 
     @classmethod
     def from_args(cls, args: Any, paths: Optional[List[Path]] = None) -> "RunRequest":
@@ -148,7 +153,22 @@ class RunRequest:
             noninteractive=args.noninteractive,
             verbose=args.verbose,
             citations=getattr(args, "citations", None),
+            chunk_size=getattr(args, "chunk_size", None),
         )
+
+    def config_overrides(self) -> Dict[str, Any]:
+        """
+        This run's one-run settings over the config files (contract 1.7).
+
+        Part of `provenance.config_sha256`: two runs with the same config
+        files but `--citations online` in one of them must not share a hash.
+        Paths and switches that do not change what is read (`--force`,
+        output folders) are left out.
+        """
+        return {"backend": self.backend, "pages": self.pages, "chapters": self.chapters,
+                "max_pages": self.max_pages, "front_matter_pages": self.front_matter_pages,
+                "citations": self.citations, "chunk_size": self.chunk_size,
+                "book_overrides": self.book_overrides}
 
     def output_for(self, pdf_path: Path) -> Path:
         """
@@ -186,6 +206,7 @@ class RunRequest:
             "ledger_path": str(self.ledger_path) if self.ledger_path else None,
             "book_overrides": self.book_overrides,
             "citations": self.citations,
+            "chunk_size": self.chunk_size,
         }
 
     @classmethod
@@ -211,6 +232,7 @@ class RunRequest:
             ledger_path=_optional_path(raw.get("ledger_path")),
             book_overrides=raw.get("book_overrides"),
             citations=raw.get("citations"),
+            chunk_size=raw.get("chunk_size"),
         )
 
 

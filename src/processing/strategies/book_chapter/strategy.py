@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from ...extractors.metadata_extractor import MetadataExtractor
-from ...models import DocumentProfile
+from ...models import ContentPage, DocumentProfile
 from ...pdf import PdfBackend
 from ..research_article.strategy import ResearchArticleStrategy
 
@@ -56,22 +56,37 @@ class BookChapterStrategy:
             citation_level=citation_level)
 
     def process(self, profile: DocumentProfile,
-                test_pages_override: Optional[List[int]] = None) -> DocumentProfile:
+                test_pages_override: Optional[List[int]] = None,
+                title_page: Optional[ContentPage] = None) -> DocumentProfile:
         """
         Read the chapter, then stamp the book's identity onto its record.
 
         Args:
             profile: the document profile from the first pass.
             test_pages_override: optional 1-based page subset, passed through.
+            title_page: a title page read in a batch's first phase (T39), or
+                None to read it here. Passed through to the article reader.
 
         Returns:
             The same profile with `processing_result` filled in by the article
             pipeline, its metadata extended with the chapter number and the
             parent volume's identifiers.
         """
-        profile = self.reader.process(profile, test_pages_override=test_pages_override)
+        if title_page is not None:
+            profile = self.reader.process(profile, test_pages_override=test_pages_override,
+                                          title_page=title_page)
+        else:
+            profile = self.reader.process(profile, test_pages_override=test_pages_override)
         self._add_chapter_identity(profile)
         return profile
+
+    def read_title_page(self, profile: DocumentProfile) -> Optional[ContentPage]:
+        """Phase 1 of a batch by model: the article reader's title page (T39)."""
+        return self.reader.read_title_page(profile)
+
+    def title_settings_key(self) -> str:
+        """The article reader's title-page fingerprint (see title_page_store.py)."""
+        return self.reader.title_settings_key()
 
     # --- helpers (after the main method, per CLAUDE.md) -------------------
 

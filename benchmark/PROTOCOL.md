@@ -311,6 +311,54 @@ How §7 is carried out, settled while writing the corpus script:
    read from the PDF (page 2: share of text lines starting right of the page
    centre ≥ 0.25 → two-column).
 
+### A13 (2026-11-26) written BEFORE round 3; no tool has been run for it: every tool in batch mode, time per page over the whole corpus
+
+**Why.** Rounds 1 and 2 ran each tool one paper at a time, starting the
+tool afresh for each paper (Prajnya with a fresh llama-server per paper).
+Every tool then pays its model load on every paper, which is not how any of
+them is used on a library: each has a mode that loads its models once and
+reads a folder. From v6.10.0 Prajnya's folder mode also groups pages by
+model (T39). Timing tools in a mode nobody uses measures start-up, not
+reading.
+
+**What changes (§6.9 cost, §4 "how it is run"; nothing else).**
+
+1. **Batch mode, each tool's own, at its defaults.** One run per tool over
+   the whole corpus:
+   - Prajnya: `run_prajnya.py --pdf <folder>`, one llama-server for the run,
+     the released `batching.chunk_size`;
+   - GROBID (both rows): the container started once, the papers sent one
+     after another (one request at a time: each tool runs alone, §6.9);
+   - Docling (both rows): `docling convert <folder>`;
+   - Marker: `marker <folder>`, its default worker count;
+   - MinerU: one process that loads the engine once and reads every paper
+     (`run_mineru.py` given the folder), same effort as before.
+2. **Time = seconds per page over the whole corpus:** wall time from the
+   launch of the tool's first process (its server or container included)
+   to the last output written, divided by the corpus's total page count.
+   A batch run reports no per-paper times: inside a batch they are not
+   measured the same way for every tool. Peak VRAM and host RAM are taken
+   over the whole batch, as before.
+3. **A paper that fails** inside the batch is left out of the time
+   (researcher, 2026-11-26): its pages leave the page count, and the time
+   the tool spent on it (from the tool's log: the end of the paper before
+   it to the failure) leaves the wall time. Any re-run of it is a separate
+   process, not timed; the paper and its failure are named. A tool whose
+   batch stops part-way is restarted on the papers left; the time of both
+   parts is added, without the failed paper's, and the restart is disclosed.
+4. **Unchanged:** the fair-timing rule (each tool alone, VRAM at its idle
+   baseline, recorded), the corpus, the keys, every quality measure, and
+   determinism (§6.8: the whole batch run twice, servers restarted between).
+
+5. **Per-paper mode stays available** as an optional, separately labelled
+   column, if a round decides to report it: each tool started afresh per
+   paper as in rounds 1-2 (Prajnya with `--chunk-size 1` on a folder of one).
+   Batch mode is the headline time.
+
+**Not comparable with rounds 1-2.** Round 3's times are reported as a new
+column; earlier rounds' per-paper-mode times stay as published and are not
+re-labelled.
+
 ### A12 (2026-11-23, 20:10) ⚠️ made AFTER the A11 round's scores had been seen: Docling's formula reader
 
 **What happened.** A11 added formulas as a measure, but Docling ran with

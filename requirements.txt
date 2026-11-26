@@ -1,4 +1,4 @@
-# Prajnya v6.9.0 — dependencies
+# Prajnya v6.10.0 — dependencies
 #
 # PINNED EXACTLY (==) to the environment every published number was measured
 # on (researcher's standing order, 2026-11-22). Upgrading a package is a

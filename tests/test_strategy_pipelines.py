@@ -161,6 +161,71 @@ class TestProcessTitlePage:
         assert "server down" in result.metadata["error"]
 
 
+class TestShot1FromTheTextLayer:
+    """
+    T37 (eval/title_text_layer/GATE.md): on a born-digital title page the
+    PDF's own text stands in for shot 1; shot 2 still sees the image. Mark 4:
+    a scanned page, or a thin text layer, still goes to the model.
+    """
+
+    WORDS = [f"word{i}" for i in range(60)]
+
+    @staticmethod
+    def _run(page, providers, source="text_layer"):
+        factory = FakeFactory(providers)
+        result = process_title_page(
+            FakeCache({0: page}), 0, factory,
+            title_profile_data={"two_shot_parameters": {}},
+            shot1_task="raw_ocr_extraction",
+            shot2_task="structured_analysis_title_page",
+            resolution=1288, logger=LOG, shot1_source=source)
+        return result
+
+    @staticmethod
+    def shot(content="", metadata=None):
+        return FakeProvider([{"success": True, "content": content,
+                              "metadata": metadata or {}, "quality_score": 0.8}])
+
+    def test_a_born_digital_page_skips_the_model_for_shot_1(self):
+        page = FakePage(words=word_row(self.WORDS, y=100.0), text=" ".join(self.WORDS))
+        shot2 = self.shot(metadata={"title": "T"})
+        result = self._run(page, [shot2])
+        assert result.content == " ".join(self.WORDS)
+        assert result.metadata["shot1_source"] == "text_layer"
+        assert result.metadata["title"] == "T"
+        # Shot 2 was given the text layer as its text (and the image).
+        assert shot2.calls[0]["base_text"] == " ".join(self.WORDS)
+
+    def test_a_scanned_page_still_goes_to_the_model(self):
+        page = FakePage(words=word_row(self.WORDS, y=100.0), text=" ".join(self.WORDS),
+                        images=[ImageBlock(rect=Rect(0.0, 0.0, 612.0, 792.0))])
+        result = self._run(page, [self.shot("model text"), self.shot()])
+        assert result.content == "model text"
+        assert result.metadata["shot1_source"] == "vlm"
+
+    def test_a_thin_text_layer_still_goes_to_the_model(self):
+        few = self.WORDS[:10]
+        page = FakePage(words=word_row(few, y=100.0), text=" ".join(few))
+        result = self._run(page, [self.shot("model text"), self.shot()])
+        assert result.content == "model text"
+        assert result.metadata["shot1_source"] == "vlm"
+
+    def test_vlm_is_todays_behaviour(self):
+        page = FakePage(words=word_row(self.WORDS, y=100.0), text=" ".join(self.WORDS))
+        result = self._run(page, [self.shot("model text"), self.shot()], source="vlm")
+        assert result.content == "model text"
+        assert result.metadata["shot1_source"] == "vlm"
+
+    def test_the_setting_is_part_of_the_title_fingerprint(self):
+        """A title page saved by T39 under one setting is never reused under the other."""
+        import inspect
+
+        from src.processing.strategies.research_article.strategy import ResearchArticleStrategy
+
+        source = inspect.getsource(ResearchArticleStrategy.title_settings_key)
+        assert '"shot1_source": self.title_shot1_source' in source
+
+
 # ---------------------------------------------------------------------------
 # metadata_enrichment
 # ---------------------------------------------------------------------------
