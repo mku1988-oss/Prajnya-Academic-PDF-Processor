@@ -277,7 +277,8 @@ class TestTheRealBook:
     """
 
     @pytest.fixture(scope="class")
-    def result(self):
+    @classmethod
+    def result(cls):
         from run_prajnya import build_document_profile
         from src.processing.pdf import get_backend
         from src.processing.strategies.book import BookStrategy
@@ -287,7 +288,8 @@ class TestTheRealBook:
         return BookStrategy(pdf_backend=backend).process(profile).processing_result
 
     @pytest.fixture(scope="class")
-    def by_number(self, result):
+    @classmethod
+    def by_number(cls, result):
         return {record["number"]: record for record in result.chapters
                 if record["number"] is not None}
 

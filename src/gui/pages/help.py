@@ -100,9 +100,10 @@ FAQ_ITEMS: List[Dict[str, str]] = [
     {
         "q": "How do I start Prajnya Studio next time?",
         "a": "From the repository folder, run  run_prajnya_studio.py  with the "
-             "project's Python. It serves at http://127.0.0.1:8850 and opens a "
-             "browser tab for you. Useful flags: --port to move it, --no-browser "
-             "to skip opening a tab, --verbose for detailed logs. The port is "
+             "project's Python. It opens in its own window and also serves at "
+             "http://127.0.0.1:8850, so a browser tab works too. Useful flags: "
+             "--port to move it, --no-browser to start the server alone, with no "
+             "window, --verbose for detailed logs. The port is "
              "8850 so that it stays clear of the model server, which uses 9931 "
              "— if the port you ask for is already busy, the launcher "
              "says so and stops rather than starting and quietly serving "

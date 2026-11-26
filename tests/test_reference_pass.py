@@ -91,7 +91,8 @@ class TestAgainstTheRealCorpus:
     """Fixtures prove the code runs; the corpus proves it separates."""
 
     @pytest.fixture(scope="class")
-    def documents(self):
+    @classmethod
+    def documents(cls):
         if not RUN_OUTPUTS.is_dir():
             pytest.skip("corpus not present")
         found = sorted(RUN_OUTPUTS.glob("*.v6.json"))

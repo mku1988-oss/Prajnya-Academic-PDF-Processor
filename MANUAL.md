@@ -67,7 +67,7 @@ to models in configuration; see [Configuration](#configuration).
 | | |
 |---|---|
 | **OS** | Windows 10/11 or Linux. |
-| **Python** | **3.10**. Both entrypoints refuse to start on anything else. |
+| **Python** | **3.14**. Both entrypoints refuse to start on anything else. (3.15 waits for onnxruntime, which has no 3.15 build yet.) |
 | **RAM** | **16 GB** minimum. Prajnya with its model server uses up to about 9 GB. |
 | **VRAM** *(local mode only)* | **8 GB** (NVIDIA). With the shipped model presets, use peaks at about 7.9 GB (olmocr-2-7b on the title page) and about 3.4 GB for the rest of the document (glm-ocr). Other models use different amounts. |
 | **[llama.cpp](https://github.com/ggml-org/llama.cpp)** *(local mode only)* | `llama-server`, built with your GPU backend. Not bundled. |
@@ -78,7 +78,7 @@ to models in configuration; see [Configuration](#configuration).
 ```bash
 git clone https://github.com/mku1988-oss/Prajnya-Academic-PDF-Processor.git
 cd Prajnya-Academic-PDF-Processor
-conda create -n prajnya python=3.10
+conda create -n prajnya python=3.14
 conda activate prajnya
 pip install -r requirements.txt
 ```
@@ -175,9 +175,10 @@ run_prajnya.py --recite --citations online                    # add them to ever
 
 ## Prajnya Studio
 
-`python run_prajnya_studio.py` opens the interface in your browser at
-`http://127.0.0.1:8850` (`--port` to change it, `--no-browser` to not open a
-tab). Scanning a folder works with no model server running; **processing pages
+`python run_prajnya_studio.py` opens the interface in its own desktop window. It
+is served at `http://127.0.0.1:8850`, so a browser tab works too (`--port` to
+change it, `--no-browser` to start the server alone, with no window, and open
+it in a browser). Scanning a folder works with no model server running; **processing pages
 needs `llama-server`**, as for the command line. Each document runs in its own
 process, so **Stop** really stops the document in progress, and a long batch
 cannot freeze the interface.

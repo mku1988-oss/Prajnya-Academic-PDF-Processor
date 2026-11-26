@@ -1,0 +1,17 @@
+# Benchmark SCORER dependencies (benchmark/harness, ground_truth, adapters, plots).
+#
+# Install into Prajnya's own env, on top of the root requirements.txt:
+#     <prajnya env>/python.exe -m pip install -r benchmark/requirements.txt
+#
+# Kept separate from the root requirements.txt on purpose: they score the
+# benchmark, they do not process PDFs, so a Prajnya install never needs them.
+# Until session 48 they were declared nowhere and only worked because the old
+# shared env happened to have them (the clean `prajnya` env exposed it:
+# tests/test_benchmark_a11.py skipped itself). The tools being benchmarked run
+# in their own envs, listed in benchmark/tools.lock.md.
+#
+# Pinned exactly (==), like the root file. Licences: OSI-permissive only.
+
+lxml==6.1.3                # BSD-3-Clause   (JATS ground truth, TEDS tables)
+rapidfuzz==3.14.6          # MIT            (text alignment and similarity)
+matplotlib==3.11.2         # PSF-based matplotlib licence (OSI-approved, permissive)   (benchmark/plots)

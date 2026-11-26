@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -203,7 +203,7 @@ def build_ledger_record(pdf_path: Path, metadata: Dict[str, Any],
         requires_review=assessment.requires_review,
         review_needed_fields=list(assessment.missing_fields),
         review_status=assessment.review_status,
-        last_updated=datetime.utcnow().isoformat(),
+        last_updated=datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         retrieval_provenance=_provenance_of(metadata),
         source_hash=source_hash,
     )

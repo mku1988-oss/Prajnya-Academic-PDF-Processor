@@ -60,6 +60,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from src.processing.env_settings import env_setting  # noqa: E402
 from src.processing.paths import CONFIG_ROOT, REPO_ROOT  # noqa: E402
 
+# The docstring promises that `PRAJNYA_LLAMA_SERVER` may live in `.env`, so read it.
+# Anchored to the repository root, never the shell's folder; an existing
+# environment variable still wins (load_dotenv does not override by default).
+try:
+    from dotenv import load_dotenv
+    load_dotenv(REPO_ROOT / ".env")
+except ModuleNotFoundError:     # a bare Python: the explicit flag and PATH still work
+    pass
+
 #: The preset file llama-server is pointed at, relative to the repository root.
 #: Passed to the server as a RELATIVE path on purpose: combined with the pinned
 #: working directory, that is what makes a released tree portable.

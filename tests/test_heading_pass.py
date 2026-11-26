@@ -72,7 +72,8 @@ class TestAgainstRealPages:
     """Fixtures prove the code runs; only real PDFs prove it is wired up."""
 
     @pytest.fixture(scope="class")
-    def backend(self):
+    @classmethod
+    def backend(cls):
         return get_backend("pypdfium2")
 
     def _candidates(self, backend, pdf, page_number):

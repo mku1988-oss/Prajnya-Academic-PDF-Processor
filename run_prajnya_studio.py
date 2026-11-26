@@ -4,12 +4,12 @@ Prajnya Studio (V6) entrypoint — open the graphical interface.
 
 For biology researchers: this is the GUI counterpart of `run_prajnya.py`.
 That one processes a paper and prints to the terminal; this one opens a
-window in your browser where you can pick a folder, watch a batch run, read
+desktop window where you can pick a folder, watch a batch run, read
 the results, review flagged metadata, and change which AI model does what.
 
     run_prajnya_studio.py                    open it, default port 8850
     run_prajnya_studio.py --port 8973        use a different port
-    run_prajnya_studio.py --no-browser       start the server, don't open a tab
+    run_prajnya_studio.py --no-browser       server only: no window; open http://127.0.0.1:8850 in a browser
     run_prajnya_studio.py --verbose          DEBUG logging
 
 Underneath it is the same pipeline. Both entrypoints end up in
@@ -60,14 +60,15 @@ import sys
 # on the wrong numpy major version: the silent wrong-numbers failure CLAUDE.md
 # calls the worst possible mode on a project gated by IoU thresholds and word
 # coverage ratios. The version check is what makes the shebang change safe --
-# 3.10 uniquely identifies the correct env against both wrong interpreters
+# 3.14 uniquely identifies the correct env against both wrong interpreters
 # (base is 3.12, system is 3.13) without hardcoding a path.
 #
 # Messages are deliberately ASCII-only: the Windows console is cp1252.
 
-#: The `shastrasaara` conda env is Python 3.10.16. If the environment is ever
+#: The `prajnya` conda env is Python 3.14.10 (raised from 3.10 in session 48:
+#: 3.10 reached end of life in Oct 2026). If the environment is ever
 #: deliberately upgraded, change this line -- it is a pin, not a discovery.
-_REQUIRED_PYTHON = (3, 10)
+_REQUIRED_PYTHON = (3, 14)
 
 
 def _wrong_interpreter(problem: str) -> None:
@@ -206,7 +207,7 @@ def _parse_args() -> argparse.Namespace:
                              "machine by design, so putting it on a network has "
                              f"to be deliberate (default: {DEFAULT_HOST})")
     parser.add_argument("--no-browser", action="store_true",
-                        help="start the server without opening a browser tab")
+                        help="start the server only, with no window; open its address in a browser")
     parser.add_argument("--verbose", action="store_true", help="DEBUG logging")
     return parser.parse_args()
 

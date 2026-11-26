@@ -50,6 +50,31 @@ class TestLoopbackByDefault:
         assert seen["host"] == "127.0.0.1"
 
 
+class TestWindowOrServerOnly:
+    """Studio opens its own desktop window; `--no-browser` starts the server alone.
+
+    NiceGUI switches native mode on whenever a window size is given, and in
+    native mode ignores `show`, so for years `--no-browser` changed nothing.
+    """
+
+    def _run_kwargs(self, monkeypatch, show):
+        seen = {}
+        monkeypatch.setattr(studio_app.ui, "run", lambda **kwargs: seen.update(kwargs))
+        studio_app.main(show=show)
+        return seen
+
+    def test_the_default_opens_the_desktop_window(self, monkeypatch):
+        seen = self._run_kwargs(monkeypatch, show=True)
+        assert seen["native"] is True
+        assert seen["window_size"] is not None
+
+    def test_no_browser_opens_no_window_and_no_tab(self, monkeypatch):
+        seen = self._run_kwargs(monkeypatch, show=False)
+        assert seen["native"] is False
+        assert seen["window_size"] is None    # a size would turn native mode back on
+        assert seen["show"] is False
+
+
 class TestFilesServed:
     def test_only_the_icons_and_the_output_folder_are_served(self):
         routes = file_routes()
@@ -57,7 +82,7 @@ class TestFilesServed:
         assert routes["/static"].directory == str(theme.ASSETS_DIR)
         assert routes["/run_outputs"].directory == str(DEFAULT_OUTPUT_ROOT)
 
-    @pytest.mark.parametrize("attempt", ["../.env", "..\.env", "documents/../../.env",
+    @pytest.mark.parametrize("attempt", ["../.env", "..\\.env", "documents/../../.env",
                                          "../run_prajnya.py", "../config/model.ini"])
     def test_a_path_out_of_the_output_folder_is_refused(self, attempt):
         full_path, _ = file_routes()["/run_outputs"].lookup_path(attempt)

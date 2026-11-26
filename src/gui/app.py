@@ -242,15 +242,28 @@ def main(host: str = "127.0.0.1", port: int = 8850, show: bool = True) -> None:
             local llama-server's port (see run_prajnya_studio.py's
             DEFAULT_PORT note). Running this module directly gets no
             port-in-use check; the launcher is the guarded path.
-        show: open a browser tab automatically.
+        show: open Studio's desktop window. False (the launcher's
+            `--no-browser`) starts the server alone, to be opened in a
+            browser tab at http://host:port.
     """
+    # Studio opens as its OWN DESKTOP WINDOW (pywebview), by the researcher's
+    # choice (session 48). It always did: NiceGUI turns native mode on whenever
+    # `window_size` is given, so the old `native=False` here was never in force,
+    # and it only worked because pywebview happened to be installed. pywebview is
+    # now declared in requirements.txt, and these flags say what actually happens.
+    # The server still listens on host:port, so a browser tab works as well.
+    #
+    # In native mode NiceGUI IGNORES `show` (it never opens a browser tab), so
+    # `--no-browser` used to change nothing: the window opened anyway. It now
+    # means "server only": no window, no tab. The window size is passed only
+    # with the window, because giving one switches native mode back on.
     ui.run(
-        native=False,
+        native=show,
         title="Prajnya Studio V6",
         host=host,
         port=port,
-        show=show,
-        window_size=(1280, 820),
+        show=False,
+        window_size=(1280, 820) if show else None,
         storage_secret=_STORAGE_SECRET,
         reload=False,
     )

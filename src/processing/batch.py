@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
@@ -267,7 +267,7 @@ def write_batch_summary(entries: Sequence[PreflightEntry], results: Dict[str, An
     output_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "run": {
-            "finished_utc": datetime.utcnow().isoformat() + "Z",
+            "finished_utc": datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z",
             "elapsed_seconds": round(elapsed, 1),
             "documents": len(entries),
         },
@@ -279,7 +279,7 @@ def write_batch_summary(entries: Sequence[PreflightEntry], results: Dict[str, An
                     if results.get(str(entry.path), {}).get("status") == "partial"],
     }
 
-    stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y%m%dT%H%M%SZ")
     for name in (f"batch_summary_{stamp}.json", "batch_summary.json"):
         write_json_atomically(output_dir / name, payload)   # never half a file (D4)
 

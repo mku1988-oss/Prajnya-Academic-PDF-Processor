@@ -6,6 +6,40 @@ it in `document_info.pipeline_version`.
 
 ---
 
+## 6.11.0
+
+A new Python and up-to-date dependencies, with output unchanged, and two
+improvements to Prajnya Studio. The output contract stays at 1.7.
+
+- **Python 3.14** (was 3.10, which reached end of life in October 2026).
+  Every dependency moves to its current release, including numpy 2.5,
+  Pillow 13, OpenCV 5, onnxruntime 1.32 and NiceGUI 4. On the 9-PDF sample
+  corpus the output is identical to 6.10.0 in every field, figure crop,
+  table cell and reference, and the run is 1.4% faster. Create a fresh
+  environment (`conda create -n prajnya python=3.14`, then
+  `pip install -r requirements.txt`); both entrypoints refuse any other
+  Python. Python 3.15 waits for onnxruntime, which has no 3.15 build yet.
+- **Two dependencies are now declared.** `pywebview` gives Prajnya Studio its
+  desktop window: Studio always opened in its own window, but a fresh
+  install failed to start because the package was never listed. The
+  benchmark scorer's packages are in their own `benchmark/requirements.txt`.
+- **`--no-browser` now works.** It starts Studio's server with no window;
+  open `http://127.0.0.1:8850` in a browser. Before, the window opened anyway.
+- **Studio draws every formula in page text as maths.** Formulas written
+  `\( … \)` or `\[ … \]` (olmOCR's style) showed as garbled text with stray
+  italics; they are now drawn like `$…$` ones. A formula the maths
+  converter cannot read no longer stops the whole page from showing: it
+  appears as its LaTeX and the rest of the page draws.
+- **Studio's Results screen lists a document's equations.** A new
+  "Equations" section shows every equation set on its own line, drawn as
+  maths, with its page and, where the printed label was read unambiguously,
+  its number. It is read from the page text; equations are not yet separate
+  items in the output JSON.
+- **llama.cpp.** Results are measured with llama-server build b12035. A
+  newer build (b12760) loads every model and answers correctly, but changes
+  a few words of output (a change in how it breaks ties between equally
+  likely tokens), so the measured build stays b12035.
+
 ## 6.10.0
 
 Speed. The 9-PDF sample corpus runs 15.6% faster than 6.9.0 (articles 25%

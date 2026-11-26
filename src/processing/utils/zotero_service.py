@@ -68,7 +68,11 @@ class DiskCache:
 
         try:
             mtime = datetime.fromtimestamp(p.stat().st_mtime)
-            if datetime.utcnow() - mtime > self.ttl:
+            # Both sides in LOCAL time: fromtimestamp() above gives local time.
+            # (It used to subtract from utcnow(), deprecated in Python 3.12, which
+            # also mixed UTC with local time and kept entries 5.5 h past the TTL
+            # in India. Harmless against a 30-day TTL, but wrong.)
+            if datetime.now() - mtime > self.ttl:
                 # expired
                 try:
                     p.unlink()

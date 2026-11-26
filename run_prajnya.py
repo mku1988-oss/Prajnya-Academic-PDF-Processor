@@ -65,9 +65,11 @@ import sys
 # imports a helper in order to report that imports are broken has a
 # bootstrapping problem. Messages are ASCII-only (Windows console is cp1252).
 
-#: The `shastrasaara` conda env is Python 3.10.16. A pin, not a discovery --
-#: change this line if the environment is ever deliberately upgraded.
-_REQUIRED_PYTHON = (3, 10)
+#: The `prajnya` conda env is Python 3.14.10 (raised from 3.10 in session 48:
+#: 3.10 reached end of life in Oct 2026). A pin, not a discovery -- change this
+#: line if the environment is ever deliberately upgraded. 3.14 still tells the
+#: right env apart from miniconda base (3.12) and the system Python (3.13).
+_REQUIRED_PYTHON = (3, 14)
 
 
 def _wrong_interpreter(problem: str) -> None:

@@ -78,7 +78,8 @@ class TestRendering:
             padded = render_page(page, target_size=512)
         pad = RENDER_PADDING_PX
         crop = padded.crop((pad, pad, pad + raw.width, pad + raw.height))
-        assert list(crop.getdata()) == list(raw.getdata())
+        assert crop.mode == raw.mode and crop.size == raw.size
+        assert crop.tobytes() == raw.tobytes()   # every pixel identical
 
     def test_cache_memoizes_renders(self):
         with DocumentCache(get_backend("pypdfium2"), BENCHMARK_PDF) as cache:

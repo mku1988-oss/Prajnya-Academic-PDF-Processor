@@ -1,5 +1,5 @@
 Prajnya — The Reference Architecture for Academic RAG
-Version 6.10.0 (the project began as Shastrasaara)
+Version 6.11.0 (the project began as Shastrasaara)
 Copyright 2026 Prajnya contributors
 
 This product includes software and models developed by third parties.
@@ -83,6 +83,13 @@ latex2mathml
   Copyright (c) Ronie Martinez
   Licensed under the MIT License
   https://github.com/roniemartinez/latex2mathml
+
+pywebview (Studio's desktop window)
+  Copyright (c) Roman Sirokov and contributors
+  Licensed under the BSD 3-Clause License
+  https://github.com/r0x0r/pywebview
+  On Windows it installs pythonnet and clr_loader (MIT, the .NET Foundation and
+  contributors), proxy_tools (MIT) and bottle (MIT).
 
 ================================================================================
 Metadata enrichment

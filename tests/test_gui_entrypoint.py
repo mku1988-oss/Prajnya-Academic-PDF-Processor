@@ -158,9 +158,9 @@ class TestInterpreterGuard:
             )
 
     def test_required_python_matches_the_conda_env(self):
-        """3.10 uniquely identifies the correct env against BOTH wrong
+        """3.14 uniquely identifies the correct env against BOTH wrong
         interpreters on this machine (base 3.12, system 3.13)."""
-        assert launcher._REQUIRED_PYTHON == (3, 10)
+        assert launcher._REQUIRED_PYTHON == (3, 14)
 
     def test_the_suite_itself_runs_on_the_required_interpreter(self):
         """If this fails, pytest is running on the wrong Python -- which is

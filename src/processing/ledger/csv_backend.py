@@ -2,7 +2,7 @@
 
 import csv
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 import logging
 import json
@@ -203,7 +203,7 @@ class CsvLedgerBackend(SemanticLedger):
     def update_record(self, record: LedgerRecord):
         """Add or update a record in the in-memory ledger store."""
         if not record.last_updated: # Ensure last_updated is always set
-            record.last_updated = datetime.utcnow().isoformat()
+            record.last_updated = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
         self._records[record.document_id] = record
         self.logger.info(f"Updated in-memory record for document_id: {record.document_id}")
 

@@ -42,6 +42,8 @@ from src.processing.paths import DEFAULT_OUTPUT_ROOT
 from src.processing.utils.figure_extractor import safe_doc_id
 
 from .. import links, theme
+from ..equations import list_display_equations
+from ..page_text import guard_unparsable_formulas, prepare_page_markdown
 from ..table_html import prepare_grid_html
 
 
@@ -161,6 +163,9 @@ def _render_document(container: ui.column, document: Dict[str, Any],
             _render_figure_gallery(figures, mentions)
         if tables:
             _render_table_gallery(tables, mentions)
+        equations = list_display_equations(document)
+        if equations:
+            _render_equation_list(equations)
         _render_reference_list(document)
         _render_raw_json_section(document)
 
@@ -258,8 +263,10 @@ def _render_page_viewer(document: Dict[str, Any], names: Dict[str, str]) -> None
                         f'color: {theme.var("text_muted")};'
                     ).tooltip("From simple checks on the text (length, structure, odd "
                               "characters), not a measured accuracy. Nothing acts on it.")
-                # 'latex' extra: draws $...$ formulas (needs no internet)
-                ui.markdown(page.get("content") or "*(no text)*",
+                # 'latex' extra: draws $...$ formulas (needs no internet). It
+                # knows only the dollar form, so \( \) and \[ \] (olmOCR's
+                # style) are rewritten to dollars first (page_text.py).
+                ui.markdown(prepare_page_markdown(page.get("content") or "") or "*(no text)*",
                             extras=["fenced-code-blocks", "tables", "latex"]).classes("w-full").style(
                     "max-height: 480px; overflow-y: auto;"
                 )
@@ -334,6 +341,40 @@ def _render_table_gallery(tables: List[Dict[str, Any]],
                             "text-xs prajnya-grid"
                         ).style("max-width: 760px; overflow-x: auto;")
                 _render_mentions(mentions.get(table.get("table_id"), []))
+
+
+def _render_equation_list(equations: List[Dict[str, Any]]) -> None:
+    """Display equations found in the page text (equations.py), in page order.
+
+    Unlike figures and tables, equations are not separate items in the output
+    yet (v7), so this list is read from the page text each time it is shown.
+    A number appears only where the paper's own label was read unambiguously.
+    """
+    with ui.expansion(f"Equations ({len(equations)})", icon="functions").classes("w-full"):
+        ui.label("Equations set on their own line, read from the page text. A number "
+                 "is shown only where the printed label was read unambiguously.").classes(
+            "text-xs").style(f'color: {theme.var("text_muted")};')
+        for equation in equations:
+            with ui.row().classes("w-full items-center no-wrap gap-4").style(
+                f'border-bottom: 1px solid {theme.var("border")}; padding: 2px 0;'
+            ):
+                with ui.column().classes("gap-0").style("min-width: 64px;"):
+                    number = equation["number"]
+                    ui.label(f"({number})" if number else "—").classes("text-sm font-semibold")
+                    ui.label(f"p. {equation['page']}").classes("text-xs").style(
+                        f'color: {theme.var("text_muted")};'
+                    )
+                # The same markdown 'latex' extra as the page view: MathML,
+                # offline; an unparsable formula is shown as its LaTeX text
+                # (the guard), instead of stopping the list from drawing.
+                ui.markdown(guard_unparsable_formulas(f"$${equation['latex']}$$"),
+                            extras=["latex"]).classes("w-full").style(
+                    # sideways scroll for a long equation; no vertical
+                    # scrollbar stub beside every row. MathML's block margin
+                    # overhangs by a few pixels: padding keeps descenders
+                    # (subscripts, fraction bottoms) inside instead of clipped.
+                    "overflow-x: auto; overflow-y: hidden; padding: 6px 0;"
+                )
 
 
 def _render_raw_json_section(document: Dict[str, Any]) -> None:

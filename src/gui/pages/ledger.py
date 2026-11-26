@@ -41,7 +41,7 @@ import logging
 import os
 import platform
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -324,7 +324,7 @@ def _save_from_dialog(record: LedgerRecord, ui_state: Dict[str, Any], dialog, re
     record.year = int(year) if year else None
     record.review_status = status
     record.validation_source = "user_corrected"
-    record.last_updated = datetime.utcnow().isoformat()
+    record.last_updated = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
     ledger.update_record(record)
     ledger.commit()
